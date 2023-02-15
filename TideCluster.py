@@ -34,8 +34,6 @@ def run_tidehunter(fasta_file, num_threads=4, min_period=40, max_period=3000):
                       F" -p {min_period} -P {max_period}"
                       F" {fasta_file}")
 
-
-
     subprocess.check_call(tidehunter_cmd, shell=True)
     return tmp_file
 
@@ -50,7 +48,7 @@ class TideHunterFeature:
         self.seq_length = int(line.split()[2])
         self.start = int(line.split()[3])
         self.end = int(line.split()[4])
-        self.cons_length = float(line.split()[5])
+        self.cons_length = int(line.split()[5])
         self.copy_numer = float(line.split()[6])
         self.aver_match = float(line.split()[7])
         self.full_length = int(line.split()[8])
@@ -98,26 +96,29 @@ def main(args):
 
     """
     # get size of input file
-    fasta_size = tc_utils.read_fasta_sequence_size(args.input)
-    print(fasta_size)
     chunk_size = 500000
     overlap = 50000
     # this fill split sequences to chunk and all is stored in single file
     fasta_file_chunked, matching_table = tc_utils.split_fasta_to_chunks(
         args.input, chunk_size, overlap
         )
-    fasta_seq_size = tc_utils.read_fasta_sequence_size(fasta_file_chunked)
-    total_size = sum(fasta_seq_size.values())
-    number_of_chunks = len(fasta_seq_size)
-
-    # JUST TEST - delete later
-    results = run_tidehunter(fasta_file_chunked, num_threads=8)
+    results = run_tidehunter(
+        fasta_file_chunked, num_threads=args.threads, min_period=args.min_period,
+        max_period=args.max_period
+        )
     with open(args.output, "w") as out:
+        # write GFF3 header
+        out.write("##gff-version 3\n")
+
         with open(results) as f:
             for line in f:
                 if line.startswith("#"):
                     continue
                 feature = TideHunterFeature(line)
+                # TideHunte is also returning sequences of NNN - to not include them
+                # in the output
+                if feature.consensus == "N" * feature.cons_length:
+                    continue
                 feature.recalculate_coordinates(matching_table)
                 out.write(feature.gff3() + "\n")
     # clean up
@@ -127,7 +128,6 @@ def main(args):
     with open(args.output + "_chunks.bed", "w") as out:
         for m in matching_table:
             out.write(F'{m[0]}\t{m[2]}\t{m[3]}\t{m[4]}\n')
-
 
 
 if __name__ == "__main__":
@@ -142,15 +142,20 @@ if __name__ == "__main__":
         )
 
     # TideHunter parameters
-    parser.add_argument( '-t', '--threads', type=int, default=4,
-        help='number of threads to use')
-    parser.add_argument("-p", '--min_period', type=int, default=40,
-        help="minimum period of repeats to be detected")
-    parser.add_argument("-P", '--max_period', type=int, default=3000,
-        help="maximum period of repeats to be detected")
+    parser.add_argument(
+        '-t', '--threads', type=int, default=4,
+        help='number of threads to use, default 4'
+        )
+    parser.add_argument(
+        "-p", '--min_period', type=int, default=40,
+        help="minimum period of repeats to be detected, default 40"
+        )
+    parser.add_argument(
+        "-P", '--max_period', type=int, default=3000,
+        help="maximum period of repeats to be detected, default 3000"
+        )
 
     # add program description
     parser.description = "Wrapper of TideHunter"
-
     cmd_args = parser.parse_args()
     main(cmd_args)
