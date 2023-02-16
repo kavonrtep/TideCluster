@@ -16,7 +16,7 @@ import subprocess
 assert sys.version_info >= (3, 6), "Python 3.6 or newer is required"
 
 
-def run_tidehunter(fasta_file, num_threads=4, min_period=40, max_period=3000):
+def run_tidehunter(fasta_file, tidehunter_arguments):
     """run tidehunter on fasta file
     require TideHunter to be in PATH
     version of TideHunter must be 1.4.3
@@ -30,10 +30,11 @@ def run_tidehunter(fasta_file, num_threads=4, min_period=40, max_period=3000):
 
     # run tidehunter
     tmp_file = fasta_file + ".out"
-    tidehunter_cmd = (F"TideHunter -c 5 -p 40 -P 3000 -f 2 -o {tmp_file} -t {num_threads}"
-                      F" -p {min_period} -P {max_period}"
+    tidehunter_cmd = (F"TideHunter -f 2 -o {tmp_file} {tidehunter_arguments}"
                       F" {fasta_file}")
 
+    print("running TideHunter")
+    print(tidehunter_cmd)
     subprocess.check_call(tidehunter_cmd, shell=True)
     return tmp_file
 
@@ -103,8 +104,7 @@ def main(args):
         args.input, chunk_size, overlap
         )
     results = run_tidehunter(
-        fasta_file_chunked, num_threads=args.threads, min_period=args.min_period,
-        max_period=args.max_period
+        fasta_file_chunked, args.tidehunter_arguments
         )
     with open(args.output, "w") as out:
         # write GFF3 header
@@ -141,20 +141,10 @@ if __name__ == "__main__":
         '-o', '--output', type=str, required=True, help='path to output file'
         )
 
-    # TideHunter parameters
+    # TideHunter parameters as single arguments in quotes
     parser.add_argument(
-        '-t', '--threads', type=int, default=4,
-        help='number of threads to use, default 4'
-        )
-    parser.add_argument(
-        "-p", '--min_period', type=int, default=40,
-        help="minimum period of repeats to be detected, default 40"
-        )
-    parser.add_argument(
-        "-P", '--max_period', type=int, default=3000,
-        help="maximum period of repeats to be detected, default 3000"
-        )
-
+        '-T', '--tidehunter_arguments', type=str,nargs="?", required=False, default="",
+        help='additional arguments for TideHunter in quotes')
     # add program description
     parser.description = "Wrapper of TideHunter"
     cmd_args = parser.parse_args()

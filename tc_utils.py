@@ -11,7 +11,7 @@ class Gff3Feature:
     def __init__(self, line):
         self.line = line
         self.items = line.strip().split('\t')
-        self.header = self.items[0]
+        self.seqid = self.items[0]
         self.source = self.items[1]
         self.type = self.items[2]
         self.start = int(self.items[3])
@@ -32,13 +32,13 @@ class Gff3Feature:
 
     def __str__(self):
         return '\t'.join(
-            [self.header, self.source, self.type, str(self.start), str(self.end),
+            [self.seqid, self.source, self.type, str(self.start), str(self.end),
              self.score, self.strand, self.frame, self.attributes_str]
             ) + '\n'
 
     def __repr__(self):
         return '\t'.join(
-            [self.header, self.source, self.type, str(self.start), str(self.end),
+            [self.seqid, self.source, self.type, str(self.start), str(self.end),
              self.score, self.strand, self.frame, self.attributes_str]
             ) + '\n'
 
@@ -69,7 +69,7 @@ class Gff3Feature:
         string with recalculated line
         """
         return '\t'.join(
-            [self.header, self.source, self.type, str(self.start), str(self.end),
+            [self.seqid, self.source, self.type, str(self.start), str(self.end),
              self.score, self.strand, self.frame, self.attributes_str]
             ) + '\n'
 
@@ -89,8 +89,8 @@ class Gff3Feature:
         :param other:
         :return:
         """
-        if self.start == other.start and self.end == other.end and self.header == \
-                other.header:
+        if self.start == other.start and self.end == other.end and self.seqid == \
+                other.seqid:
             return True
         else:
             return False
@@ -249,11 +249,11 @@ def recalculate_gff3_coordinates(gff3_file, matching_table):
                 else:
                     feature = Gff3Feature(line)
                     new_coords = get_new_header_and_coordinates(
-                        feature.header, feature.start, feature.end, matching_table
+                        feature.seqid, feature.start, feature.end, matching_table
                         )
                     for new_header, new_start, new_end, sequence_length in new_coords:
                         if new_start >= 1 and new_end <= sequence_length:
-                            feature.header = new_header
+                            feature.seqid = new_header
                             feature.start = new_start
                             feature.end = new_end
                             fh_out.write(str(feature))
@@ -281,13 +281,13 @@ def recalculate_gff3_back_to_original_coordinates(
                     feature = Gff3Feature(line)
                     ori_header, ori_start, ori_end, real_chunk_size = \
                         get_original_header_and_coordinates(
-                        feature.header, feature.start, feature.end, matching_table
+                        feature.seqid, feature.start, feature.end, matching_table
                         )
                     # if feature is too close (less than 100 nt) to the end ends of
                     # chunk,skip it
                     if feature.start < 100 or feature.end > real_chunk_size - 100:
                         continue
-                    feature.header = ori_header
+                    feature.seqid = ori_header
                     feature.start = ori_start
                     feature.end = ori_end
                     fh_out.write(str(feature))
