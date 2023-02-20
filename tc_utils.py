@@ -94,7 +94,17 @@ class Gff3Feature:
             return True
         else:
             return False
-
+    def print_line(self):
+        """
+        :return:
+        string with recalculated line
+        """
+        columns = [self.seqid, self.source, self.type, str(self.start), str(self.end),
+                self.score, self.strand, self.frame]
+        attributes_list = ['{}={}'.format(key, value) for key, value in
+                       self.attributes_dict.items()]
+        attributes = [';'.join(attributes_list)]
+        return '\t'.join(columns + attributes) + '\n'
 
 def read_fasta_sequence_size(fasta_file):
     """Read size of sequence into dictionary"""
