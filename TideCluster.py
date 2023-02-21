@@ -327,6 +327,10 @@ def clustering(args):
     for k, v in clusters_final.items():
         clusters_final[k] = cluster_names[v]
 
+    # for debugin record consensus sequences and clusters in dictionary of dictionaries
+    consensus_clusters = {}
+    consensus_clusters_dimers = {}
+
     # read gff3 and append cluster ID
     with open(gff3, 'r') as f1, open(gff3_out, 'w') as f2:
         for line in f1:
@@ -339,10 +343,30 @@ def clustering(args):
             gff3_feature.attributes_dict['Name'] = cluster_id
             unique_id = cluster_id + "_" + gff3_feature.attributes_dict['ID']
             gff3_feature.attributes_dict['ID'] = unique_id
+            # add consensus sequence to dictionary of dictionaries
+            consensus = gff3_feature.attributes_dict['Consensus_sequence']
+            if cluster_id not in consensus_clusters:
+                consensus_clusters[cluster_id] = {}
+                consensus_clusters_dimers[cluster_id] = {}
+            consensus_clusters[cluster_id][unique_id] = consensus
+            consensus_clusters_dimers[cluster_id][unique_id] = consensus * 2
+
             f2.write(gff3_feature.print_line())
 
     merge_overlapping_gff3_intervals(gff3_out, gff3_out)
 
+    # for debuging
+    # write consensus sequences by clusters to directory
+    #  used gff3_out as base name for directory
+    consensus_dir = gff3_out + "_consensus"
+    # create directory if it does not exist
+    if not os.path.exists(consensus_dir):
+        os.makedirs(consensus_dir)
+    for cluster_id in consensus_clusters:
+        f = os.path.join(consensus_dir, cluster_id + ".fasta")
+        save_fasta_dict_to_file(consensus_clusters[cluster_id], f)
+        f = os.path.join(consensus_dir, cluster_id + "_dimers.fasta")
+        save_fasta_dict_to_file(consensus_clusters_dimers[cluster_id], f)
 
 # TideHunter related functions:
 def run_tidehunter(fasta_file, tidehunter_arguments):
