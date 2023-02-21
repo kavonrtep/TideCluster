@@ -8,6 +8,8 @@ coordinates in the table must be recalculated to the original sequence
 """
 import os
 import sys
+import textwrap
+
 import tc_utils
 import argparse
 import subprocess
@@ -247,6 +249,7 @@ def merge_overlapping_gff3_intervals(gff3_file, gff3_out_file):
                 gff3_dict[seq_cluster_id] = []
             gff3_dict[seq_cluster_id].append(gff3_feature)
     with open(gff3_out_file, 'w') as f:
+        f.write("##gff-version 3\n")
         for i in gff3_dict:
             intervals = []
             for j in gff3_dict[i]:
@@ -459,7 +462,7 @@ def tidehunter(args):
 
 if __name__ == "__main__":
     # Command line arguments
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter)
     subparsers = parser.add_subparsers(dest='command', help='TideHunter wrapper')
     parser_tidehunter = subparsers.add_parser(
         'tidehunter', help='Run wrapper of TideHunter'
@@ -492,7 +495,41 @@ if __name__ == "__main__":
         "-o", "--output", help="Output gff3 file with clusters", required=True
         )
 
-    parser.description = "Wrapper of TideHunter"
+    parser.description = """Wrapper of TideHunter
+    This script enable to run TideHunter on large fasta files in parallel. It splits
+    fasta file into chunks and run TideHunter on each chunk. Then it merges results
+    and clusters similar tandem repeats.
+    """
+
+    # make epilog, in epilog keep line breaks as preformatted text
+
+
+
+    parser.epilog = ('''
+    Example of usage:
+    
+    # first run tidehunter on fasta file to generate raw gff3 output
+    TideCluster.py tidehunter -f test.fasta -o test.gff3 -T "-p 40 -P 3000 -c 5 -e 0.25 -t 46"
+    
+    # then run clustering on the output to cluster similar tantem repeats
+    TideCluster.py clustering -f test.fasta -g test.gff3 -o test_clustered.gff3
+    
+    
+    Recommended parameters for TideHunter:
+    short monomers: -T "-p 10 -P 39 -c 5 -e 0.25"
+    long monomers: -T "-p 40 -P 3000 -c 5 -e 0.25"
+    
+    For parallel processing include -t option. 
+    
+    For more information about TideHunter parameters see TideHunter manual.
+    ''')
+
+
+
+
+
+
+
     cmd_args = parser.parse_args()
     if cmd_args.command == "tidehunter":
         tidehunter(cmd_args)

@@ -1,3 +1,4 @@
 TideHunter=1.4.3
 blast
 mmseqs2
+python>=3.6
