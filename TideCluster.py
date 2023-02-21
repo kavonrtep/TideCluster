@@ -220,7 +220,7 @@ def find_clusters_by_blast(consensus_representative):
 
     clusters = {}
     for vertices in components:
-        v_representative = vertices[0]
+        v_representative = sorted(vertices)[0]
         for v in vertices:
             clusters[v] = v_representative
 
@@ -310,7 +310,6 @@ def clustering(args):
 
     # second round of clustering by blastn
     clusters2 = find_clusters_by_blast(consensus_representative)
-
     # combine clusters
     clusters_final = clusters1.copy()
     for k, v in clusters1.items():
@@ -320,7 +319,7 @@ def clustering(args):
             clusters_final[k] = v
 
     # rename values in clusters dictionary
-    representative_id = set(clusters_final.values())
+    representative_id = sorted(set(clusters_final.values()))
     cluster_names = {}
     for i, v in enumerate(representative_id):
         cluster_names[v] = F"TRC_{i}"

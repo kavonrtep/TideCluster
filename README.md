@@ -4,7 +4,6 @@ TideCluster is wrapper for Tidehunter and is intended for identifying tandem rep
 
 # Usage
 
-
 ## Credits
 
 TideCluster utilizes Tidehunter [https://github.com/Xinglab/TideHunter] for tandem repeat detection.
