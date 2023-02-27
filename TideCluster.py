@@ -8,12 +8,11 @@ coordinates in the table must be recalculated to the original sequence
 """
 import os
 import sys
-import textwrap
-
 import tc_utils
 import argparse
 import subprocess
 import tempfile
+import networkx as nx
 from shutil import rmtree
 from tc_utils import Gff3Feature
 
@@ -102,8 +101,8 @@ def find_cluster_by_mmseqs2(sequences):
     save_fasta_dict_to_file(sequences, input_fasta_file.name)
 
     cmd = (F'mmseqs easy-cluster {input_fasta_file.name} {input_fasta_file.name}.clu'
-           F' {tmp_dir} --cluster-mode 1 '
-           F'--mask 0  ')
+           F' {tmp_dir} --cluster-mode 0 '
+           F'--mask 0  -s 1')
 
     subprocess.check_call(cmd, shell=True)
 
@@ -140,36 +139,23 @@ def make_graph(pairs):
     return graph
 
 
-def find_connected_components(graph):
+def get_connected_component_clusters(pairs):
     """
     find connected components in graph
-    :param graph:
-    :return: components
+    :param pairs: list of pairs
+    :return: clusters as list of lists
     """
-    visited = set()  # create a set to keep track of visited vertices
-    components = []  # create an empty list to keep track of components
+    # Create a NetworkX graph from the list of edges
+    g = nx.Graph()
+    g.add_edges_from(pairs)
 
-    # define a recursive function to perform DFS
-    def dfs(vertex, component):
-        """
-        perform depth-first search on the graph to find all connected components
-        :param vertex:
-        :param component:
-        """
-        visited.add(vertex)
-        component.append(vertex)
-        for neighbor in graph[vertex]:
-            if neighbor not in visited:
-                dfs(neighbor, component)
+    # Find the connected components in the graph
+    components = list(nx.connected_components(g))
 
-    # iterate over all vertices to perform DFS
-    for vertex in graph:
-        if vertex not in visited:
-            component = []
-            dfs(vertex, component)
-            components.append(component)
+    # Convert the components to a list of clusters
+    clusters = [list(component) for component in components]
 
-    return components
+    return clusters
 
 
 def run_blastn(sequences):
@@ -189,9 +175,10 @@ def run_blastn(sequences):
 
     outfmt = "'6 qseqid sseqid pident length evalue bitscore qlen slen'"
 
-    cmd = (F"blastn -query {fasta_file} -db {fasta_file} -outfmt {outfmt}"
-           F" -out {blast_out} -num_threads 5 -evalue 1e-5 -perc_identity 80 "
-           F"-word_size 21")
+    cmd = (F"blastn -task blastn -query {fasta_file} -db {fasta_file} -outfmt {outfmt}"
+           F" -out {blast_out} -num_threads 30 -evalue 1e-20 -perc_identity 75"
+           F" -word_size 9 -max_target_seqs 1000000 -dust no "
+           F" -gapextend 1 -gapopen 2 -reward 1 -penalty -1")
 
     subprocess.check_call(cmd, shell=True)
     # read pairs to list, exclude self hits and duplicates
@@ -201,13 +188,17 @@ def run_blastn(sequences):
             qseqid, sseqid, pident, length, evalue, bitscore, qlen, slen = line.split()
             if qseqid != sseqid:
                 # overlap should be at least 50% over the shorter sequence
-                if min([int(qlen), int(slen)]) / int(length) > 0.5:
+                if int(length) / min([int(qlen), int(slen)]) > 0.8:
                     pairs.add(tuple(sorted([qseqid, sseqid])))
+    # add self hits separately, so they are in the graph later
+    for seq_id in sequences:
+        pairs.add((seq_id, seq_id))
+
     rmtree(tmp_dir)
     return pairs
 
 
-def find_clusters_by_blast(consensus_representative):
+def find_clusters_by_blast_connected_component(consensus_representative):
     """
     find clusters by blastn, return dictionary with clusters
     cluaste are connected components in graph
@@ -215,9 +206,9 @@ def find_clusters_by_blast(consensus_representative):
     :return: clusters
     """
     pairs = run_blastn(consensus_representative)
-    graph = make_graph(pairs)
-    components = find_connected_components(graph)
-
+    # graph = make_graph(pairs)
+    # components = find_connected_components(graph)
+    components = get_connected_component_clusters(pairs)
     clusters = {}
     for vertices in components:
         v_representative = sorted(vertices)[0]
@@ -225,6 +216,59 @@ def find_clusters_by_blast(consensus_representative):
             clusters[v] = v_representative
 
     return clusters
+
+
+def get_cluster_size(fin, clusters):
+    """
+    get cluster size
+    :param fin: input gff
+    :param clusters: clusters dictionary id:cluster_id
+    :return: cluster size as total length of intervals
+    """
+    cluster_size = {}
+    with open(fin, 'r') as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            gff3_feature = Gff3Feature(line)
+            cluster_id = clusters[gff3_feature.attributes_dict['ID']]
+            if cluster_id not in cluster_size:
+                cluster_size[cluster_id] = 0
+            cluster_size[cluster_id] += gff3_feature.end - gff3_feature.start
+    return cluster_size
+
+
+def add_cluster_info_to_gff3(fin, fout, clusters):
+    """
+    add cluster info to gff3 file
+    :param fin: input gff
+    :param fout: output gff
+    :param clusters: clusters dictionary id:cluster_id
+    :return: consensus and consensus dimers of representative sequences
+    """
+    consensus_clusters = {}
+    consensus_clusters_dimers = {}
+    with open(fin, 'r') as f1, open(fout, 'w') as f2:
+        for line in f1:
+            if line.startswith("#"):
+                f2.write(line)
+                continue
+            gff3_feature = Gff3Feature(line)
+            cluster_id = clusters[gff3_feature.attributes_dict['ID']]
+            gff3_feature.attributes_dict['Cluster_ID'] = cluster_id
+            gff3_feature.attributes_dict['Name'] = cluster_id
+            unique_id = cluster_id + "_" + gff3_feature.attributes_dict['ID']
+            gff3_feature.attributes_dict['ID'] = unique_id
+            # add consensus sequence to dictionary of dictionaries
+            consensus = gff3_feature.attributes_dict['Consensus_sequence']
+            if cluster_id not in consensus_clusters:
+                consensus_clusters[cluster_id] = {}
+                consensus_clusters_dimers[cluster_id] = {}
+            consensus_clusters[cluster_id][unique_id] = consensus
+            consensus_clusters_dimers[cluster_id][unique_id] = consensus * 2
+
+            f2.write(gff3_feature.print_line())
+    return consensus_clusters, consensus_clusters_dimers
 
 
 def merge_overlapping_gff3_intervals(gff3_file, gff3_out_file):
@@ -283,6 +327,41 @@ def merge_intervals(intervals):
     return merged
 
 
+def filter_gff_by_size(gff3_file, min_size=10000):
+    """
+    Filter gff3 file by size of intervals
+    :param gff3_file:
+    :param min_size:
+    :return: filtered gff3 file path
+    """
+    gff_out = tempfile.NamedTemporaryFile(delete=False).name
+    with open(gff3_file, 'r') as f1, open(gff_out, 'w') as f2:
+        for line in f1:
+            if line.startswith("#"):
+                f2.write(line)
+                continue
+            gff3_feature = Gff3Feature(line)
+            if gff3_feature.end - gff3_feature.start > min_size:
+                f2.write(line)
+    return gff_out
+
+
+def save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer):
+    """
+    Save consensus sequences to fasta files
+    :param consensus_dir: directory to save consensus sequences
+    :param cons_cls: consensus sequences for each cluster
+    :param cons_cls_dimer: consensus sequences for each cluster, dimers
+    """
+    if not os.path.exists(consensus_dir):
+        os.makedirs(consensus_dir)
+    for cluster_id in cons_cls:
+        f = os.path.join(consensus_dir, cluster_id + ".fasta")
+        save_fasta_dict_to_file(cons_cls[cluster_id], f)
+        f = os.path.join(consensus_dir, cluster_id + "_dimers.fasta")
+        save_fasta_dict_to_file(cons_cls_dimer[cluster_id], f)
+
+
 def clustering(args):
     """
     Run clustering on sequences defined in gff3 file and fasta file
@@ -299,74 +378,56 @@ def clustering(args):
     for seq_id, seq, cons in gff3_to_fasta(gff3, fasta):
         mult = round(1 + 10000 / len(cons))
         consensus[seq_id] = cons * mult
-        consensus_dimers[seq_id] = cons * 2
+        consensus_dimers[seq_id] = cons * 4
         if len(consensus[seq_id]) > 10000:
             consensus[seq_id] = consensus[seq_id][0:10000]
 
     # first round of clustering by mmseqs2
     clusters1 = find_cluster_by_mmseqs2(consensus)
+
     representative_id = set(clusters1.values())
     consensus_representative = {k: consensus_dimers[k] for k in representative_id}
-
     # second round of clustering by blastn
-    clusters2 = find_clusters_by_blast(consensus_representative)
+    clusters2 = find_clusters_by_blast_connected_component(consensus_representative)
     # combine clusters
     clusters_final = clusters1.copy()
+
     for k, v in clusters1.items():
         if v in clusters2:
             clusters_final[k] = clusters2[v]
         else:
             clusters_final[k] = v
 
+    # get total size of each cluster, store in dict
+    cluster_size = get_cluster_size(gff3, clusters_final)
+
+    # rrepresentative id sorted by cluster size
+    representative_id = sorted(cluster_size, key=cluster_size.get, reverse=True)
     # rename values in clusters dictionary
-    representative_id = sorted(set(clusters_final.values()))
     cluster_names = {}
     for i, v in enumerate(representative_id):
-        cluster_names[v] = F"TRC_{i}"
+        cluster_names[v] = F"TRC_{i + 1}"
 
     for k, v in clusters_final.items():
         clusters_final[k] = cluster_names[v]
 
-    # for debugin record consensus sequences and clusters in dictionary of dictionaries
-    consensus_clusters = {}
-    consensus_clusters_dimers = {}
-
-    # read gff3 and append cluster ID
-    with open(gff3, 'r') as f1, open(gff3_out, 'w') as f2:
-        for line in f1:
-            if line.startswith("#"):
-                f2.write(line)
-                continue
-            gff3_feature = Gff3Feature(line)
-            cluster_id = clusters_final[gff3_feature.attributes_dict['ID']]
-            gff3_feature.attributes_dict['Cluster_ID'] = cluster_id
-            gff3_feature.attributes_dict['Name'] = cluster_id
-            unique_id = cluster_id + "_" + gff3_feature.attributes_dict['ID']
-            gff3_feature.attributes_dict['ID'] = unique_id
-            # add consensus sequence to dictionary of dictionaries
-            consensus = gff3_feature.attributes_dict['Consensus_sequence']
-            if cluster_id not in consensus_clusters:
-                consensus_clusters[cluster_id] = {}
-                consensus_clusters_dimers[cluster_id] = {}
-            consensus_clusters[cluster_id][unique_id] = consensus
-            consensus_clusters_dimers[cluster_id][unique_id] = consensus * 2
-
-            f2.write(gff3_feature.print_line())
-
+    cons_cls, cons_cls_dimer = add_cluster_info_to_gff3(gff3, gff3_out, clusters_final)
     merge_overlapping_gff3_intervals(gff3_out, gff3_out)
+
+    # save also first round of clustering for debugging
+    cons_cls1, cons_cls_dimer1_ = add_cluster_info_to_gff3(
+        gff3, gff3_out + "_1.gff3", clusters1
+        )
+    merge_overlapping_gff3_intervals(gff3_out + "_1.gff3", gff3_out + "_1.gff3")
 
     # for debuging
     # write consensus sequences by clusters to directory
     #  used gff3_out as base name for directory
     consensus_dir = gff3_out + "_consensus"
     # create directory if it does not exist
-    if not os.path.exists(consensus_dir):
-        os.makedirs(consensus_dir)
-    for cluster_id in consensus_clusters:
-        f = os.path.join(consensus_dir, cluster_id + ".fasta")
-        save_fasta_dict_to_file(consensus_clusters[cluster_id], f)
-        f = os.path.join(consensus_dir, cluster_id + "_dimers.fasta")
-        save_fasta_dict_to_file(consensus_clusters_dimers[cluster_id], f)
+    save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer)
+    save_consensus_files(consensus_dir + "_1", cons_cls1, cons_cls_dimer1_)
+
 
 # TideHunter related functions:
 def run_tidehunter(fasta_file, tidehunter_arguments):
@@ -526,13 +587,12 @@ if __name__ == "__main__":
 
     # make epilog, in epilog keep line breaks as preformatted text
 
-
-
     parser.epilog = ('''
     Example of usage:
     
     # first run tidehunter on fasta file to generate raw gff3 output
-    TideCluster.py tidehunter -f test.fasta -o test.gff3 -T "-p 40 -P 3000 -c 5 -e 0.25 -t 46"
+    TideCluster.py tidehunter -f test.fasta -o test.gff3 -T "-p 40 -P 3000 -c 5 -e 0.25 
+    -t 46"
     
     # then run clustering on the output to cluster similar tantem repeats
     TideCluster.py clustering -f test.fasta -g test.gff3 -o test_clustered.gff3
@@ -546,12 +606,6 @@ if __name__ == "__main__":
     
     For more information about TideHunter parameters see TideHunter manual.
     ''')
-
-
-
-
-
-
 
     cmd_args = parser.parse_args()
     if cmd_args.command == "tidehunter":

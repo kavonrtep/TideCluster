@@ -3,6 +3,7 @@ import os
 import tempfile
 from itertools import cycle
 
+
 class Gff3Feature:
     """
     Class for gff3 feature
@@ -94,17 +95,19 @@ class Gff3Feature:
             return True
         else:
             return False
+
     def print_line(self):
         """
         :return:
         string with recalculated line
         """
         columns = [self.seqid, self.source, self.type, str(self.start), str(self.end),
-                self.score, self.strand, self.frame]
+                   self.score, self.strand, self.frame]
         attributes_list = ['{}={}'.format(key, value) for key, value in
-                       self.attributes_dict.items()]
+                           self.attributes_dict.items()]
         attributes = [';'.join(attributes_list)]
         return '\t'.join(columns + attributes) + '\n'
+
 
 def read_fasta_sequence_size(fasta_file):
     """Read size of sequence into dictionary"""
@@ -161,9 +164,8 @@ def split_fasta_to_chunks(fasta_file, chunk_size=100000000, overlap=100000):
             adjusted_chunk_size = int(size / number_of_chunks)
             for i in range(number_of_chunks):
                 start = i * adjusted_chunk_size
-                end = ((
-                                   i + 1) * adjusted_chunk_size + overlap) if i + 1 < \
-                                                                              number_of_chunks else size
+                end1 = (i + 1) * adjusted_chunk_size + overlap
+                end = end1 if i + 1 < number_of_chunks else size
                 new_header = header + '_' + str(i)
                 matching_table.append([header, i, start, end, new_header])
         else:
@@ -276,7 +278,8 @@ def recalculate_gff3_back_to_original_coordinates(
         ):
     """
     Recalculate gff3 back to original coordinates, use gff3_feature class
-    :param gff3_file:
+    :param chunk_size: int
+    :param gff3_file: str
     :param matching_table:
     :return:
     gff3_file_recalculated
