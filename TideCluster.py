@@ -21,15 +21,18 @@ from tc_utils import save_consensus_files
 assert sys.version_info >= (3, 6), "Python 3.6 or newer is required"
 
 
-def clustering(args):
+def clustering(fasta, gff3, output):
     """
     Run clustering on sequences defined in gff3 file and fasta file
-    :param args: command line arguments
+    produce gff3 file with cluster information
+    :param fasta: path to fasta file
+    :param gff3: path to gff3 file from tidehunter
+    :param output: path to output file - gff3
     :return:
     """
-    fasta = args.fasta
-    gff3 = args.gff3
-    gff3_out = args.output
+    fasta = fasta
+    gff3 = gff3
+    gff3_out = output
 
     # get consensus sequences for clustering
     consensus = {}
@@ -88,23 +91,24 @@ def clustering(args):
     save_consensus_files(consensus_dir + "_1", cons_cls1, cons_cls_dimer1_)
 
 
-def tidehunter(args):
+def tidehunter(fasta, tidehunter_arguments, output):
     """
     run tidehunter on fasta file
-    :param args: object with command line arguments
-
+    :param fasta: path to fasta file
+    :param tidehunter_arguments: arguments for tidehunter
+    :param output: path to output file
     """
     # get size of input file
     chunk_size = 500000
     overlap = 50000
     # this fill split sequences to chunk and all is stored in single file
     fasta_file_chunked, matching_table = tc_utils.split_fasta_to_chunks(
-        args.fasta, chunk_size, overlap
+        fasta, chunk_size, overlap
         )
     results = run_tidehunter(
-        fasta_file_chunked, args.tidehunter_arguments
+        fasta_file_chunked, tidehunter_arguments
         )
-    with open(args.output, "w") as out:
+    with open(output, "w") as out:
         # write GFF3 header
         out.write("##gff-version 3\n")
 
@@ -123,7 +127,7 @@ def tidehunter(args):
     os.remove(fasta_file_chunked)
     os.remove(results)
 
-    with open(args.output + "_chunks.bed", "w") as out:
+    with open(output + "_chunks.bed", "w") as out:
         for m in matching_table:
             out.write(F'{m[0]}\t{m[2]}\t{m[3]}\t{m[4]}\n')
 
@@ -193,9 +197,9 @@ if __name__ == "__main__":
 
     cmd_args = parser.parse_args()
     if cmd_args.command == "tidehunter":
-        tidehunter(cmd_args)
+        tidehunter(cmd_args.fasta, cmd_args.tidehunter_arguments, cmd_args.output)
     elif cmd_args.command == "clustering":
-        clustering(cmd_args)
+        clustering(cmd_args.fasta, cmd_args.gff3, cmd_args.output)
     else:
         parser.print_help()
         sys.exit(1)
