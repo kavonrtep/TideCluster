@@ -3,3 +3,4 @@ blast
 mmseqs2
 python>=3.6
 networkx
+repeatmasker

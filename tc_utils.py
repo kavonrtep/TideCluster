@@ -24,14 +24,37 @@ class Gff3Feature:
         self.strand = self.items[6]
         self.frame = self.items[7]
         self.attributes = self.items[8]
-        self.attributes_dict = {}
+        self._attributes_dict = {}
         for item in self.attributes.split(';'):
             if item != '':
                 key, value = item.split('=')
-                self.attributes_dict[key] = value
+                self._attributes_dict[key] = value
 
-        self.attributes_str = ';'.join(
-            ['{}={}'.format(key, value) for key, value in self.attributes_dict.items()]
+        self._attributes_str = ';'.join(
+            ['{}={}'.format(key, value) for key, value in self._attributes_dict.items()]
+            )
+
+    @property
+    def attributes_dict(self):
+        return self._attributes_dict
+
+
+    @property
+    def attributes_str(self):
+        return self._attributes_str
+
+    @attributes_str.getter
+    def attributes_str(self):
+        self._attributes_str = ';'.join(
+            ['{}={}'.format(key, value) for key, value in self._attributes_dict.items()]
+            )
+        return self._attributes_str
+
+    @attributes_dict.setter
+    def attributes_dict(self, value):
+        self._attributes_dict = value
+        self._attributes_str = ';'.join(
+            ['{}={}'.format(key, value) for key, value in self._attributes_dict.items()]
             )
 
     def __str__(self):
@@ -110,6 +133,100 @@ class Gff3Feature:
                            self.attributes_dict.items()]
         attributes = [';'.join(attributes_list)]
         return '\t'.join(columns + attributes) + '\n'
+
+class RepeatMaskerFeature:
+    """
+    class for parsing repeatmasker ouput from .out file
+    """
+    def __init__(self, line):
+
+        items = line.split()
+        if len(items) < 12:
+            raise ValueError('Line does not contain enough columns')
+        self.seqid = items[4]
+        self.start = int(items[5])
+        self.end = int(items[6])
+        self.length = self.end - self.start
+        self.strand = items[8]
+        self.annot = items[10]
+        self.refid = items[9]
+        self.family = items[11]
+
+
+def get_repeatmasker_annotation(rm_file, seq_lengths, prefix):
+    """
+    :parse repeatmasker output and calculate proportion of each annotation
+    :param rm_file:
+    :param seq_lengths:
+    :param prefix:
+    :return:
+    """
+
+    seq_rm_info = {}
+    with open(rm_file, 'r') as f:
+        # parse repeatmasker output, first three lines are header
+        for i in range(3):
+            next(f)
+        for line in f:
+            rm_feature = RepeatMaskerFeature(line)
+            if rm_feature.seqid not in seq_rm_info:
+                seq_rm_info[rm_feature.seqid] = {}
+                if rm_feature.annot not in seq_rm_info[rm_feature.seqid]:
+                    seq_rm_info[rm_feature.seqid][rm_feature.annot] = 0
+                prop = rm_feature.length / seq_lengths[rm_feature.seqid]
+                seq_rm_info[rm_feature.seqid][rm_feature.annot] += prop
+    # for each TRC calculate mean value for each annotation
+    # not all sequences are necessarily annotated
+    annot_summary = {}
+    trc_consensus_count = {}  # how many consensus sequences are in each TRC
+    # scan all consensus sequences id
+    for seqid in seq_lengths:
+        trc_id = "TRC_" + seqid.split("_")[1]
+        if trc_id not in trc_consensus_count:
+            trc_consensus_count[trc_id] = 0
+        trc_consensus_count[trc_id] += 1
+        if trc_id not in annot_summary:
+            annot_summary[trc_id] = {}
+        # does seqid have any annotations
+        if seqid in seq_rm_info:
+            for annot in seq_rm_info[seqid]:
+                if annot not in annot_summary[trc_id]:
+                    annot_summary[trc_id][annot] = 0
+                annot_summary[trc_id][annot] += seq_rm_info[seqid][annot]
+
+    # divide by number of consensus sequences in each TRC
+    for trc_id in annot_summary:
+        for annot in annot_summary[trc_id]:
+            annot_summary[trc_id][annot] /= trc_consensus_count[trc_id]
+
+    # export annotation to table:
+    annot_table = prefix + "_annotation.tsv"
+    annot_description = {}
+    with open(annot_table, "w") as f:
+        f.write("TRC\tannotation\tproportion_coverage\n")
+        for trc_id in annot_summary:
+            annot_description[trc_id] = "NA"
+            if len(annot_summary[trc_id]) == 0:
+                continue
+            # sort keys by values
+            key_sorted = sorted(annot_summary[trc_id],
+                                key=annot_summary[trc_id].get,
+                                reverse=True)
+            for i, v in enumerate(key_sorted):
+                p = round(annot_summary[trc_id][v], 3)
+                if i > 0:
+                    # round to 2 decimal places
+                    annot_description[trc_id] += F"; {v} ({p})"
+                    f.write(F"\t{v}\t{annot_summary[trc_id][v]}")
+                else:
+                    annot_description[trc_id] = F"{v} ({p})"
+                    f.write(F"{trc_id}\t{v}\t{annot_summary[trc_id][v]}")
+            f.write("\n")
+    print("Annotation exported to: " + annot_table)
+    return annot_description
+
+
+
 
 
 def read_fasta_sequence_size(fasta_file):
@@ -455,7 +572,7 @@ def save_fasta_dict_to_file(fasta_dict, fasta_file):
 
 
 # run mmseqs2 on consensus sequences
-def find_cluster_by_mmseqs2(sequences):
+def find_cluster_by_mmseqs2(sequences, cpu=4):
     """
     run mmseqs2 on consensus sequences
     :param sequences:
@@ -467,8 +584,7 @@ def find_cluster_by_mmseqs2(sequences):
 
     cmd = (F'mmseqs easy-cluster {input_fasta_file.name} {input_fasta_file.name}.clu'
            F' {tmp_dir} --cluster-mode 0 '
-           F'--mask 0  -s 1')
-
+           F'--mask 0  -s 1 --threads {cpu}')
     subprocess.check_call(cmd, shell=True)
 
     # read clusters to dictionary
@@ -523,7 +639,7 @@ def get_connected_component_clusters(pairs):
     return clusters
 
 
-def run_blastn(sequences):
+def run_blastn(sequences, cpu=4):
     """
     run blastn on fasta file
     :param sequences : dictionary with sequences
@@ -541,10 +657,9 @@ def run_blastn(sequences):
     outfmt = "'6 qseqid sseqid pident length evalue bitscore qlen slen'"
 
     cmd = (F"blastn -task blastn -query {fasta_file} -db {fasta_file} -outfmt {outfmt}"
-           F" -out {blast_out} -num_threads 30 -evalue 1e-20 -perc_identity 75"
+           F" -out {blast_out} -num_threads {cpu} -evalue 1e-20 -perc_identity 75"
            F" -word_size 9 -max_target_seqs 1000000 -dust no "
            F" -gapextend 1 -gapopen 2 -reward 1 -penalty -1")
-
     subprocess.check_call(cmd, shell=True)
     # read pairs to list, exclude self hits and duplicates
     pairs = set()
@@ -563,14 +678,14 @@ def run_blastn(sequences):
     return pairs
 
 
-def find_clusters_by_blast_connected_component(consensus_representative):
+def find_clusters_by_blast_connected_component(consensus_representative, cpu=4):
     """
     find clusters by blastn, return dictionary with clusters
     cluaste are connected components in graph
     :param consensus_representative:
     :return: clusters
     """
-    pairs = run_blastn(consensus_representative)
+    pairs = run_blastn(consensus_representative, cpu=cpu)
     # graph = make_graph(pairs)
     # components = find_connected_components(graph)
     components = get_connected_component_clusters(pairs)
@@ -602,6 +717,26 @@ def get_cluster_size(fin, clusters):
             cluster_size[cluster_id] += gff3_feature.end - gff3_feature.start
     return cluster_size
 
+def add_attribute_to_gff(fin, fout, attr2match, new_attr, attr_dict):
+    """
+    add attribute to gff file
+    :param fin: input gff
+    :param fout: output gff
+    :param attr2match: which attribute to use to match with attribute_dict
+    :param new_attr: name of new attribute to be added to gff
+    :param attr_dict: dictionary with attributes
+    :return:
+    """
+    with open(fin, 'r') as f1, open(fout, 'w') as f2:
+        for line in f1:
+            if line.startswith("#"):
+                f2.write(line)
+                continue
+            gff3_feature = Gff3Feature(line)
+            attr_value = gff3_feature.attributes_dict[attr2match]
+            if attr_value in attr_dict:
+                gff3_feature.attributes_dict[new_attr] = attr_dict[attr_value]
+            f2.write(str(gff3_feature))
 
 def add_cluster_info_to_gff3(fin, fout, clusters):
     """
@@ -692,11 +827,11 @@ def merge_intervals(intervals):
     return merged
 
 
-def filter_gff_by_size(gff3_file, min_size=10000):
+def filter_gff_by_length(gff3_file, min_length=1000):
     """
     Filter gff3 file by size of intervals
     :param gff3_file:
-    :param min_size:
+    :param min_length:
     :return: filtered gff3 file path
     """
     gff_out = tempfile.NamedTemporaryFile(delete=False).name
@@ -706,7 +841,7 @@ def filter_gff_by_size(gff3_file, min_size=10000):
                 f2.write(line)
                 continue
             gff3_feature = Gff3Feature(line)
-            if gff3_feature.end - gff3_feature.start > min_size:
+            if gff3_feature.end - gff3_feature.start > min_length:
                 f2.write(line)
     return gff_out
 
