@@ -36,15 +36,26 @@ class Gff3Feature:
 
     @property
     def attributes_dict(self):
+        """
+        store attributes as dictionary
+        :return:
+        """
         return self._attributes_dict
-
 
     @property
     def attributes_str(self):
+        """
+        store attributes as string
+        :return:
+        """
         return self._attributes_str
 
     @attributes_str.getter
     def attributes_str(self):
+        """
+        store attributes as string
+         :return:
+        """
         self._attributes_str = ';'.join(
             ['{}={}'.format(key, value) for key, value in self._attributes_dict.items()]
             )
@@ -134,12 +145,13 @@ class Gff3Feature:
         attributes = [';'.join(attributes_list)]
         return '\t'.join(columns + attributes) + '\n'
 
+
 class RepeatMaskerFeature:
     """
     class for parsing repeatmasker ouput from .out file
     """
-    def __init__(self, line):
 
+    def __init__(self, line):
         items = line.split()
         if len(items) < 12:
             raise ValueError('Line does not contain enough columns')
@@ -209,9 +221,9 @@ def get_repeatmasker_annotation(rm_file, seq_lengths, prefix):
             if len(annot_summary[trc_id]) == 0:
                 continue
             # sort keys by values
-            key_sorted = sorted(annot_summary[trc_id],
-                                key=annot_summary[trc_id].get,
-                                reverse=True)
+            key_sorted = sorted(
+                annot_summary[trc_id], key=annot_summary[trc_id].get, reverse=True
+                )
             for i, v in enumerate(key_sorted):
                 p = round(annot_summary[trc_id][v], 3)
                 if i > 0:
@@ -224,9 +236,6 @@ def get_repeatmasker_annotation(rm_file, seq_lengths, prefix):
             f.write("\n")
     print("Annotation exported to: " + annot_table)
     return annot_description
-
-
-
 
 
 def read_fasta_sequence_size(fasta_file):
@@ -575,6 +584,7 @@ def save_fasta_dict_to_file(fasta_dict, fasta_file):
 def find_cluster_by_mmseqs2(sequences, cpu=4):
     """
     run mmseqs2 on consensus sequences
+    :param cpu:
     :param sequences:
     :return: clusters
     """
@@ -642,6 +652,7 @@ def get_connected_component_clusters(pairs):
 def run_blastn(sequences, cpu=4):
     """
     run blastn on fasta file
+    :param cpu:
     :param sequences : dictionary with sequences
     :return: dictionary with clusters
     """
@@ -682,6 +693,7 @@ def find_clusters_by_blast_connected_component(consensus_representative, cpu=4):
     """
     find clusters by blastn, return dictionary with clusters
     cluaste are connected components in graph
+    :param cpu:
     :param consensus_representative:
     :return: clusters
     """
@@ -717,6 +729,7 @@ def get_cluster_size(fin, clusters):
             cluster_size[cluster_id] += gff3_feature.end - gff3_feature.start
     return cluster_size
 
+
 def add_attribute_to_gff(fin, fout, attr2match, new_attr, attr_dict):
     """
     add attribute to gff file
@@ -737,6 +750,7 @@ def add_attribute_to_gff(fin, fout, attr2match, new_attr, attr_dict):
             if attr_value in attr_dict:
                 gff3_feature.attributes_dict[new_attr] = attr_dict[attr_value]
             f2.write(str(gff3_feature))
+
 
 def add_cluster_info_to_gff3(fin, fout, clusters):
     """

@@ -24,12 +24,17 @@ from tc_utils import add_attribute_to_gff
 # minimal python version is 3.6
 assert sys.version_info >= (3, 6), "Python 3.6 or newer is required"
 
-def annotation(prefix, library, gff=None, consensus_dir = None, cpu=1):
+
+def annotation(prefix, library, gff=None, consensus_dir=None, cpu=1):
     """
     Run annotation on sequences defined in gff3 file based on coresponding
     consensus sequences in stored in consensu directory
     produce gff3 file with updated annotation  information
     :param prefix: prefix - base naame for input and output files
+    :param library: library file for RepeatMasker
+    :param gff: gff3 file with tidehunter results
+    :param consensus_dir: directory with consensus sequences
+    :param cpu: number of cpu cores to use
     :return:
     """
     if consensus_dir is None:
@@ -71,16 +76,19 @@ def clustering(fasta, prefix, gff3=None, min_length=None, cpu=4):
     """
     Run clustering on sequences defined in gff3 file and fasta file
     produce gff3 file with cluster information
-    :param fasta: path to fasta file
-    :param gff3: path to gff3 file from tidehunter
-    :param output: path to output file - gff3
+    :param fasta: fasta file with sequences
+    :param prefix: prefix - base naame for input and output files
+    :param gff3: gff3 file with tidehunter results
+    :param min_length: minimal length of repeat to be included in clustering
+    :param cpu: number of cpu cores to use
     :return:
+
     """
     fasta = fasta
     if gff3 is None:
         gff3 = prefix + "_tidehunter.gff3"
     if min_length is not None:
-        gff3 = filter_gff_by_length(gff3, min_length = min_length)
+        gff3 = filter_gff_by_length(gff3, min_length=min_length)
     gff3_out = prefix + "_clustering.gff3"
 
     # get consensus sequences for clustering
@@ -99,8 +107,9 @@ def clustering(fasta, prefix, gff3=None, min_length=None, cpu=4):
     representative_id = set(clusters1.values())
     consensus_representative = {k: consensus_dimers[k] for k in representative_id}
     # second round of clustering by blastn
-    clusters2 = find_clusters_by_blast_connected_component(consensus_representative,
-                                                           cpu=cpu)
+    clusters2 = find_clusters_by_blast_connected_component(
+        consensus_representative, cpu=cpu
+        )
     # combine clusters
     clusters_final = clusters1.copy()
 
@@ -144,9 +153,12 @@ def clustering(fasta, prefix, gff3=None, min_length=None, cpu=4):
 def tidehunter(fasta, tidehunter_arguments, prefix, cpu=4):
     """
     run tidehunter on fasta file
-    :param fasta: path to fasta file
-    :param tidehunter_arguments: arguments for tidehunter
-    :param output: path to output file
+    :param fasta: fasta file with sequences
+    :param tidehunter_arguments: tidehunter arguments
+    :param prefix: prefix - base name for input and output files
+    :param cpu: number of cpu cores to use
+    :return:
+
     """
     # get size of input file
     chunk_size = 500000
@@ -224,17 +236,17 @@ if __name__ == "__main__":
         )
 
     parser_clustering.add_argument(
-        "-m", "--min_length", help="Minimum length of tandem repeat",
-        required=False, default=None, type=int)
+        "-m", "--min_length", help="Minimum length of tandem repeat", required=False,
+        default=None, type=int
+        )
 
     parser_clustering.add_argument(
         "-pr", "--prefix", help="Base name used for input and output files from ",
         required=True
         )
     parser_clustering.add_argument(
-        "-g", "--gff",
-        help=("gff output file from tidehunter ster. If not provided "
-              "the file named 'prefix_tidehunter.gff3' will be used"),
+        "-g", "--gff", help=("gff output file from tidehunter ster. If not provided "
+                             "the file named 'prefix_tidehunter.gff3' will be used"),
         required=False, default=None
         )
 
@@ -249,22 +261,19 @@ if __name__ == "__main__":
         )
 
     parser_annotation.add_argument(
-        "-g", "--gff",
-        help=("gff output file from clustering step. If not provided "
-                "the file named 'prefix_clustering.gff3' will be used"),
+        "-g", "--gff", help=("gff output file from clustering step. If not provided "
+                             "the file named 'prefix_clustering.gff3' will be used"),
         required=False, default=None
         )
     parser_annotation.add_argument(
         "-cd", "--consensus_directory",
         help=("Directory with consensus sequences which are to be "
               "annotated. If not provided the directory named 'prefix_consensus' "
-              "will be used"),
-        required=False, default=None
+              "will be used"), required=False, default=None
         )
 
     parser_annotation.add_argument(
-        "-l", "--library", help="Path to library of tandem repeats", required=True,
-        )
+        "-l", "--library", help="Path to library of tandem repeats", required=True, )
 
     parser.description = """Wrapper of TideHunter
     This script enable to run TideHunter on large fasta files in parallel. It splits
@@ -296,15 +305,19 @@ if __name__ == "__main__":
 
     cmd_args = parser.parse_args()
     if cmd_args.command == "tidehunter":
-        tidehunter(cmd_args.fasta, cmd_args.tidehunter_arguments,
-                   cmd_args.prefix, cmd_args.cpu)
+        tidehunter(
+            cmd_args.fasta, cmd_args.tidehunter_arguments, cmd_args.prefix, cmd_args.cpu
+            )
     elif cmd_args.command == "clustering":
-        clustering(cmd_args.fasta, cmd_args.prefix, cmd_args.gff,
-                   cmd_args.min_length, cmd_args.cpu)
+        clustering(
+            cmd_args.fasta, cmd_args.prefix, cmd_args.gff, cmd_args.min_length,
+            cmd_args.cpu
+            )
     elif cmd_args.command == "annotation":
-        annotation(cmd_args.prefix, cmd_args.library,
-                   cmd_args.gff, cmd_args.consensus_directory,
-                   cmd_args.cpu)
+        annotation(
+            cmd_args.prefix, cmd_args.library, cmd_args.gff, cmd_args.consensus_directory,
+            cmd_args.cpu
+            )
     else:
         parser.print_help()
         sys.exit(1)
