@@ -98,7 +98,7 @@ options:
 LIBRARY is fasta file with tandem repeats reference library.
 Required format for sequence names  in fasta is `>seqid#class/subclass`
 
-```
+
 
 ```
 
