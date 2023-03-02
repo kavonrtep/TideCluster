@@ -96,13 +96,13 @@ options:
 ```
 
 LIBRARY is fasta file with tandem repeats reference library.
-Required format is for sequence names is `>seqid#class/subclass`
+Required format for sequence names  in fasta is `>seqid#class/subclass`
 
 ```
 
 ```
 
-## example for full pipeline
+## Example for full pipeline
 
 ```bash
 TideCluster.py -c 40 tidehunter -pr cen6_sat -f CEN6_ver_220406.fasta -T "-p 40 -P 3000 -c 5 -e 0.25"
