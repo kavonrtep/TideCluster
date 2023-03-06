@@ -4,6 +4,8 @@ import subprocess
 import tempfile
 from itertools import cycle, permutations
 from shutil import rmtree
+import re
+
 import networkx as nx
 
 def get_kmers(dna, k):
@@ -799,6 +801,108 @@ def run_blastn(sequences, dust = False, cpu=4):
     rmtree(tmp_dir)
     return pairs
 
+def get_ssrs_proportions(sequences):
+    """
+    Run dustmasker on fasta file to identifie simple repeats fro masking. if
+    repeats is masked by more than 80% of the sequence, then ths sequnece is
+    scanned for SSRs and the proportion of SSRs is calculated.
+    it is indended to be used for masking tandem repeats with monomer up to 6 nt
+    :param sequences: dictionary with sequences
+    :return: dictionary with dustmasker results
+    """
+    tmp_dir = tempfile.mkdtemp()
+    fasta_file = F'{tmp_dir}/seqs.fasta'
+    dust_out = F'{tmp_dir}/dust.out'
+    save_fasta_dict_to_file(sequences, fasta_file)
+    # run dustmasker
+    cmd = (F"dustmasker -in {fasta_file} -out {dust_out} -outfmt fasta -window 64 "
+           F"-level 20")
+    subprocess.check_call(cmd, shell=True)
+    # read dustmasker results to dictionary
+    dust = {}
+    lengths = {}
+    # read fasta and calucutate proportion of lower case letters
+    with open(dust_out, 'r') as f:
+        for line in f:
+            if line.startswith('>'):
+                seq_id = line[1:].strip()
+                dust[seq_id] = 0
+                lengths[seq_id] = 0
+            else:
+                lengths[seq_id] +=len(line.strip())
+                dust[seq_id] += sum(1 for char in line.strip() if char.islower())
+    ssrs_prop = {}
+    for id in dust:
+        dust[id] /= lengths[id]
+        ssrs_prop[id] = 0
+        if dust[id] > 0.8:
+            ssrs = find_ssrs(sequences[id])
+            ssrs_prop[id] = single_sequence_ssrs_proportion(ssrs)
+    rmtree(tmp_dir)
+    return ssrs_prop
+
+
+def homopolymer(motif, motiflength):
+    #return true if motif is repeat of single nucleotide
+    reps = motiflength - 1
+    return True if re.search(r'([gatc])\1{%d}' % reps, motif) else False
+
+def novel(position, locations):
+    if position in locations:
+        return False
+    else:
+        locations[position] = True
+        return True
+def find_ssrs(sequence):
+    # motif-repeat parameters:
+    # specify motif length, minimum number of repeats.
+    # modify according to researcher's preferences
+    specs = [(2, 9),  # dinucl. with >= 9 repeats
+             (3, 6),  # trinucl. with >= 6 repeats
+             (4, 5),  # tetranucl. with >= 5 repeats
+             (5, 5),  # pentanucl. with >= 5 repeats
+             (6, 6)]  # hexanucl. with >= 6 repeats
+    results = []
+    locations = {}
+    for i in range(len(specs)):
+        motiflength, minreps = specs[i]
+        regexp = r'(([gatc]{%d})\2{%d,})' % (motiflength, minreps-1)
+        for match in re.finditer(regexp, sequence.lower()):
+            ssr = match.group(1)
+            motif = match.group(2).lower()
+            if homopolymer(motif, motiflength):
+                continue
+            ssrlength = len(ssr)
+            repeats = ssrlength // motiflength
+            end = match.end()
+            start = end - ssrlength + 1
+            if novel(start, locations):
+                results.append({
+                    'ssr_number': len(results) + 1,
+                    'motif_length': motiflength,
+                    'motif_sequence': motif,
+                    'repeats': repeats,
+                    'start': start,
+                    'end': end,
+                    'seq_length': len(sequence)
+                    })
+    return results
+
+def single_sequence_ssrs_proportion(ssrs):
+    """
+    calculate proportion of sequence coverad by ssrs
+    :param ssrs: ssrs is list of dictionaries with ssr information
+    :return: ssrs proportion
+    """
+    if len(ssrs) == 0:
+        return 0
+    # boolean list with length of sequence
+    is_ssr = [False] * len(ssrs[0])
+    # set True for each position covered by ssr
+    for ssr in ssrs:
+        is_ssr[ssr['start'] - 1:ssr['end']] = [True] * ssr['seq_length']
+    # calculate proportion of True values
+    return sum(is_ssr) / len(is_ssr)
 
 def find_clusters_by_blast_connected_component(consensus_representative, dust=False,
                                                cpu=4):

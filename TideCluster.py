@@ -132,6 +132,18 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=False, cpu=4):
         if len(consensus[seq_id]) > 10000:
             consensus[seq_id] = consensus[seq_id][0:10000]
 
+    # run dustmasker first, sequences which are completely masked
+    # will not be used in clastering.
+    mask_prop = tc_utils.get_ssrs_proportions(consensus_dimers)
+
+    # if count mask_prop above 0.9
+    ssrs_id = [k for k, v in mask_prop.items() if v > 0.9]
+    # remove ssrs from consensus sequences, they will be added back later
+    # but not used for clustering
+    for k in ssrs_id:
+        consensus.pop(k, None)
+        consensus_dimers.pop(k, None)
+
     # first round of clustering by mmseqs2
     clusters1 = find_cluster_by_mmseqs2(consensus, cpu=cpu)
 
@@ -150,6 +162,12 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=False, cpu=4):
         else:
             clusters_final[k] = v
 
+    # add ssrs_id back to clusters_final
+    # and also to clusters1 - these are saved as well
+    for k in ssrs_id:
+        clusters_final[k] = k
+        clusters1[k] = k
+
     # get total size of each cluster, store in dict
     cluster_size = get_cluster_size(gff3, clusters_final)
 
@@ -160,17 +178,28 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=False, cpu=4):
     for i, v in enumerate(representative_id):
         cluster_names[v] = F"TRC_{i + 1}"
 
+    ssrs_info = {}  # store ssrs info for gff3 file
     for k, v in clusters_final.items():
         clusters_final[k] = cluster_names[v]
+        if k in ssrs_id:
+            ssrs_info[cluster_names[v]] = "SSR"
+        else:
+            ssrs_info[cluster_names[v]] = "TR"
 
     cons_cls, cons_cls_dimer = add_cluster_info_to_gff3(gff3, gff3_out, clusters_final)
+
     merge_overlapping_gff3_intervals(gff3_out, gff3_out)
+
+    gff_tmp = gff3_out + "_tmp"
+    add_attribute_to_gff(gff3_out, gff_tmp, "Name", "repeat_type", ssrs_info)
+    os.rename(gff_tmp, gff3_out)
 
     # save also first round of clustering for debugging
     cons_cls1, cons_cls_dimer1_ = add_cluster_info_to_gff3(
         gff3, gff3_out + "_1.gff3", clusters1
         )
     merge_overlapping_gff3_intervals(gff3_out + "_1.gff3", gff3_out + "_1.gff3")
+
 
     # for debugging
     # write consensus sequences by clusters to directory
