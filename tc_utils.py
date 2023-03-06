@@ -2,9 +2,120 @@
 import os
 import subprocess
 import tempfile
-from itertools import cycle
+from itertools import cycle, permutations
 from shutil import rmtree
 import networkx as nx
+
+def get_kmers(dna, k):
+    """ Return all kmers of length k from dna.
+    param dna: dict of dna sequences
+    param k: length of kmers
+    return: dictionary kmer:count
+    """
+    kmers = {}
+    for seq in dna.values():
+        for i in range(len(seq)-k+1):
+            kmer = seq[i:i+k]
+            if kmer in kmers:
+                kmers[kmer] += 1
+            else:
+                kmers[kmer] = 1
+    return kmers
+
+def kmers2debruijn(kmers):
+    """ Return debruijn graph from kmers.
+    param kmers: list of kmers
+    return: dictionary of nodes
+    """
+    graph = nx.DiGraph()
+    for kmer in kmers:
+        edge_weight = kmers[kmer]
+        graph.add_edge(kmer[:-1], kmer[1:], weight=edge_weight)
+    return graph
+
+
+def smallest_circular_paths(G):
+
+    cycles = nx.simple_cycles(G)
+    cycles = sorted(
+        cycles, key=lambda cycle: sum(
+            G[u][v]['weight'] for u, v in zip(cycle, cycle[1:] + cycle[:1])
+            ), reverse=True
+        )
+    paths = []
+    while cycles:
+        cycle = cycles.pop(0)
+        H = G.copy()
+        H.remove_edges_from(zip(cycle, cycle[1:] + cycle[:1]))
+        H.remove_nodes_from([v for v in cycle if H.degree[v] == 0])
+        while True:
+            subcycles = nx.simple_cycles(H)
+            print(len(subcycles))
+            if not subcycles:
+                break
+            subcycles = sorted(
+                subcycles, key=lambda subcycle: sum(
+                    H[u][v]['weight'] for u, v in
+                    zip(subcycle, subcycle[1:] + subcycle[:1])
+                    ), reverse=True
+                )
+            subcycle = subcycles[0]
+            H.remove_edges_from(zip(subcycle, subcycle[1:] + subcycle[:1]))
+            H.remove_nodes_from([v for v in subcycle if H.degree[v] == 0])
+            cycles.insert(0, subcycle)
+        paths.append(cycle)
+    if len(paths) == 1:
+        return paths
+    else:
+        assigned = set()
+        result = []
+        for path in paths:
+            unassigned = set(path) - assigned
+            result.append([v for v in path if v in unassigned])
+            assigned |= unassigned
+        return result
+
+def debruijn2contigs(graph):
+    """ Return contigs from debruijn graph.
+    param graph: debruijn graph
+    return: list of contigs
+    """
+    contigs_kmers = {}
+    # get list of nodes as set:
+    nodes = set(list(graph.nodes()))
+    while nodes:
+        node = nodes.pop()
+        neighbor = next(graph.neighbors(node))
+        path = nx.shortest_path(graph, neighbor, node, weight='weight')
+        frozenset_path = frozenset(sorted(path))
+        contigs_kmers[frozenset_path] = path
+        nodes -= frozenset_path
+    return contigs_kmers
+
+def contigs_kmers2strings(contigs_kmers):
+    """ Return contigs from contigs_kmers.
+    param contigs_kmers: dictionary of contigs
+    return: list of contigs
+    """
+    if type(contigs_kmers) is dict:
+        contigs = []
+        for contig in contigs_kmers.values():
+            contig_string = contig[0]
+            for kmer in contig[1:]:
+                contig_string += kmer[-1]
+            contigs.append(contig_string)
+    else:
+        contigs = []
+        for contig in contigs_kmers:
+            contig_string = contig[0]
+            for kmer in contig[1:]:
+                contig_string += kmer[-1]
+            contigs.append(contig_string)
+
+    return contigs
+
+
+
 
 
 class Gff3Feature:
@@ -254,7 +365,7 @@ def read_fasta_sequence_size(fasta_file):
 def read_single_fasta_to_dictionary(fh):
     """
     Read fasta file into dictionary
-    :param fh:
+    :param fh: - file handle
     :return:
     fasta_dict
     """
@@ -649,7 +760,7 @@ def get_connected_component_clusters(pairs):
     return clusters
 
 
-def run_blastn(sequences, cpu=4):
+def run_blastn(sequences, dust = False, cpu=4):
     """
     run blastn on fasta file
     :param cpu:
@@ -663,13 +774,13 @@ def run_blastn(sequences, cpu=4):
     # make blast database
     cmd = F"makeblastdb -in {tmp_dir}/seqs.fasta -dbtype nucl"
     subprocess.check_call(cmd, shell=True)
-    # run blastn
-
+    # blast parameters:
+    dust = "yes" if dust else "no"
     outfmt = "'6 qseqid sseqid pident length evalue bitscore qlen slen'"
-
+    # run blastn
     cmd = (F"blastn -task blastn -query {fasta_file} -db {fasta_file} -outfmt {outfmt}"
            F" -out {blast_out} -num_threads {cpu} -evalue 1e-20 -perc_identity 75"
-           F" -word_size 9 -max_target_seqs 1000000 -dust no "
+           F" -word_size 9 -max_target_seqs 1000000 -dust {dust}"
            F" -gapextend 1 -gapopen 2 -reward 1 -penalty -1")
     subprocess.check_call(cmd, shell=True)
     # read pairs to list, exclude self hits and duplicates
@@ -689,7 +800,8 @@ def run_blastn(sequences, cpu=4):
     return pairs
 
 
-def find_clusters_by_blast_connected_component(consensus_representative, cpu=4):
+def find_clusters_by_blast_connected_component(consensus_representative, dust=False,
+                                               cpu=4):
     """
     find clusters by blastn, return dictionary with clusters
     cluaste are connected components in graph
@@ -697,7 +809,7 @@ def find_clusters_by_blast_connected_component(consensus_representative, cpu=4):
     :param consensus_representative:
     :return: clusters
     """
-    pairs = run_blastn(consensus_representative, cpu=cpu)
+    pairs = run_blastn(consensus_representative, dust=dust, cpu=cpu)
     # graph = make_graph(pairs)
     # components = find_connected_components(graph)
     components = get_connected_component_clusters(pairs)

@@ -19,10 +19,41 @@ from tc_utils import get_cluster_size, add_cluster_info_to_gff3
 from tc_utils import merge_overlapping_gff3_intervals
 from tc_utils import save_consensus_files, filter_gff_by_length
 from tc_utils import read_fasta_sequence_size, get_repeatmasker_annotation
-from tc_utils import add_attribute_to_gff
+from tc_utils import add_attribute_to_gff, read_single_fasta_to_dictionary
 
 # minimal python version is 3.6
 assert sys.version_info >= (3, 6), "Python 3.6 or newer is required"
+
+def tarean(prefix, consensu_dir=None, cpu=4):
+    """
+    Run tarean on consensus sequences
+    produce gff3 file with tarean results
+    :param prefix: prefix - base naame for input and output files
+    :param consensu_dir: directory with consensus sequences
+    :param cpu: number of cpu cores to use
+    :return:
+    """
+    if consensu_dir is None:
+        consensu_dir = prefix + "_consensus"
+    consensus_files = glob.glob(consensu_dir + "/TRC*dimers.fasta")
+    for path in consensus_files:
+        print(path)
+        with open(path, "r") as f:
+            seqs = read_single_fasta_to_dictionary(f)
+            seq_lengths = read_fasta_sequence_size(path)
+            print(seq_lengths)
+            # seqs are dimmers, it must be trimmed to monomers plus k
+            k_length = 29
+            seqs = {k: v[0:(len(v) + k_length)] for k, v in seqs.items()}
+            kmers = tc_utils.get_kmers(seqs, k = k_length)
+            graph = tc_utils.kmers2debruijn(kmers)
+            # contigs_kmers = tc_utils.smallest_circular_paths(graph)
+            contigs_kmers = tc_utils.debruijn2contigs(graph)
+            contigs = tc_utils.contigs_kmers2strings(contigs_kmers)
+            print(contigs)
+            print(len(contigs))
+            print("length of contigs", [len(x) for x in contigs])
+            print("-------------------------")
 
 
 def annotation(prefix, library, gff=None, consensus_dir=None, cpu=1):
@@ -72,7 +103,7 @@ def annotation(prefix, library, gff=None, consensus_dir=None, cpu=1):
         print(F"gff3 file {gff} does not exist, no annotation added to gff3 file")
 
 
-def clustering(fasta, prefix, gff3=None, min_length=None, cpu=4):
+def clustering(fasta, prefix, gff3=None, min_length=None, dust=False, cpu=4):
     """
     Run clustering on sequences defined in gff3 file and fasta file
     produce gff3 file with cluster information
@@ -108,7 +139,7 @@ def clustering(fasta, prefix, gff3=None, min_length=None, cpu=4):
     consensus_representative = {k: consensus_dimers[k] for k in representative_id}
     # second round of clustering by blastn
     clusters2 = find_clusters_by_blast_connected_component(
-        consensus_representative, cpu=cpu
+        consensus_representative, dust = dust, cpu=cpu
         )
     # combine clusters
     clusters_final = clusters1.copy()
@@ -249,6 +280,11 @@ if __name__ == "__main__":
                              "the file named 'prefix_tidehunter.gff3' will be used"),
         required=False, default=None
         )
+    parser_clustering.add_argument(
+        '-d', '--dust', required=False, default=False,
+        action='store_true',
+        help='Use dust filter in blastn when clustering'
+        )
 
     # Annotation
     parser_annotation = subparsers.add_parser(
@@ -274,6 +310,26 @@ if __name__ == "__main__":
 
     parser_annotation.add_argument(
         "-l", "--library", help="Path to library of tandem repeats", required=True, )
+
+    # tarean
+    parser_tarean = subparsers.add_parser(
+        'tarean', help='Run TAREAN on custers to extract representative sequences'
+        )
+    parser_tarean.add_argument(
+        "-pr", "--prefix", help="Base name used for input and output files from ",
+        required=True
+        )
+    parser_tarean.add_argument(
+        "-cd", "--consensus_directory",
+        help=("Directory with consensus sequences will be used to extract "
+              "representative sequences.If not "
+              "provided the directory named 'prefix_consensus' "
+              "will be used"),
+        required=False, default=None
+        )
+
+
+
 
     parser.description = """Wrapper of TideHunter
     This script enable to run TideHunter on large fasta files in parallel. It splits
@@ -303,6 +359,7 @@ if __name__ == "__main__":
     For more information about TideHunter parameters see TideHunter manual.
     ''')
 
+
     cmd_args = parser.parse_args()
     if cmd_args.command == "tidehunter":
         tidehunter(
@@ -311,12 +368,16 @@ if __name__ == "__main__":
     elif cmd_args.command == "clustering":
         clustering(
             cmd_args.fasta, cmd_args.prefix, cmd_args.gff, cmd_args.min_length,
-            cmd_args.cpu
+            cmd_args.dust, cmd_args.cpu
             )
     elif cmd_args.command == "annotation":
         annotation(
             cmd_args.prefix, cmd_args.library, cmd_args.gff, cmd_args.consensus_directory,
             cmd_args.cpu
+            )
+    elif cmd_args.command == "tarean":
+        tarean(
+            cmd_args.prefix, cmd_args.consensus_directory, cmd_args.cpu
             )
     else:
         parser.print_help()
