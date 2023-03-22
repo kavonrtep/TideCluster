@@ -4,3 +4,13 @@ mmseqs2
 python>=3.6
 networkx
 repeatmasker
+r-optparse
+r-igraph
+bioconductor-biostrings
+r-scales
+r-stringr
+r-hwriter
+r-r2html
+r-plyr
+r-dplyr
+mafft

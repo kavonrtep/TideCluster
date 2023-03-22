@@ -1,11 +1,11 @@
 """ Utilities for the project. """
+import concurrent.futures
 import os
 import subprocess
 import tempfile
-from itertools import cycle, permutations
+from itertools import cycle, permutations, combinations
 from shutil import rmtree
 import re
-
 import networkx as nx
 
 def get_kmers(dna, k):
@@ -32,7 +32,13 @@ def kmers2debruijn(kmers):
     graph = nx.DiGraph()
     for kmer in kmers:
         edge_weight = kmers[kmer]
-        graph.add_edge(kmer[:-1], kmer[1:], weight=edge_weight)
+        # use negative weigh for finding paths
+        graph.add_edge(kmer[:-1], kmer[1:], weight= 1/edge_weight)
+    # add weight to nodes:
+    for node in graph.nodes():
+        all_edges = graph.edges(node, data=True)
+        total_weight =  abs(sum(1/edge[2]['weight'] for edge in all_edges))
+        graph.nodes[node]['weight'] = total_weight
     return graph
 
 
@@ -52,7 +58,6 @@ def smallest_circular_paths(G):
         H.remove_nodes_from([v for v in cycle if H.degree[v] == 0])
         while True:
             subcycles = nx.simple_cycles(H)
-            print(len(subcycles))
             if not subcycles:
                 break
             subcycles = sorted(
@@ -77,48 +82,6 @@ def smallest_circular_paths(G):
             assigned |= unassigned
         return result
 
-def debruijn2contigs(graph):
-    """ Return contigs from debruijn graph.
-    param graph: debruijn graph
-    return: list of contigs
-    """
-    contigs_kmers = {}
-    # get list of nodes as set:
-    nodes = set(list(graph.nodes()))
-    while nodes:
-        node = nodes.pop()
-        neighbor = next(graph.neighbors(node))
-        path = nx.shortest_path(graph, neighbor, node, weight='weight')
-        frozenset_path = frozenset(sorted(path))
-        contigs_kmers[frozenset_path] = path
-        nodes -= frozenset_path
-    return contigs_kmers
-
-def contigs_kmers2strings(contigs_kmers):
-    """ Return contigs from contigs_kmers.
-    param contigs_kmers: dictionary of contigs
-    return: list of contigs
-    """
-    if type(contigs_kmers) is dict:
-        contigs = []
-        for contig in contigs_kmers.values():
-            contig_string = contig[0]
-            for kmer in contig[1:]:
-                contig_string += kmer[-1]
-            contigs.append(contig_string)
-    else:
-        contigs = []
-        for contig in contigs_kmers:
-            contig_string = contig[0]
-            for kmer in contig[1:]:
-                contig_string += kmer[-1]
-            contigs.append(contig_string)
-
-    return contigs
-
-
-
-
 
 class Gff3Feature:
     """
@@ -140,8 +103,13 @@ class Gff3Feature:
         self._attributes_dict = {}
         for item in self.attributes.split(';'):
             if item != '':
-                key, value = item.split('=')
-                self._attributes_dict[key] = value
+                try:
+                    key, value = item.split('=')
+                    self._attributes_dict[key] = value
+                except:
+                    print(item)
+                    print(self.attributes)
+                    raise
 
         self._attributes_str = ';'.join(
             ['{}={}'.format(key, value) for key, value in self._attributes_dict.items()]
@@ -341,7 +309,7 @@ def get_repeatmasker_annotation(rm_file, seq_lengths, prefix):
                 p = round(annot_summary[trc_id][v], 3)
                 if i > 0:
                     # round to 2 decimal places
-                    annot_description[trc_id] += F"; {v} ({p})"
+                    annot_description[trc_id] += F", {v} ({p})"
                     f.write(F"\t{v}\t{annot_summary[trc_id][v]}")
                 else:
                     annot_description[trc_id] = F"{v} ({p})"
@@ -371,12 +339,18 @@ def read_single_fasta_to_dictionary(fh):
     :return:
     fasta_dict
     """
+    # verify that fh is a file handle
+    if not hasattr(fh, 'read'):
+        raise TypeError("fh must be a file handle")
     fasta_dict = {}
+    header = None
     for line in fh:
         if line[0] == '>':
             header = line.strip().split(' ')[0][1:]  # remove part of name after space
             fasta_dict[header] = []
         else:
+            if header is None:
+                raise ValueError('Fasta file does not start with header')
             fasta_dict[header] += [line.strip()]
     fasta_dict = {k: ''.join(v) for k, v in fasta_dict.items()}
     return fasta_dict
@@ -659,10 +633,11 @@ def get_seq_from_fasta(fasta_dict, seq_id, start=None, end=None):
     return fasta_dict[seq_id]
 
 
-def gff3_to_fasta(gff3_file, fasta_file):
+def gff3_to_fasta(gff3_file, fasta_file, additonal_attribute=None):
     """
     extract fasta sequences from gff3 file
-    it is generator, returns one sequence at time and seq ID
+    it is generator, returns one sequence at time and seq ID plus additional attribute
+    if provided
     :param gff3_file: path to gff3 file
     :param fasta_file: path to fasta file
     :return:
@@ -677,8 +652,16 @@ def gff3_to_fasta(gff3_file, fasta_file):
             s = get_seq_from_fasta(
                 fasta_dict, gff3_feature.seqid, gff3_feature.start, gff3_feature.end
                 )
-            yield [gff3_feature.attributes_dict['ID'], s,
-                   gff3_feature.attributes_dict['Consensus_sequence']]
+            if "ID" not in gff3_feature.attributes_dict:
+                gff3_feature.attributes_dict["ID"] = (gff3_feature.seqid + "_" +
+                                                      str(gff3_feature.start) + "_" +
+                                                      str(gff3_feature.end))
+            if additonal_attribute:
+                yield [gff3_feature.attributes_dict['ID'], s,
+                       gff3_feature.attributes_dict[additonal_attribute]]
+            else:
+                yield [gff3_feature.attributes_dict['ID'], s]
+
 
 
 def save_fasta_dict_to_file(fasta_dict, fasta_file):
@@ -761,6 +744,95 @@ def get_connected_component_clusters(pairs):
 
     return clusters
 
+def extract_sequences_from_gff3(gff3_file, fasta_file, output_dir):
+    """
+    extract sequences from gff3 file
+    :param gff3_file: path to gff3 file
+    :param fasta_file: path to fasta file
+    :param output_dir: path to output directory
+    :return: dictionary with path to fasta files
+    """
+    # make dir:
+    if not os.path.exists(output_dir):
+        os.mkdir(output_dir)
+    else:
+        # remove old files
+        for f in os.listdir(output_dir):
+            try:
+                os.remove(F"{output_dir}/{f}")
+            except:
+                pass
+    fasta_files = {}
+    for seq_id, seq, name in gff3_to_fasta(gff3_file, fasta_file, "Name"):
+        f = F"{output_dir}/{name}.fasta"
+        fasta_files[name] = f
+        out_file = F"{output_dir}/{name}.fasta"
+        with open(out_file, 'a') as f:
+            f.write(F">{seq_id}\n{seq}")
+            f.write(seq)
+            f.write("\n")
+    return fasta_files
+
+
+def group_sequences_by_orientation(sequences, k):
+    """
+    group sequences by orientation
+    :param sequences: dictionary with sequences
+    :param k: kmers size
+    :return:
+    """
+    groups = {'forward': [], 'reverse': []}
+    reference = max(list(sequences.values()), key=len)
+    ref_kmers = generate_kmers(reference, k)
+
+    for i in sequences:
+        seq = sequences[i]
+        rc_seq = reverse_complement(seq)
+
+        kmers = generate_kmers(seq, k)
+        kmers_sorted = sorted(kmers, key=lambda key:kmers[key], reverse=True)
+        kmers = set(list(kmers_sorted[0:int(len(kmers_sorted) * 0.5)]))
+
+        rc_kmers = generate_kmers(rc_seq, k)
+        rc_kmers_sorted = sorted(rc_kmers, key=lambda key:rc_kmers[key], reverse=True)
+        rc_kmers = set(rc_kmers_sorted[0:int(len(rc_kmers_sorted) * 0.5)])
+
+        overlap = len(kmers.intersection(ref_kmers))
+        rc_overlap = len(rc_kmers.intersection(ref_kmers))
+        if  overlap > rc_overlap:
+            groups['forward'].append(i)
+        else:
+            groups['reverse'].append(i)
+    return groups
+
+def reverse_complement(dna):
+    # complement including all IUPAC codes
+    complement = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'R': 'Y', 'Y': 'R', 'S': 'S',
+                  'W': 'W', 'K': 'M', 'M': 'K', 'B': 'V', 'D': 'H', 'H': 'D', 'V': 'B',
+                  'N': 'N'}
+
+    return ''.join(complement[base] for base in reversed(dna))
+
+def generate_kmers(dna, k):
+    """
+    generate kmers from dna sequence
+    :param dna: string
+    :param k: length of kmers
+    :return: dictionary with kmers, value is frequency of each kmer
+    """
+    kmers = dict()
+    for i in range(len(dna) - k + 1):
+        kmer = dna[i:i + k]
+        if kmer not in kmers:
+            kmers[kmer] = 0
+        kmers[kmer] += 1
+    return kmers
+
+
+
+
+
+
 
 def run_blastn(sequences, dust = False, cpu=4):
     """
@@ -803,7 +875,7 @@ def run_blastn(sequences, dust = False, cpu=4):
 
 def get_ssrs_proportions(sequences):
     """
-    Run dustmasker on fasta file to identifie simple repeats fro masking. if
+    Run dustmasker on fasta file to identifie simple repeats from masking. if
     repeats is masked by more than 80% of the sequence, then ths sequnece is
     scanned for SSRs and the proportion of SSRs is calculated.
     it is indended to be used for masking tandem repeats with monomer up to 6 nt
@@ -853,15 +925,18 @@ def novel(position, locations):
     else:
         locations[position] = True
         return True
-def find_ssrs(sequence):
-    # motif-repeat parameters:
-    # specify motif length, minimum number of repeats.
-    # modify according to researcher's preferences
-    specs = [(2, 9),  # dinucl. with >= 9 repeats
-             (3, 6),  # trinucl. with >= 6 repeats
-             (4, 5),  # tetranucl. with >= 5 repeats
-             (5, 5),  # pentanucl. with >= 5 repeats
-             (6, 6)]  # hexanucl. with >= 6 repeats
+def find_ssrs(sequence, specs=None):
+    """
+    :param sequence: string
+    :param specs: list of tuples with length of motif and minimum number of repeats
+    :return: list of tuples with motif and number of repeats
+    """
+    if specs is None:
+        specs = [(2, 9),  # dinucl. with >= 9 repeats
+                 (3, 6),  # trinucl. with >= 6 repeats
+                 (4, 5),  # tetranucl. with >= 5 repeats
+                 (5, 5),  # pentanucl. with >= 5 repeats
+                 (6, 6)]  # hexanucl. with >= 6 repeats
     results = []
     locations = {}
     for i in range(len(specs)):
@@ -887,6 +962,50 @@ def find_ssrs(sequence):
                     'seq_length': len(sequence)
                     })
     return results
+
+def normalize_motif(motif):
+    """
+    find the lexicographically smallest string in the set of all possible cyclic
+    rotations. This will be the normalized version of the motif.
+    :param motif:
+    :return: normalized motif
+    """
+    doubled_motif = (motif + motif).upper()
+    rc_motif = reverse_complement(doubled_motif)
+    fm = min(doubled_motif[i:i+len(motif)] for i in range(len(motif)))
+    rcm = min(rc_motif[i:i+len(motif)] for i in range(len(motif)))
+    return min(fm, rcm)
+
+def sum_up_ssrs_motifs(results):
+    # sum up motifs
+    motifs = {}
+    for i in results:
+        motif = i['motif_sequence']
+        motif = normalize_motif(motif)
+        if motif in motifs:
+            motifs[motif] += i['repeats']
+        else:
+            motifs[motif] = i['repeats']
+    return motifs
+
+def get_ssrs_description(seq_str):
+    specs = [(2, 3),  # dinucl. with >= 9 repeats
+             (3, 3),  # trinucl. with >= 6 repeats
+             (4, 3),  # tetranucl. with >= 5 repeats
+             (5, 3),  # pentanucl. with >= 5 repeats
+             (6, 3)]  # hexanucl. with >= 6 repeats
+    ssrs = find_ssrs(seq_str, specs)
+    motif_count = sum_up_ssrs_motifs(ssrs)
+    motif_percent = {k: 100 * v * len(k) / len(seq_str) for k, v in motif_count.items()}
+    desc = ""
+    # iterate over sorted motifs by percent
+    for motif, percent in sorted(motif_percent.items(),
+                                 key=lambda x: x[1], reverse=True):
+        desc += F"{motif}({percent:.2f})%, "
+    # remove_last_comma
+    return desc[:-2]
+
+
 
 def single_sequence_ssrs_proportion(ssrs):
     """
@@ -1090,3 +1209,10 @@ def save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer):
         save_fasta_dict_to_file(cons_cls[cluster_id], f)
         f = os.path.join(consensus_dir, cluster_id + "_dimers.fasta")
         save_fasta_dict_to_file(cons_cls_dimer[cluster_id], f)
+
+def run_cmd(cmd):
+    try:
+        subprocess.run(cmd, shell=True, check=True)
+    except subprocess.CalledProcessError as e:
+        return [cmd, 'error']
+    return [cmd, 'ok']
