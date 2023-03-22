@@ -136,9 +136,11 @@ options:
 ## Example for full pipeline
 
 ```bash
-TideCluster.py -c 40 tidehunter -pr cen6_sat -f CEN6_ver_220406.fasta -T "-p 40 -P 3000 -c 5 -e 0.25"
+TideCluster.py -c 40 tidehunter -pr cen6_sat -f CEN6_ver_220406.fasta 
 TideCluster.py -c 40 clustering -pr cen6_sat -f CEN6_ver_220406.fasta
 TideCluster.py -c 40 annotation -pr cen6_sat -l library.fasta
+TideCluster.py -c 40 tarean -pr cen6_sat -f CEN6_ver_220406.fasta 
+
 
 
 ```
