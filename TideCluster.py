@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Wrapper of TideHunter
-input is a fasta file of DNA sequences
-output is a table of detected tandem repeats by tidehunter
+Input is a fasta file of DNA sequences
+Output is a table of detected tandem repeats by tidehunter
 this wrapper split DNA sequence to chunks, run tidehunter on each chunk and merge results
 coordinates in the table must be recalculated to the original sequence
 
@@ -11,20 +11,8 @@ import os
 import subprocess
 import sys
 from multiprocessing import Pool
-
 import tc_utils as tc
 import argparse
-from tc_utils import run_tidehunter, TideHunterFeature
-from tc_utils import gff3_to_fasta, find_cluster_by_mmseqs2
-from tc_utils import find_clusters_by_blast_connected_component
-from tc_utils import get_cluster_size, add_cluster_info_to_gff3
-from tc_utils import merge_overlapping_gff3_intervals
-from tc_utils import save_consensus_files, filter_gff_by_length
-from tc_utils import read_fasta_sequence_size, get_repeatmasker_annotation
-from tc_utils import add_attribute_to_gff, read_single_fasta_to_dictionary
-from tc_utils import extract_sequences_from_gff3
-from tc_utils import group_sequences_by_orientation, save_fasta_dict_to_file
-from tc_utils import reverse_complement
 
 # minimal python version is 3.6
 assert sys.version_info >= (3, 6), "Python 3.6 or newer is required"
@@ -39,6 +27,7 @@ def tarean(prefix, gff, fasta=None, cpu=4):
     :param cpu: number of cpu cores to use
     :return:
     """
+    script_path = os.path.dirname(os.path.realpath(__file__))
     if gff is None:
         # use preferentially gff3 file with annotation
         if os.path.exists(prefix + "_annotation.gff3"):
@@ -61,7 +50,7 @@ def tarean(prefix, gff, fasta=None, cpu=4):
     if not os.path.exists(tarean_dir_fasta):
         os.mkdir(tarean_dir_fasta)
 
-    fasta_dict = extract_sequences_from_gff3(gff, fasta, tarean_dir_fasta)
+    fasta_dict = tc.extract_sequences_from_gff3(gff, fasta, tarean_dir_fasta)
     l_debug = 0
     cmd_list = []
     print("preparaing sequence for TAREAN")
@@ -69,18 +58,18 @@ def tarean(prefix, gff, fasta=None, cpu=4):
         l_debug += 1
         v_basename = os.path.basename(v)
         with open(v, "r") as f:
-            seqs = read_single_fasta_to_dictionary(f)
+            seqs = tc.read_single_fasta_to_dictionary(f)
         # does seqs contain only one sequence?
         if len(seqs) > 1:
             # more than one sequence in fasta file, set orientation
-            seqs2 = group_sequences_by_orientation(seqs, k=8)
+            seqs2 = tc.group_sequences_by_orientation(seqs, k=8)
             for id in seqs:
                 if id in seqs2['reverse']:
-                    seqs[id] = reverse_complement(seqs[id])
+                    seqs[id] = tc.reverse_complement(seqs[id])
         # save oriented sequences to file
-        save_fasta_dict_to_file(seqs, v)
+        tc.save_fasta_dict_to_file(seqs, v)
         # get current script path
-        script_path = os.path.dirname(os.path.realpath(__file__))
+
         tarean_out = F"{tarean_dir}/{v_basename}_tarean"
         cmd = F"{script_path}/tarean/tarean.R -i {v} -s 0 -n {1} -o {tarean_out}"
         cmd_list.append(cmd)
@@ -109,11 +98,9 @@ def tarean(prefix, gff, fasta=None, cpu=4):
         for k, v in SSR.items():
             f.write(F"{k}\t{v}\n")
 
-
-
     # final report:
     cmd = (F"{script_path}/tarean/tarean_report.R -i {tarean_dir} -o"
-           F" {prefix}_tarean_report")
+           F" {prefix}_tarean_report -g {gff}")
     print("Making final report")
     tc.run_cmd(cmd)
 
@@ -149,7 +136,7 @@ def annotation(prefix, library, gff=None, consensus_dir=None, cpu=1):
                 with open(consensus_file, "r") as f_in:
                     for line in f_in:
                         f.write(line)
-    seq_lengths = read_fasta_sequence_size(consensus_files_concat)
+    seq_lengths = tc.read_fasta_sequence_size(consensus_files_concat)
     # run RepeatMasker on concatenated consensus sequences
     cmd = (F"RepeatMasker -pa {cpu} -lib {library} -e ncbi -s -no_is -norna "
            F"-nolow "
@@ -158,15 +145,15 @@ def annotation(prefix, library, gff=None, consensus_dir=None, cpu=1):
 
     rm_file = F"{consensus_files_concat}.out"
     # parse RepeatMasker output
-    rm_annotation = get_repeatmasker_annotation(rm_file, seq_lengths, prefix)
+    rm_annotation = tc.get_repeatmasker_annotation(rm_file, seq_lengths, prefix)
     # add annotation to gff3 file, only if gff3 file exists
     if os.path.exists(gff):
-        add_attribute_to_gff(gff, gff_out, "Name", "Annotation", rm_annotation)
+        tc.add_attribute_to_gff(gff, gff_out, "Name", "Annotation", rm_annotation)
     else:
         print(F"gff3 file {gff} does not exist, no annotation added to gff3 file")
 
 
-def clustering(fasta, prefix, gff3=None, min_length=None, dust=False, cpu=4):
+def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
     """
     Run clustering on sequences defined in gff3 file and fasta file
     produce gff3 file with cluster information
@@ -182,13 +169,13 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=False, cpu=4):
     if gff3 is None:
         gff3 = prefix + "_tidehunter.gff3"
     if min_length is not None:
-        gff3 = filter_gff_by_length(gff3, min_length=min_length)
+        gff3 = tc.filter_gff_by_length(gff3, min_length=min_length)
     gff3_out = prefix + "_clustering.gff3"
 
     # get consensus sequences for clustering
     consensus = {}
     consensus_dimers = {}
-    for seq_id, seq, cons in gff3_to_fasta(gff3, fasta, "Consensus_sequence"):
+    for seq_id, seq, cons in tc.gff3_to_fasta(gff3, fasta, "Consensus_sequence"):
         mult = round(1 + 10000 / len(cons))
         consensus[seq_id] = cons * mult
         consensus_dimers[seq_id] = cons * 4
@@ -211,12 +198,12 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=False, cpu=4):
         ssrs_description[k] = tc.get_ssrs_description(fdimer)
 
     # first round of clustering by mmseqs2
-    clusters1 = find_cluster_by_mmseqs2(consensus, cpu=cpu)
+    clusters1 = tc.find_cluster_by_mmseqs2(consensus, cpu=cpu)
 
     representative_id = set(clusters1.values())
     consensus_representative = {k: consensus_dimers[k] for k in representative_id}
     # second round of clustering by blastn
-    clusters2 = find_clusters_by_blast_connected_component(
+    clusters2 = tc.find_clusters_by_blast_connected_component(
         consensus_representative, dust=dust, cpu=cpu
         )
     # combine clusters
@@ -235,7 +222,7 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=False, cpu=4):
         clusters1[k] = k
 
     # get total size of each cluster, store in dict
-    cluster_size = get_cluster_size(gff3, clusters_final)
+    cluster_size = tc.get_cluster_size(gff3, clusters_final)
 
     # representative id sorted by cluster size
     representative_id = sorted(cluster_size, key=cluster_size.get, reverse=True)
@@ -256,31 +243,31 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=False, cpu=4):
     for k, v in ssrs_description.items():
         ssrs_description_final[cluster_names[k]] = v
 
-    cons_cls, cons_cls_dimer = add_cluster_info_to_gff3(gff3, gff3_out, clusters_final)
+    cons_cls, cons_cls_dimer = tc.add_cluster_info_to_gff3(gff3, gff3_out, clusters_final)
 
-    merge_overlapping_gff3_intervals(gff3_out, gff3_out)
+    tc.merge_overlapping_gff3_intervals(gff3_out, gff3_out)
 
     gff_tmp = gff3_out + "_tmp"
 
-    add_attribute_to_gff(gff3_out, gff_tmp, "Name", "repeat_type", ssrs_info)
+    tc.add_attribute_to_gff(gff3_out, gff_tmp, "Name", "repeat_type", ssrs_info)
     os.rename(gff_tmp, gff3_out)
-    add_attribute_to_gff(gff3_out, gff_tmp, "Name", "SSR", ssrs_description_final)
+    tc.add_attribute_to_gff(gff3_out, gff_tmp, "Name", "SSR", ssrs_description_final)
     os.rename(gff_tmp, gff3_out)
 
 
     # save also first round of clustering for debugging
-    cons_cls1, cons_cls_dimer1_ = add_cluster_info_to_gff3(
+    cons_cls1, cons_cls_dimer1_ = tc.add_cluster_info_to_gff3(
         gff3, gff3_out + "_1.gff3", clusters1
         )
-    merge_overlapping_gff3_intervals(gff3_out + "_1.gff3", gff3_out + "_1.gff3")
+    tc.merge_overlapping_gff3_intervals(gff3_out + "_1.gff3", gff3_out + "_1.gff3")
 
     # for debugging
     # write consensus sequences by clusters to directory
     #  used gff3_out as base name for directory
     consensus_dir = prefix + "_consensus"
-    save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer)
+    tc.save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer)
     consensus_dir = prefix + "_consensus_1"
-    save_consensus_files(consensus_dir, cons_cls1, cons_cls_dimer1_)
+    tc.save_consensus_files(consensus_dir, cons_cls1, cons_cls_dimer1_)
 
 
 def tidehunter(fasta, tidehunter_arguments, prefix, cpu=4):
@@ -308,7 +295,7 @@ def tidehunter(fasta, tidehunter_arguments, prefix, cpu=4):
     fasta_file_chunked, matching_table = tc.split_fasta_to_chunks(
         fasta, chunk_size, overlap
         )
-    results = run_tidehunter(
+    results = tc.run_tidehunter(
         fasta_file_chunked, tidehunter_arguments
         )
     with open(output, "w") as out:
@@ -319,7 +306,7 @@ def tidehunter(fasta, tidehunter_arguments, prefix, cpu=4):
             for line in f:
                 if line.startswith("#"):
                     continue
-                feature = TideHunterFeature(line)
+                feature = tc.TideHunterFeature(line)
                 # TideHunter is also returning sequences of NNN - to not include them
                 # in the output
                 if feature.consensus == "N" * feature.cons_length:
@@ -385,8 +372,8 @@ if __name__ == "__main__":
         required=False, default=None
         )
     parser_clustering.add_argument(
-        '-d', '--dust', required=False, default=False, action='store_true',
-        help='Use dust filter in blastn when clustering'
+        '-nd', '--no_dust', required=False, default=False, action='store_true',
+        help='Do not use dust filter in blastn when clustering'
         )
 
     # Annotation
@@ -419,21 +406,27 @@ if __name__ == "__main__":
         'tarean', help='Run TAREAN on custers to extract representative sequences'
         )
     parser_tarean.add_argument(
-        "-g", "--gff", help="Base name used for input and output files from ",
+        "-g", "--gff", help=("gff output file from annotation or clustering step"
+                             "If not provided the file named 'prefix_annotation.gff3' "
+                             "will be used instead. If 'prefix_annotation.gff3' is not "
+                             "found, 'prefix_clustering.gff3' will be used"
+                             ),
         required=False, default=None
         )
     parser_tarean.add_argument(
         "-f", "--fasta", help="Reference fasta", required=True
         )
     parser_tarean.add_argument(
-        "-pr", "--prefix", help="Base name used for input and output files from ",
+        "-pr", "--prefix", help="Base name used for input and output files",
         required=True
         )
 
     parser.description = """Wrapper of TideHunter
     This script enable to run TideHunter on large fasta files in parallel. It splits
-    fasta file into chunks and run TideHunter on each chunk. Then it merges results
-    and clusters similar tandem repeats.
+    fasta file into chunks and run TideHunter on each chunk. Identified tandem repeat 
+    are then clusters, annotated and representative consensus sequences are extracted.
+    
+     
     """
 
     # make epilog, in epilog keep line breaks as preformatted text
@@ -442,18 +435,24 @@ if __name__ == "__main__":
     Example of usage:
     
     # first run tidehunter on fasta file to generate raw gff3 output
-    TideCluster.py tidehunter -f test.fasta -o test.gff3 -T "-p 40 -P 3000 -c 5 -e 0.25 
-    -t 46"
+    TideCluster.py -c 10 tidehunter -f test.fasta -pr prefix 
     
-    # then run clustering on the output to cluster similar tandem repeats
-    TideCluster.py clustering -f test.fasta -g test.gff3 -o test_clustered.gff3
+    # then run clustering on the output from previous step to cluster similar tandem repeats
+    TideCluster.py -c 10 clustering -f test.fasta -pr prefix -d -m 5000
     
+    # then run annotation on the clustered output to annotate clusters with reference
+    # library of tandem repeats in RepeatMasker format
+    TideCluster.py -c 10 annotation -pr prefix -l library.fasta
+    
+    # then run TAREAN on the annotated output to extract representative consensus
+    # and generate html report
+    TideCluster.py -c 10 tarean -f test.fasta -pr prefix
     
     Recommended parameters for TideHunter:
     short monomers: -T "-p 10 -P 39 -c 5 -e 0.25"
-    long monomers: -T "-p 40 -P 3000 -c 5 -e 0.25"
+    long monomers: -T "-p 40 -P 3000 -c 5 -e 0.25" (default)
     
-    For parallel processing include TideHunter -t option. 
+    For parallel processing include -c option before command name. 
     
     For more information about TideHunter parameters see TideHunter manual.
     ''')
@@ -466,7 +465,7 @@ if __name__ == "__main__":
     elif cmd_args.command == "clustering":
         clustering(
             cmd_args.fasta, cmd_args.prefix, cmd_args.gff, cmd_args.min_length,
-            cmd_args.dust, cmd_args.cpu
+            not cmd_args.no_dust, cmd_args.cpu
             )
     elif cmd_args.command == "annotation":
         annotation(

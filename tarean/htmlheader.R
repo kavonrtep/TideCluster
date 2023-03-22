@@ -4,6 +4,12 @@ htmlheader <- "
 		<title> Kmer analysis summary </title>
 		<style>
 		<!--
+		.sticky-header {
+          position: sticky;
+          top: 0;
+          background-color: #f1f1f1;
+          z-index: 100;
+        }
 		table { background:#FFFFFF;
 		border:1px solid gray;
 		border-collapse:collapse;
@@ -14,18 +20,18 @@ htmlheader <- "
 		color:#5C443A;
 		font-weight:bold;
 		font-size:20pt
-		padding:6px 4px 8px 0px;
+		padding:16px 14px 18px 10px;
 		text-align:center;
 		
 		}
 		td, th { color:#363636;
-		padding:.4em;
+		padding:1.4em;
 		}
 		tr { border:1px dotted gray;
 		}
-		thead th, tfoot th { background:#5C443A;
+		thead th, tfoot th { background:#9C443A;
 		color:#FFFFFF;
-		padding:3px 10px 3px 10px;
+		padding:10px 10px 10px 10px;
 		text-align:left;
 		text-transform:uppercase;
 		}

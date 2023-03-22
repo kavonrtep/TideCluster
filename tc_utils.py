@@ -1001,7 +1001,7 @@ def get_ssrs_description(seq_str):
     # iterate over sorted motifs by percent
     for motif, percent in sorted(motif_percent.items(),
                                  key=lambda x: x[1], reverse=True):
-        desc += F"{motif}({percent:.2f})%, "
+        desc += F"{motif} ({percent:.2f}%), "
     # remove_last_comma
     return desc[:-2]
 
