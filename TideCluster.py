@@ -74,7 +74,7 @@ def tarean(prefix, gff, fasta=None, cpu=4):
         cmd = F"{script_path}/tarean/tarean.R -i {v} -s 0 -n {1} -o {tarean_out}"
         cmd_list.append(cmd)
     # run cmd tarean in parallel using multiprocessing module
-    print("running TAREAN in parallel")
+    print("running TAREAN")
     with Pool(cpu) as p:
         total_jobs = len(cmd_list)
         completed_jobs = 0
@@ -198,11 +198,13 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
         ssrs_description[k] = tc.get_ssrs_description(fdimer)
 
     # first round of clustering by mmseqs2
+    print("Clustering by mmseqs2")
     clusters1 = tc.find_cluster_by_mmseqs2(consensus, cpu=cpu)
 
     representative_id = set(clusters1.values())
     consensus_representative = {k: consensus_dimers[k] for k in representative_id}
     # second round of clustering by blastn
+    print("Clustering by BLASTN")
     clusters2 = tc.find_clusters_by_blast_connected_component(
         consensus_representative, dust=dust, cpu=cpu
         )
@@ -346,7 +348,7 @@ if __name__ == "__main__":
         '-T', '--tidehunter_arguments', type=str, nargs="?", required=False,
         default="-p 40 -P 3000 -c 5 -e 0.25",
         help=('additional arguments for TideHunter in quotes'
-              ' default: -p 40 -P 3000 -c 5 -e 0.25')
+              ', default value: %(default)s)'),
         )
 
     # Clustering
@@ -421,6 +423,38 @@ if __name__ == "__main__":
         required=True
         )
 
+    parser_run_all = subparsers.add_parser(
+        'run_all', help='Run all steps of TideCluster'
+        )
+
+    parser_run_all.add_argument(
+        "-f", "--fasta", help="Reference fasta", required=True, type=str
+        )
+    parser_run_all.add_argument(
+        "-pr", "--prefix", help="Base name used for input and output files",
+        required=True, type=str
+        )
+    parser_run_all.add_argument(
+        "-l", "--library", help="Path to library of tandem repeats", required=True,
+        type=str
+        )
+    parser_run_all.add_argument(
+        "-m", "--min_length", help=("Minimum length of tandem repeat"
+                                    " (%(default)s)"), required=False,
+        default=5000, type=int
+        )
+    parser_run_all.add_argument(
+        '-T', '--tidehunter_arguments', type=str, nargs="?", required=False,
+        default="-p 40 -P 3000 -c 5 -e 0.25",
+        help=('additional arguments for TideHunter in quotes'
+                ', default value: %(default)s)'),
+        )
+    parser_run_all.add_argument(
+        "-nd", "--no_dust", help="Do not use dust filter in blastn when clustering",
+        action="store_true", required=False, default=False
+        )
+
+
     parser.description = """Wrapper of TideHunter
     This script enable to run TideHunter on large fasta files in parallel. It splits
     fasta file into chunks and run TideHunter on each chunk. Identified tandem repeat 
@@ -455,6 +489,12 @@ if __name__ == "__main__":
     For parallel processing include -c option before command name. 
     
     For more information about TideHunter parameters see TideHunter manual.
+    
+    Library of tandem repeats for annotation step are sequences in RepeatMasker format
+    where header is in format:
+    
+    >id#clasification
+    
     ''')
 
     cmd_args = parser.parse_args()
@@ -476,6 +516,17 @@ if __name__ == "__main__":
         tarean(
             cmd_args.prefix, cmd_args.gff, cmd_args.fasta, cmd_args.cpu
             )
+    elif cmd_args.command == "run_all":
+        tidehunter(
+            cmd_args.fasta, cmd_args.tidehunter_arguments, cmd_args.prefix, cmd_args.cpu
+            )
+        clustering(cmd_args.fasta, cmd_args.prefix, None, cmd_args.min_length,
+                     not cmd_args.no_dust, cmd_args.cpu)
+        annotation(cmd_args.prefix, cmd_args.library, None, None, cmd_args.cpu)
+        tarean(cmd_args.prefix, None, cmd_args.fasta, cmd_args.cpu)
+
+
+
     else:
         parser.print_help()
         sys.exit(1)

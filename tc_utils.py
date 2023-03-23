@@ -309,10 +309,10 @@ def get_repeatmasker_annotation(rm_file, seq_lengths, prefix):
                 p = round(annot_summary[trc_id][v], 3)
                 if i > 0:
                     # round to 2 decimal places
-                    annot_description[trc_id] += F", {v} ({p})"
+                    annot_description[trc_id] += F", {v} ({round(p * 100,1)}%)"
                     f.write(F"\t{v}\t{annot_summary[trc_id][v]}")
                 else:
-                    annot_description[trc_id] = F"{v} ({p})"
+                    annot_description[trc_id] = F"{v} ({round(p*100,1)}%)"
                     f.write(F"{trc_id}\t{v}\t{annot_summary[trc_id][v]}")
             f.write("\n")
     print("Annotation exported to: " + annot_table)
@@ -689,7 +689,7 @@ def find_cluster_by_mmseqs2(sequences, cpu=4):
     save_fasta_dict_to_file(sequences, input_fasta_file.name)
 
     cmd = (F'mmseqs easy-cluster {input_fasta_file.name} {input_fasta_file.name}.clu'
-           F' {tmp_dir} --cluster-mode 0 '
+           F' {tmp_dir} --cluster-mode 0 -v 1 '
            F'--mask 0  -s 1 --threads {cpu}')
     subprocess.check_call(cmd, shell=True)
 
@@ -847,7 +847,7 @@ def run_blastn(sequences, dust = False, cpu=4):
     save_fasta_dict_to_file(sequences, fasta_file)
     # make blast database
     cmd = F"makeblastdb -in {tmp_dir}/seqs.fasta -dbtype nucl"
-    subprocess.check_call(cmd, shell=True)
+    subprocess.check_call(cmd, shell=True, stdout=subprocess.DEVNULL)
     # blast parameters:
     dust = "yes" if dust else "no"
     outfmt = "'6 qseqid sseqid pident length evalue bitscore qlen slen'"
@@ -1211,8 +1211,14 @@ def save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer):
         save_fasta_dict_to_file(cons_cls_dimer[cluster_id], f)
 
 def run_cmd(cmd):
+    msg = ""
     try:
-        subprocess.run(cmd, shell=True, check=True)
+        # run command and capture waring and error messages
+        # if command fails, print error message and return error
+        p = subprocess.run(cmd, shell=True, check=True, stderr=subprocess.PIPE)
+        if p.stderr:
+            msg = p.stderr.decode('utf-8')
     except subprocess.CalledProcessError as e:
+        print(msg)
         return [cmd, 'error']
     return [cmd, 'ok']

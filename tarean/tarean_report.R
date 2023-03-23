@@ -17,10 +17,7 @@ read_gff3 <- function(file_path) {
   gff3_data <- read.table(file_path, header = FALSE, sep = "\t", stringsAsFactors = FALSE, comment.char = "#", quote = "", na.strings = ".", col.names = c("seqid", "source", "type", "start", "end", "score", "strand", "phase", "attributes"))
 
   # Process attributes
-  attr_list <- sapply(gff3_data$attributes, process_attributes)
-
-  list_to_dataframe(attr_list)
-
+  attr_list <- lapply(gff3_data$attributes, process_attributes)
   gff3_data$attributes <- list_to_dataframe(attr_list)
   return(gff3_data)
 }
@@ -70,6 +67,12 @@ file.arg.name <- "--file="
 
 # tarean dir is in format TCR_INDEX.fasta_tarean
 tarean_dirs <- dir(args$input_dir, full.names = FALSE, pattern = "_tarean")
+# sort by INDEX
+INDEX <- as.numeric(gsub("TRC_", "",
+                         gsub("[.]fasta_tarean",
+                              "", tarean_dirs)))
+tarean_dirs <- tarean_dirs[order(INDEX)]
+
 input_dir_base <- basename(args$input_dir)
 INDEX <-  numeric()
 kmer <-  numeric()
@@ -81,6 +84,7 @@ graph_link <- character()
 logo_link <- character()
 n_gap50 <- numeric()
 consensus <- character()
+
 
 for (i in seq_along(tarean_dirs)) {
   td_full <- paste0(args$input_dir, "/", tarean_dirs[i])
@@ -137,6 +141,10 @@ minmedmax <- paste0("min:    ",summary_df$min_array_length,"<br>",
                                 "max:    ", summary_df$median_array_length)
 summary_df$size_of_arrays <- minmedmax
 summary_df$Consensus <- consensus
+summary_df$Annotation <- sapply(summary_df$TRC, function(x) {
+  unique(gff[gff$attributes$Name == x, ]$attributes$Annotation)
+})
+
 
 Total_size <- sapply(summary_df$TRC, function(x) {
   sum(gff[gff$attributes$Name == x, ]$end - gff[gff$attributes$Name == x, ]$start)
@@ -146,8 +154,6 @@ summary_df$Total_size <-  Total_size
 
 
 summary_df$TRC_with_link <- paste0("<a href='", input_dir_base, "/TRC_", summary_df$INDEX, ".fasta_tarean/report.html'>", summary_df$TRC, "</a>")
-write.table(summary_df, file = "summary_table.csv", sep = "\t",
-            row.names = FALSE, quote = FALSE)
 
 # get current script path
 script.name <- sub(file.arg.name, "",
@@ -163,6 +169,7 @@ include_cols <- c("TRC_with_link"="TRC",
                   "total_score" = "Score",
                   "Total_size" = "Total size",
                   "SSRs" = "SSRs",
+                  "Annotation" = "Annotation",
                   "number_of_arrays" = "Number of arrays",
                   "size_of_arrays" = "Size of arrays",
                   "Consensus" = "Consensus",
@@ -174,7 +181,12 @@ summary_df_out <- summary_df[, names(include_cols)]
 names(summary_df_out) <- include_cols[names(summary_df_out)]
 
 html_out <- paste0(args$output, ".html")
+csv_out <- paste0(args$output, ".csv")
 cat(htmlheader, file = html_out)
 HTML(summary_df_out, file = html_out, title = "TAREAN report",
        caption = "TAREAN report", row.names = FALSE, classfirstline="sticky-header")
 HTMLEndFile(file = html_out)
+save.image(file = paste0("test.RData"))
+write.table(apply(summary_df, 2, as.character),
+            file = csv_out, sep = "\t",
+            row.names = FALSE, quote = FALSE)
