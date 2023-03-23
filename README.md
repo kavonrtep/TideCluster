@@ -8,7 +8,25 @@ TideCluster run in four steps:
 3. Annotation step - Annotation step is performed using reference library of tandem repeats. Representative consensus sequences as reported by TideHunter are annotated using RepeatMasker and resulting annotaton for each tandem repeat is added to GFF3 file.
 4. TAREAN step - Tandem Repeat Analyzer is used on origin sequences from reference and consensus sequences are estimated using k-mer based approach. This steps also generate HTML summary.
 
-# Usage
+## Installation
+
+TideCluster is available on Anaconda repository. To install TideCluster run we recomend to install it using [Mamba](https://github.com/mamba-org/mamba) an extremely fast replacement for the Conda package manager
+
+In case you do not have Mamba installed, you can install it using conda to you base environment:
+
+```bash
+conda install -n base -c conda-forge mamba
+```
+
+Then install TideCluster using Mamba:
+    
+```bash
+mamba create -n tidecluster -c conda-forge -c bioconda -c petrnovak tidecluster
+```
+
+```bash
+
+## Usage
 
 ```help
 

@@ -26,7 +26,12 @@ kmers2graph <- function(kmers, mode = "strong", prop = NULL) {
   kme <- data.frame(kmer = substring(kmers$name, 2), ide = 1:nrow(kmers), stringsAsFactors = FALSE)
 
   ## df = merge(kms,kme, by = 'kmer',all=FALSE)[,c(2,3,1)]
-  df <- inner_join(kme, kms, by = 'kmer', multiple='all')[, c(2, 3)]
+  if (packageVersion('dplyr') > '1.1.0') {
+    df <- inner_join(kme, kms, by = 'kmer', multiple='all', relationship = "many-to-many")[, c(2, 3)]
+  } else {
+    df <- inner_join(kme, kms, by = 'kmer', multiple='all')[, c(2, 3)]
+  }
+
   gm_mean <- function(x, na.rm = TRUE) {
     exp(sum(log(x[x > 0]), na.rm = na.rm)/length(x))
   }
