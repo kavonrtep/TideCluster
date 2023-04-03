@@ -1,12 +1,14 @@
 # TideCluster
 
-TideCluster is wrapper for Tidehunter and is intended for identifying tandem repeats in genome assemblies. 
-It utilizes Tidehunter for tandem repeat detection in smaller overlapping windows, and then clusters these repeats based on similarity using mmseqs2 and NCBI BLAST.
-TideCluster run in four steps:
-1. Tidehunter step - run Tidehunter on fasta file. This step generates GFF3 file with all tandem repeats as detected by Tidehunter. 
-2. Clustering step - Clustering step is performed in two steps, first step is done using mmseqs2 and second step is done using graph based clustering based on all-to-all NCBI-BLAST comparison. GFF3 file from Tidehunter step is updated based on clustering results. 
-3. Annotation step - Annotation step is performed using reference library of tandem repeats. Representative consensus sequences as reported by TideHunter are annotated using RepeatMasker and resulting annotaton for each tandem repeat is added to GFF3 file.
-4. TAREAN step - Tandem Repeat Analyzer is used on origin sequences from reference and consensus sequences are estimated using k-mer based approach. This steps also generate HTML summary.
+TideCluster is a software tool designed to identify tandem repeats in genome assemblies by utilizing Tidehunter for tandem repeat detection in smaller overlapping windows and clustering these repeats based on similarity using mmseqs2 and NCBI BLAST. The software runs in four steps as outlined below:
+
+Tidehunter Step - In this first step, Tidehunter is run on a fasta file. This generates a GFF3 file that contains all the detected tandem repeats.
+
+Clustering Step - This step is divided into two parts. Firstly, mmseqs2 is used to cluster the repeats, and then graph-based clustering is performed based on all-to-all NCBI-BLAST comparison. The GFF3 file from the Tidehunter step is updated based on the clustering results.
+
+Annotation Step - The annotation step uses a reference library of tandem repeats. The representative consensus sequences, as reported by TideHunter, are annotated using RepeatMasker. The resulting annotation for each tandem repeat is added to the GFF3 file.
+
+TAREAN Step - In this final step, the Tandem Repeat Analyzer is used to estimate consensus sequences using a k-mer-based approach on origin sequences from the reference. This step also generates an HTML summary.
 
 ## Installation
 
@@ -30,7 +32,7 @@ mamba create -n tidecluster -c conda-forge -c bioconda -c petrnovak tidecluster
 
 ```help
 
-usage: TideCluster.py [-h] [-c CPU] {tidehunter,clustering,annotation,tarean} ...
+usage: TideCluster.py [-h] [-c CPU] {tidehunter,clustering,annotation,tarean,run_all} ...
 
 Wrapper of TideHunter
     This script enable to run TideHunter on large fasta files in parallel. It splits
@@ -41,12 +43,14 @@ Wrapper of TideHunter
     
 
 positional arguments:
-  {tidehunter,clustering,annotation,tarean}
+  {tidehunter,clustering,annotation,tarean,run_all}
                         TideHunter wrapper
     tidehunter          Run wrapper of TideHunter
     clustering          Run clustering on TideHunter output
-    annotation          Run annotation on TideHunter output using reference library of tandem repeats
+    annotation          Run annotation on TideHunter output using reference library of
+                        tandem repeats
     tarean              Run TAREAN on custers to extract representative sequences
+    run_all             Run all steps of TideCluster
 
 options:
   -h, --help            show this help message and exit
@@ -75,29 +79,34 @@ options:
     For parallel processing include -c option before command name. 
     
     For more information about TideHunter parameters see TideHunter manual.
+    
+    Library of tandem repeats for annotation step are sequences in RepeatMasker format
+    where header is in format:
+    
+    >id#clasification
 
 ```
 
 ## TideHunter step
 
 ```help
-usage: TideCluster.py clustering [-h] -f FASTA [-m MIN_LENGTH] -pr PREFIX [-g GFF]
+usage: TideCluster.py tidehunter [-h] -f FASTA -pr PREFIX [-T [TIDEHUNTER_ARGUMENTS]]
 
 options:
   -h, --help            show this help message and exit
   -f FASTA, --fasta FASTA
-                        Reference fasta
-  -m MIN_LENGTH, --min_length MIN_LENGTH
-                        Minimum length of tandem repeat
+                        Path to reference sequence in fasta format
   -pr PREFIX, --prefix PREFIX
-                        Base name used for input and output files from
-  -g GFF, --gff GFF     gff output file from tidehunter ster. If not provided the file named 'prefix_tidehunter.gff3' will be used
+                        Base name for output files
+  -T [TIDEHUNTER_ARGUMENTS], --tidehunter_arguments [TIDEHUNTER_ARGUMENTS]
+                        additional arguments for TideHunter in quotes, default value: -p
+                        40 -P 3000 -c 5 -e 0.25)
+
 ```
 
 ## Clustering step
 
 ```help
-
 usage: TideCluster.py clustering [-h] -f FASTA [-m MIN_LENGTH] -pr PREFIX [-g GFF] [-nd]
 
 options:
@@ -108,24 +117,27 @@ options:
                         Minimum length of tandem repeat
   -pr PREFIX, --prefix PREFIX
                         Base name used for input and output files from
-  -g GFF, --gff GFF     gff output file from tidehunter ster. If not provided the file named 'prefix_tidehunter.gff3' will be used
+  -g GFF, --gff GFF     gff output file from tidehunter ster. If not provided the file
+                        named 'prefix_tidehunter.gff3' will be used
   -nd, --no_dust        Do not use dust filter in blastn when clustering
-     gff output file from tidehunter ster. If not provided the file named 'prefix_tidehunter.gff3' will be used
 
 ```
 
 ## Annotation step
 
 ```help
-usage: TideCluster.py annotation [-h] -pr PREFIX [-g GFF] [-cd CONSENSUS_DIRECTORY] -l LIBRARY
+usage: TideCluster.py annotation [-h] -pr PREFIX [-g GFF] [-cd CONSENSUS_DIRECTORY] -l
+                                 LIBRARY
 
 options:
   -h, --help            show this help message and exit
   -pr PREFIX, --prefix PREFIX
                         Base name used for input and output files from
-  -g GFF, --gff GFF     gff output file from clustering step. If not provided the file named 'prefix_clustering.gff3' will be used
+  -g GFF, --gff GFF     gff output file from clustering step. If not provided the file
+                        named 'prefix_clustering.gff3' will be used
   -cd CONSENSUS_DIRECTORY, --consensus_directory CONSENSUS_DIRECTORY
-                        Directory with consensus sequences which are to be annotated. If not provided the directory named 'prefix_consensus' will be used
+                        Directory with consensus sequences which are to be annotated. If
+                        not provided the directory named 'prefix_consensus' will be used
   -l LIBRARY, --library LIBRARY
                         Path to library of tandem repeats
 
@@ -142,13 +154,37 @@ usage: TideCluster.py tarean [-h] [-g GFF] -f FASTA -pr PREFIX
 
 options:
   -h, --help            show this help message and exit
-  -g GFF, --gff GFF     gff output file from annotation or clustering stepIf not provided the file named 'prefix_annotation.gff3' will be used instead. If
-                        'prefix_annotation.gff3' is not found, 'prefix_clustering.gff3' will be used
+  -g GFF, --gff GFF     gff output file from annotation or clustering stepIf not provided
+                        the file named 'prefix_annotation.gff3' will be used instead. If
+                        'prefix_annotation.gff3' is not found, 'prefix_clustering.gff3'
+                        will be used
   -f FASTA, --fasta FASTA
                         Reference fasta
   -pr PREFIX, --prefix PREFIX
                         Base name used for input and output files
 
+```
+
+## Run all steps
+
+```help
+usage: TideCluster.py run_all [-h] -f FASTA -pr PREFIX -l LIBRARY [-m MIN_LENGTH]
+                              [-T [TIDEHUNTER_ARGUMENTS]] [-nd]
+
+options:
+  -h, --help            show this help message and exit
+  -f FASTA, --fasta FASTA
+                        Reference fasta
+  -pr PREFIX, --prefix PREFIX
+                        Base name used for input and output files
+  -l LIBRARY, --library LIBRARY
+                        Path to library of tandem repeats
+  -m MIN_LENGTH, --min_length MIN_LENGTH
+                        Minimum length of tandem repeat (5000)
+  -T [TIDEHUNTER_ARGUMENTS], --tidehunter_arguments [TIDEHUNTER_ARGUMENTS]
+                        additional arguments for TideHunter in quotes, default value: -p
+                        40 -P 3000 -c 5 -e 0.25)
+  -nd, --no_dust        Do not use dust filter in blastn when clustering
 ```
 
 ## Example for full pipeline
@@ -158,9 +194,6 @@ TideCluster.py -c 40 tidehunter -pr cen6_sat -f CEN6_ver_220406.fasta
 TideCluster.py -c 40 clustering -pr cen6_sat -f CEN6_ver_220406.fasta
 TideCluster.py -c 40 annotation -pr cen6_sat -l library.fasta
 TideCluster.py -c 40 tarean -pr cen6_sat -f CEN6_ver_220406.fasta 
-
-
-
 ```
 
 ## Credits
