@@ -8,7 +8,6 @@ r-optparse
 r-igraph
 bioconductor-biostrings
 r-scales
-r-stringr
 r-hwriter
 r-r2html
 r-plyr

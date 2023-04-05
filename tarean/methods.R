@@ -4,7 +4,6 @@ suppressPackageStartupMessages(library(igraph))
 suppressPackageStartupMessages(library(parallel))
 suppressPackageStartupMessages(library(Biostrings))
 suppressPackageStartupMessages(library(scales))
-suppressPackageStartupMessages(library(stringr))
 suppressPackageStartupMessages(library(hwriter))
 suppressPackageStartupMessages(library(R2HTML))
 suppressPackageStartupMessages(library(plyr))
@@ -386,10 +385,28 @@ calculate_consensus_matrix <- function(aln, tr_paths, G) {
   return(t(CM)[, 1:5])
 }
 
+str_locate_all_base <- function(string, pattern) {
+  # this is replacement of str_locate_all from stringr package
+  # there are problems with stringr package installed using mamba..
+  matches <- gregexpr(pattern, string)
+  start_positions <- unlist(matches)
+
+  if (any(start_positions != -1)) {
+    # remove matches that start at -1
+    remove <- which(start_positions == -1)
+    start <- start_positions[-remove]
+    matches <- matches[-remove]
+    end <- start_positions + nchar(pattern) - 1
+    locations <- cbind(start, end)
+    return(locations)
+  } else {
+    return(matrix(integer(0), ncol = 2))
+  }
+}
 
 get_gaps_from_alignment <- function(aln) {
   as.character(aln)
-  gaps_positions <- unique(do.call(rbind, str_locate_all(as.character(aln), "-+")))
+  gaps_positions <- unique(str_locate_all_base(as.character(aln), "-+"))
   return(gaps_positions)
 }
 

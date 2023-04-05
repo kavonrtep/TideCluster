@@ -254,12 +254,15 @@ def get_repeatmasker_annotation(rm_file, seq_lengths, prefix):
     :param prefix:
     :return:
     """
-
     seq_rm_info = {}
     with open(rm_file, 'r') as f:
         # parse repeatmasker output, first three lines are header
         for i in range(3):
-            next(f)
+            # file could be empty!
+            try:
+                next(f)
+            except StopIteration:
+                return {}
         for line in f:
             rm_feature = RepeatMaskerFeature(line)
             if rm_feature.seqid not in seq_rm_info:
@@ -684,6 +687,10 @@ def find_cluster_by_mmseqs2(sequences, cpu=4):
     :param sequences:
     :return: clusters
     """
+    if len(sequences) == 0:
+        return {}
+    print("Clustering by mmseqs2")
+
     tmp_dir = tempfile.mkdtemp()
     input_fasta_file = tempfile.NamedTemporaryFile(mode='w', delete=False)
     save_fasta_dict_to_file(sequences, input_fasta_file.name)
@@ -1032,6 +1039,9 @@ def find_clusters_by_blast_connected_component(consensus_representative, dust=Fa
     :param consensus_representative:
     :return: clusters
     """
+    if len(consensus_representative) == 0:
+        return {}
+    print("Clustering by BLASTN")
     pairs = run_blastn(consensus_representative, dust=dust, cpu=cpu)
     # graph = make_graph(pairs)
     # components = find_connected_components(graph)
@@ -1211,14 +1221,11 @@ def save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer):
         save_fasta_dict_to_file(cons_cls_dimer[cluster_id], f)
 
 def run_cmd(cmd):
-    msg = ""
     try:
         # run command and capture waring and error messages
         # if command fails, print error message and return error
-        p = subprocess.run(cmd, shell=True, check=True, stderr=subprocess.PIPE)
-        if p.stderr:
-            msg = p.stderr.decode('utf-8')
+        subprocess.check_call(cmd, shell=True, stderr=subprocess.PIPE)
+        # store stderr in variable
     except subprocess.CalledProcessError as e:
-        print(msg)
         return [cmd, 'error']
     return [cmd, 'ok']

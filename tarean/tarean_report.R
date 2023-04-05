@@ -138,13 +138,16 @@ summary_df$SSRs <- sapply(summary_df$TRC, function(x) {
 
 minmedmax <- paste0("min:    ",summary_df$min_array_length,"<br>",
                                 "median: ",   summary_df$median_array_length, "<br>",
-                                "max:    ", summary_df$median_array_length)
+                                "max:    ", summary_df$max_array_length)
 summary_df$size_of_arrays <- minmedmax
 summary_df$Consensus <- consensus
 summary_df$Annotation <- sapply(summary_df$TRC, function(x) {
-  unique(gff[gff$attributes$Name == x, ]$attributes$Annotation)
+  ann <- unique(gff[gff$attributes$Name == x, ]$attributes$Annotation)
+  if (is.null(ann)){
+    ann <- ""
+  }
+  ann
 })
-
 
 Total_size <- sapply(summary_df$TRC, function(x) {
   sum(gff[gff$attributes$Name == x, ]$end - gff[gff$attributes$Name == x, ]$start)
@@ -181,7 +184,7 @@ summary_df_out <- summary_df[, names(include_cols)]
 names(summary_df_out) <- include_cols[names(summary_df_out)]
 
 html_out <- paste0(args$output, ".html")
-csv_out <- paste0(args$output, ".csv")
+csv_out <- paste0(args$output, ".tsv")
 cat(htmlheader, file = html_out)
 HTML(summary_df_out, file = html_out, title = "TAREAN report",
        caption = "TAREAN report", row.names = FALSE, classfirstline="sticky-header")

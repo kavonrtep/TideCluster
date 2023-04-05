@@ -13,6 +13,7 @@ import sys
 from multiprocessing import Pool
 import tc_utils as tc
 import argparse
+from version import __version__
 
 # minimal python version is 3.6
 assert sys.version_info >= (3, 6), "Python 3.6 or newer is required"
@@ -53,7 +54,7 @@ def tarean(prefix, gff, fasta=None, cpu=4):
     fasta_dict = tc.extract_sequences_from_gff3(gff, fasta, tarean_dir_fasta)
     l_debug = 0
     cmd_list = []
-    print("preparaing sequence for TAREAN")
+    print("preparaing sequences for TAREAN")
     for k, v in fasta_dict.items():
         l_debug += 1
         v_basename = os.path.basename(v)
@@ -165,13 +166,27 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
     :return:
 
     """
+    gff3_out = prefix + "_clustering.gff3"
     fasta = fasta
     if gff3 is None:
         gff3 = prefix + "_tidehunter.gff3"
     if min_length is not None:
+        print('running filtering on gff3 file')
         gff3 = tc.filter_gff_by_length(gff3, min_length=min_length)
-    gff3_out = prefix + "_clustering.gff3"
 
+    # check if gff3 has more than 1 sequence, it is enougp te read
+    # just beginning of the file
+    with open(gff3, "r") as f:
+        count = 0
+        for i in f:
+            if i.startswith("#"):
+                continue
+            count += 1
+            if count > 1:
+                break
+    if count == 0:
+        print("No tandem repeats found in gff3 file after filtering, exiting")
+        exit(0)
     # get consensus sequences for clustering
     consensus = {}
     consensus_dimers = {}
@@ -196,15 +211,15 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
         fdimer = consensus_dimers.pop(k, None)
         # for each ssrs caclulate ssr proportions
         ssrs_description[k] = tc.get_ssrs_description(fdimer)
-
+    if len(consensus) == 0:
+        print("No tandem repeats left after dustmasking, skipping clustering")
     # first round of clustering by mmseqs2
-    print("Clustering by mmseqs2")
     clusters1 = tc.find_cluster_by_mmseqs2(consensus, cpu=cpu)
 
     representative_id = set(clusters1.values())
     consensus_representative = {k: consensus_dimers[k] for k in representative_id}
     # second round of clustering by blastn
-    print("Clustering by BLASTN")
+
     clusters2 = tc.find_clusters_by_blast_connected_component(
         consensus_representative, dust=dust, cpu=cpu
         )
@@ -327,7 +342,8 @@ def tidehunter(fasta, tidehunter_arguments, prefix, cpu=4):
 if __name__ == "__main__":
     # Command line arguments
     parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("-c", "--cpu", type=int, default=4, help="Number of CPUs to use")
+
+    parser.add_argument("-v", "--version", action="version", version=__version__)
 
     subparsers = parser.add_subparsers(dest='command', help='TideHunter wrapper')
 
@@ -350,7 +366,8 @@ if __name__ == "__main__":
         help=('additional arguments for TideHunter in quotes'
               ', default value: %(default)s)'),
         )
-
+    parser_tidehunter.add_argument("-c", "--cpu", type=int, default=4,
+                                   help="Number of CPUs to use")
     # Clustering
     parser_clustering = subparsers.add_parser(
         'clustering', help='Run clustering on TideHunter output'
@@ -360,16 +377,19 @@ if __name__ == "__main__":
         )
 
     parser_clustering.add_argument(
-        "-m", "--min_length", help="Minimum length of tandem repeat", required=False,
-        default=None, type=int
+        "-m", "--min_length", help="Minimum length of tandem repeat, default (%(default)s)",
+        required=False,
+        default=5000, type=int
         )
 
     parser_clustering.add_argument(
-        "-pr", "--prefix", help="Base name used for input and output files from ",
+        "-pr", "--prefix", help=("Prefix is used as a base name for output files."
+                                 "If --gff is not provided, prefix will be also used"
+                                 "to identify GFF file from previous tidehunter step"),
         required=True
         )
     parser_clustering.add_argument(
-        "-g", "--gff", help=("gff output file from tidehunter ster. If not provided "
+        "-g", "--gff", help=("GFF3 output file from tidehunter step. If not provided "
                              "the file named 'prefix_tidehunter.gff3' will be used"),
         required=False, default=None
         )
@@ -377,19 +397,24 @@ if __name__ == "__main__":
         '-nd', '--no_dust', required=False, default=False, action='store_true',
         help='Do not use dust filter in blastn when clustering'
         )
+    parser_clustering.add_argument(
+        "-c", "--cpu", type=int, default=4, help="Number of CPUs to use"
+        )
 
     # Annotation
     parser_annotation = subparsers.add_parser(
-        'annotation', help=('Run annotation on TideHunter output using reference '
-                            'library of tandem repeats')
+        'annotation', help=('Run annotation on output from clustering step'
+                            'using reference library of tandem repeats')
         )
     parser_annotation.add_argument(
-        "-pr", "--prefix", help="Base name used for input and output files from ",
+        "-pr", "--prefix", help=("Prefix is used as a base name for output files."
+                                 "If --gff is not provided, prefix will be also used"
+                                 "to identify GFF3 file from previous clustering step"),
         required=True
         )
 
     parser_annotation.add_argument(
-        "-g", "--gff", help=("gff output file from clustering step. If not provided "
+        "-g", "--gff", help=("GFF3 output file from clustering step. If not provided "
                              "the file named 'prefix_clustering.gff3' will be used"),
         required=False, default=None
         )
@@ -403,12 +428,16 @@ if __name__ == "__main__":
     parser_annotation.add_argument(
         "-l", "--library", help="Path to library of tandem repeats", required=True, )
 
+    parser_annotation.add_argument(
+        "-c", "--cpu", type=int, default=4, help="Number of CPUs to use"
+        )
+
     # tarean
     parser_tarean = subparsers.add_parser(
-        'tarean', help='Run TAREAN on custers to extract representative sequences'
+        'tarean', help='Run TAREAN on clusters to extract representative sequences'
         )
     parser_tarean.add_argument(
-        "-g", "--gff", help=("gff output file from annotation or clustering step"
+        "-g", "--gff", help=("GFF3 output file from annotation or clustering step"
                              "If not provided the file named 'prefix_annotation.gff3' "
                              "will be used instead. If 'prefix_annotation.gff3' is not "
                              "found, 'prefix_clustering.gff3' will be used"
@@ -419,8 +448,14 @@ if __name__ == "__main__":
         "-f", "--fasta", help="Reference fasta", required=True
         )
     parser_tarean.add_argument(
-        "-pr", "--prefix", help="Base name used for input and output files",
+        "-pr", "--prefix", help=("Prefix is used as a base name for output files."
+                                 "If --gff is not provided, prefix will be also used"
+                                 "to identify GFF3 files from previous clustering/"
+                                 "annotation step"),
         required=True
+        )
+    parser_tarean.add_argument(
+        "-c", "--cpu", type=int, default=4, help="Number of CPUs to use"
         )
 
     parser_run_all = subparsers.add_parser(
@@ -435,8 +470,8 @@ if __name__ == "__main__":
         required=True, type=str
         )
     parser_run_all.add_argument(
-        "-l", "--library", help="Path to library of tandem repeats", required=True,
-        type=str
+        "-l", "--library", help="Path to library of tandem repeats", required=False,
+        type=str, default=None
         )
     parser_run_all.add_argument(
         "-m", "--min_length", help=("Minimum length of tandem repeat"
@@ -453,12 +488,14 @@ if __name__ == "__main__":
         "-nd", "--no_dust", help="Do not use dust filter in blastn when clustering",
         action="store_true", required=False, default=False
         )
-
+    parser_run_all.add_argument(
+        "-c", "--cpu", type=int, default=4, help="Number of CPUs to use"
+        )
 
     parser.description = """Wrapper of TideHunter
     This script enable to run TideHunter on large fasta files in parallel. It splits
     fasta file into chunks and run TideHunter on each chunk. Identified tandem repeat 
-    are then clusters, annotated and representative consensus sequences are extracted.
+    are then clustered, annotated and representative consensus sequences are extracted.
     
      
     """
@@ -468,7 +505,7 @@ if __name__ == "__main__":
     parser.epilog = ('''
     Example of usage:
     
-    # first run tidehunter on fasta file to generate raw gff3 output
+    # first run tidehunter on fasta file to generate raw GFF3 output
     TideCluster.py -c 10 tidehunter -f test.fasta -pr prefix 
     
     # then run clustering on the output from previous step to cluster similar tandem repeats
@@ -522,7 +559,8 @@ if __name__ == "__main__":
             )
         clustering(cmd_args.fasta, cmd_args.prefix, None, cmd_args.min_length,
                      not cmd_args.no_dust, cmd_args.cpu)
-        annotation(cmd_args.prefix, cmd_args.library, None, None, cmd_args.cpu)
+        if cmd_args.library:
+            annotation(cmd_args.prefix, cmd_args.library, None, None, cmd_args.cpu)
         tarean(cmd_args.prefix, None, cmd_args.fasta, cmd_args.cpu)
 
 
