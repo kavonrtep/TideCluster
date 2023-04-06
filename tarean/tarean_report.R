@@ -137,7 +137,7 @@ summary_df$SSRs <- sapply(summary_df$TRC, function(x) {
 })
 
 minmedmax <- paste0("min:    ",summary_df$min_array_length,"<br>",
-                                "median: ",   summary_df$median_array_length, "<br>",
+                                "median: ",   round(summary_df$median_array_length), "<br>",
                                 "max:    ", summary_df$max_array_length)
 summary_df$size_of_arrays <- minmedmax
 summary_df$Consensus <- consensus
@@ -189,7 +189,6 @@ cat(htmlheader, file = html_out)
 HTML(summary_df_out, file = html_out, title = "TAREAN report",
        caption = "TAREAN report", row.names = FALSE, classfirstline="sticky-header")
 HTMLEndFile(file = html_out)
-save.image(file = paste0("test.RData"))
 write.table(apply(summary_df, 2, as.character),
             file = csv_out, sep = "\t",
             row.names = FALSE, quote = FALSE)

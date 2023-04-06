@@ -271,7 +271,6 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
     tc.add_attribute_to_gff(gff3_out, gff_tmp, "Name", "SSR", ssrs_description_final)
     os.rename(gff_tmp, gff3_out)
 
-
     # save also first round of clustering for debugging
     cons_cls1, cons_cls_dimer1_ = tc.add_cluster_info_to_gff3(
         gff3, gff3_out + "_1.gff3", clusters1
@@ -377,7 +376,9 @@ if __name__ == "__main__":
         )
 
     parser_clustering.add_argument(
-        "-m", "--min_length", help="Minimum length of tandem repeat, default (%(default)s)",
+        "-m", "--min_length", help="Minimum length of array tandem repeat to be "
+                                   "inlcuded in clustering step. Shorter arrays are "
+                                   "discarded, default (%(default)s)",
         required=False,
         default=5000, type=int
         )

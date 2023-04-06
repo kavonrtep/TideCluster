@@ -226,10 +226,10 @@ plot_multiline_logo <- function(cons.logo, read=NULL, W=50, setpar=TRUE, gaps = 
 plot.logo <- function(pwm, maxh=NULL){
     acgt <- c("A", "C", "G", "T")
     pwm <- pwm[, acgt]
-    nbp <- dim(pwm)[1] + 1
+    nbp <- dim(pwm)[1]
     if (is.null(maxh)) {maxh <- max(rowSums(pwm))}
     
-    plot(0,0,xlim=c(0,nbp),ylim=c(0,maxh),type="n",axes=F,xlab="",ylab="")
+    plot(0,0,xlim=c(0,nbp + 1),ylim=c(0,maxh),type="n",axes=F,xlab="",ylab="")
     for ( i in 1:nbp){
         S <- order(pwm[i,])
         hgts <- pwm[i, S]
