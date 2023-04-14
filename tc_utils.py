@@ -3,6 +3,7 @@ import concurrent.futures
 import os
 import subprocess
 import tempfile
+from collections import OrderedDict
 from itertools import cycle, permutations, combinations
 from shutil import rmtree
 import re
@@ -312,10 +313,10 @@ def get_repeatmasker_annotation(rm_file, seq_lengths, prefix):
                 p = round(annot_summary[trc_id][v], 3)
                 if i > 0:
                     # round to 2 decimal places
-                    annot_description[trc_id] += F", {v} ({round(p * 100,1)}%)"
+                    annot_description[trc_id] += F", {v} ({round(p * 100,1)}%25)"
                     f.write(F"\t{v}\t{annot_summary[trc_id][v]}")
                 else:
-                    annot_description[trc_id] = F"{v} ({round(p*100,1)}%)"
+                    annot_description[trc_id] = F"{v} ({round(p*100,1)}%25)"
                     f.write(F"{trc_id}\t{v}\t{annot_summary[trc_id][v]}")
             f.write("\n")
     print("Annotation exported to: " + annot_table)
@@ -733,11 +734,11 @@ def make_graph(pairs):
     return graph
 
 
-def get_connected_component_clusters(pairs):
+def get_connected_component_clusters(pairs, representative=False):
     """
     find connected components in graph
     :param pairs: list of pairs
-    :return: clusters as list of lists
+    :return: clusters as list of lists or dictionary with representative
     """
     # Create a NetworkX graph from the list of edges
     g = nx.Graph()
@@ -748,8 +749,15 @@ def get_connected_component_clusters(pairs):
 
     # Convert the components to a list of clusters
     clusters = [list(component) for component in components]
-
-    return clusters
+    if representative:
+        clusters_representative = {}
+        for vertices in components:
+            v_representative = sorted(vertices)[0]
+            for v in vertices:
+                clusters_representative[v] = v_representative
+        return clusters_representative
+    else:
+        return clusters
 
 def extract_sequences_from_gff3(gff3_file, fasta_file, output_dir):
     """
@@ -966,7 +974,7 @@ def find_ssrs(sequence, specs=None):
                     'repeats': repeats,
                     'start': start,
                     'end': end,
-                    'seq_length': len(sequence)
+                    'seq_length': len(sequence) - sequence.count('N'),
                     })
     return results
 
@@ -994,6 +1002,26 @@ def sum_up_ssrs_motifs(results):
         else:
             motifs[motif] = i['repeats']
     return motifs
+def get_ssrs_description_multiple(seq_strs):
+    specs = [(2, 3),  # dinucl. with >= 9 repeats
+             (3, 3),  # trinucl. with >= 6 repeats
+             (4, 3),  # tetranucl. with >= 5 repeats
+             (5, 3),  # pentanucl. with >= 5 repeats
+             (6, 3)]  # hexanucl. with >= 6 repeats
+    ssrs = []
+    for seq_str in seq_strs:
+        ssrs += find_ssrs(seq_str, specs)
+    motif_count = sum_up_ssrs_motifs(ssrs)
+    L = sum([len(seq_str) for seq_str in seq_strs])
+    motif_percent = {k: 100 * v * len(k) / L for k, v in motif_count.items()}
+    desc = ""
+    # iterate over sorted motifs by percent
+    for motif, percent in sorted(motif_percent.items(),
+                                 key=lambda x: x[1],
+                                 reverse=True):
+        desc += F"{motif} ({percent:.1f}%), "
+    return desc[:-2]
+
 
 def get_ssrs_description(seq_str):
     specs = [(2, 3),  # dinucl. with >= 9 repeats
@@ -1008,7 +1036,7 @@ def get_ssrs_description(seq_str):
     # iterate over sorted motifs by percent
     for motif, percent in sorted(motif_percent.items(),
                                  key=lambda x: x[1], reverse=True):
-        desc += F"{motif} ({percent:.2f}%), "
+        desc += F"{motif} ({percent:.2f}%25), "
     # remove_last_comma
     return desc[:-2]
 
@@ -1016,7 +1044,7 @@ def get_ssrs_description(seq_str):
 
 def single_sequence_ssrs_proportion(ssrs):
     """
-    calculate proportion of sequence coverad by ssrs
+    calculate proportion of sequence covered by ssrs
     :param ssrs: ssrs is list of dictionaries with ssr information
     :return: ssrs proportion
     """
@@ -1053,6 +1081,7 @@ def find_clusters_by_blast_connected_component(consensus_representative, dust=Fa
             clusters[v] = v_representative
 
     return clusters
+
 
 
 def get_cluster_size(fin, clusters):
@@ -1185,6 +1214,43 @@ def merge_intervals(intervals):
             merged.append((start, end))
     return merged
 
+def filter_gff_remove_duplicates(gff3_file):
+    """
+    Filter gff3 file by removing duplicates, diplicates can have different ID but same
+    name genomic region
+    :param gff3_file:
+    :return: filtered gff3 file path
+    """
+    gff_out = tempfile.NamedTemporaryFile(delete=False).name
+    gff_data = {}
+    with open(gff3_file, 'r') as f1:
+        for line in f1:
+            if line.startswith("#"):
+                continue
+            gff3_feature = Gff3Feature(line)
+            gff_data[gff3_feature.attributes_dict['ID']] = gff3_feature
+    gff_data = OrderedDict(sorted(gff_data.items(), key=lambda t: (t[1].seqid, t[1].start)))
+    duplicated_ids = set()
+    for i, (k1, v1) in enumerate(gff_data.items()):
+        if i == len(gff_data) - 1:
+            break
+        k2, v2 = list(gff_data.items())[i + 1]
+        if v1.seqid == v2.seqid and v1.start == v2.start and v1.end == v2.end:
+            duplicated_ids.add(k1)  # add just one, second will be kept
+    if len(duplicated_ids) > 0:
+        print("Found duplicated IDs in gff3 file, removing duplicates")
+        print("Duplicated IDs: ", duplicated_ids)
+        with open(gff3_file, 'r') as f1, open(gff_out, 'w') as f2:
+            for line in f1:
+                if line.startswith("#"):
+                    f2.write(line)
+                    continue
+                gff3_feature = Gff3Feature(line)
+                if gff3_feature.attributes_dict['ID'] not in duplicated_ids:
+                    f2.write(line)
+        return gff_out
+    else:
+        return gff3_file
 
 def filter_gff_by_length(gff3_file, min_length=1000):
     """
@@ -1203,6 +1269,33 @@ def filter_gff_by_length(gff3_file, min_length=1000):
             if gff3_feature.end - gff3_feature.start > min_length:
                 f2.write(line)
     return gff_out
+
+def get_overlapping_features(gff3_file, ID_list):
+    # limit search to IDs in ID_list
+    gff_data = {}
+    with open(gff3_file, 'r') as f1:
+        for line in f1:
+            if line.startswith("#"):
+                continue
+            gff3_feature = Gff3Feature(line)
+            if gff3_feature.attributes_dict['ID'] in ID_list:
+                gff_data[gff3_feature.attributes_dict['ID']] = gff3_feature
+    gff_data = OrderedDict(sorted(gff_data.items(), key=lambda t: (t[1].seqid, t[1].start)))
+    overlapping_ids = []
+    for i, (k1, v1) in enumerate(gff_data.items()):
+        if i == len(gff_data) - 1:
+            break
+
+        k2, v2 = list(gff_data.items())[i + 1]
+        if v1.seqid == v2.seqid:
+            if v1.start <= v2.start <= v1.end:
+                    overlapping_ids.append((k1, k2))
+                    print(i, k1, k2, v1.start, v1.end, v2.start, v2.end)
+            elif v1.start <= v2.end <= v1.end:
+                    overlapping_ids.append((k1, k2))
+                    print(i, k1, k2, v1.start, v1.end, v2.start, v2.end)
+
+    return overlapping_ids
 
 
 def save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer):

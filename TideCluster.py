@@ -10,6 +10,7 @@ import glob
 import os
 import subprocess
 import sys
+from collections import OrderedDict
 from multiprocessing import Pool
 import tc_utils as tc
 import argparse
@@ -174,7 +175,9 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
         print('running filtering on gff3 file')
         gff3 = tc.filter_gff_by_length(gff3, min_length=min_length)
 
-    # check if gff3 has more than 1 sequence, it is enougp te read
+    # filtering on duplicates in gff3 file
+    gff3 = tc.filter_gff_remove_duplicates(gff3)
+    # check if gff3 has more than 1 sequence, it is enough to read
     # just beginning of the file
     with open(gff3, "r") as f:
         count = 0
@@ -197,6 +200,8 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
         if len(consensus[seq_id]) > 10000:
             consensus[seq_id] = consensus[seq_id][0:10000]
 
+
+
     # run dustmasker first, sequences which are completely masked
     # will not be used in clastering.
     mask_prop = tc.get_ssrs_proportions(consensus_dimers)
@@ -206,11 +211,41 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
     # remove ssrs from consensus sequences, they will be added back later
     # but not used for clustering
     ssrs_description = {}
+    ssrs_seq = {}
+    ssrs_dimers = {}
     for k in ssrs_id:
         consensus.pop(k, None)
         fdimer = consensus_dimers.pop(k, None)
+        ssrs_dimers[k] = fdimer
         # for each ssrs caclulate ssr proportions
         ssrs_description[k] = tc.get_ssrs_description(fdimer)
+        ssrs_seq[k] = " ".join([i.split(" ")[0] for i in  ssrs_description[k].split(
+                "\n")])
+    # find unique ssrs seq
+    ssrs_clusters = {}
+    ssrs_representative = {}
+    for k, ssrs in ssrs_seq.items():
+        if not ssrs in ssrs_representative:
+            ssrs_representative[ssrs] = k
+    print('ssrs_representative', ssrs_representative)
+    for k, ssrs in ssrs_seq.items():
+        ssrs_clusters[k] = ssrs_representative[ssrs]
+    for k, v in ssrs_clusters.items():
+        print(v, k, ssrs_seq[k], ssrs_description[k])
+
+    # recalculate description for each ssrs_cluster
+    dimers_ssrs_clusters = {}
+    for id, repre_id in ssrs_clusters.items():
+        if not repre_id in dimers_ssrs_clusters:
+            dimers_ssrs_clusters[repre_id] = []
+        dimers_ssrs_clusters[repre_id].append(ssrs_dimers[id])
+
+    # recalculating ssrs description
+    ssrs_cluster_description = {}
+    for k, v in dimers_ssrs_clusters.items():
+        ssrs_cluster_description[k] = tc.get_ssrs_description_multiple(v)
+
+
     if len(consensus) == 0:
         print("No tandem repeats left after dustmasking, skipping clustering")
     # first round of clustering by mmseqs2
@@ -235,9 +270,9 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
     # add ssrs_id back to clusters_final
     # and also to clusters1 - these are saved as well
     for k in ssrs_id:
-        clusters_final[k] = k
+        clusters_final[k] = ssrs_clusters[k]
         clusters1[k] = k
-
+    print(clusters_final)
     # get total size of each cluster, store in dict
     cluster_size = tc.get_cluster_size(gff3, clusters_final)
 
@@ -257,7 +292,7 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
             ssrs_info[cluster_names[v]] = "TR"
     #
     ssrs_description_final = {} # with TRC names
-    for k, v in ssrs_description.items():
+    for k, v in ssrs_cluster_description.items():
         ssrs_description_final[cluster_names[k]] = v
 
     cons_cls, cons_cls_dimer = tc.add_cluster_info_to_gff3(gff3, gff3_out, clusters_final)
