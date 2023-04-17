@@ -590,9 +590,9 @@ class TideHunterFeature:
         """
         columns = [self.seq_name, "TideHunter", "repeat_region", self.start, self.end,
                    self.aver_match, ".", "."]
-        attributes = {"ID": self.repeat_ID, "Consensus_sequence": self.consensus,
-                      "Consensus_length": self.cons_length,
-                      "Copy_number": self.copy_numer, "Average_match": self.aver_match}
+        attributes = {"ID": self.repeat_ID, "consensus_sequence": self.consensus,
+                      "consensus_length": self.cons_length,
+                      "copy_number": self.copy_numer, "cverage_match": self.aver_match}
 
         # put attributes in the right order and format, some are floats or ints - must be
         # converted to string
@@ -1019,7 +1019,7 @@ def get_ssrs_description_multiple(seq_strs):
     for motif, percent in sorted(motif_percent.items(),
                                  key=lambda x: x[1],
                                  reverse=True):
-        desc += F"{motif} ({percent:.1f}%), "
+        desc += F"{motif} ({percent:.1f}%25), "
     return desc[:-2]
 
 
@@ -1148,7 +1148,7 @@ def add_cluster_info_to_gff3(fin, fout, clusters):
             unique_id = cluster_id + "_" + gff3_feature.attributes_dict['ID']
             gff3_feature.attributes_dict['ID'] = unique_id
             # add consensus sequence to dictionary of dictionaries
-            consensus = gff3_feature.attributes_dict['Consensus_sequence']
+            consensus = gff3_feature.attributes_dict['consensus_sequence']
             if cluster_id not in consensus_clusters:
                 consensus_clusters[cluster_id] = {}
                 consensus_clusters_dimers[cluster_id] = {}
@@ -1217,7 +1217,7 @@ def merge_intervals(intervals):
 def filter_gff_remove_duplicates(gff3_file):
     """
     Filter gff3 file by removing duplicates, diplicates can have different ID but same
-    name genomic region
+    exactly genomic region
     :param gff3_file:
     :return: filtered gff3 file path
     """
@@ -1238,8 +1238,6 @@ def filter_gff_remove_duplicates(gff3_file):
         if v1.seqid == v2.seqid and v1.start == v2.start and v1.end == v2.end:
             duplicated_ids.add(k1)  # add just one, second will be kept
     if len(duplicated_ids) > 0:
-        print("Found duplicated IDs in gff3 file, removing duplicates")
-        print("Duplicated IDs: ", duplicated_ids)
         with open(gff3_file, 'r') as f1, open(gff_out, 'w') as f2:
             for line in f1:
                 if line.startswith("#"):
@@ -1269,33 +1267,6 @@ def filter_gff_by_length(gff3_file, min_length=1000):
             if gff3_feature.end - gff3_feature.start > min_length:
                 f2.write(line)
     return gff_out
-
-def get_overlapping_features(gff3_file, ID_list):
-    # limit search to IDs in ID_list
-    gff_data = {}
-    with open(gff3_file, 'r') as f1:
-        for line in f1:
-            if line.startswith("#"):
-                continue
-            gff3_feature = Gff3Feature(line)
-            if gff3_feature.attributes_dict['ID'] in ID_list:
-                gff_data[gff3_feature.attributes_dict['ID']] = gff3_feature
-    gff_data = OrderedDict(sorted(gff_data.items(), key=lambda t: (t[1].seqid, t[1].start)))
-    overlapping_ids = []
-    for i, (k1, v1) in enumerate(gff_data.items()):
-        if i == len(gff_data) - 1:
-            break
-
-        k2, v2 = list(gff_data.items())[i + 1]
-        if v1.seqid == v2.seqid:
-            if v1.start <= v2.start <= v1.end:
-                    overlapping_ids.append((k1, k2))
-                    print(i, k1, k2, v1.start, v1.end, v2.start, v2.end)
-            elif v1.start <= v2.end <= v1.end:
-                    overlapping_ids.append((k1, k2))
-                    print(i, k1, k2, v1.start, v1.end, v2.start, v2.end)
-
-    return overlapping_ids
 
 
 def save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer):

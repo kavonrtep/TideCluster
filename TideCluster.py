@@ -92,9 +92,9 @@ def tarean(prefix, gff, fasta=None, cpu=4):
             if i.startswith("#"):
                 continue
             gff_record = tc.Gff3Feature(i)
-            if "SSR" in gff_record.attributes:
+            if "ssr" in gff_record.attributes:
                 SSR[gff_record.attributes_dict['Name']] = gff_record.attributes_dict[
-                "SSR"]
+                "ssr"]
     # export SSR info to csv file
     with open(F"{tarean_dir}/SSRS_summary.csv", "w") as f:
         for k, v in SSR.items():
@@ -150,7 +150,7 @@ def annotation(prefix, library, gff=None, consensus_dir=None, cpu=1):
     rm_annotation = tc.get_repeatmasker_annotation(rm_file, seq_lengths, prefix)
     # add annotation to gff3 file, only if gff3 file exists
     if os.path.exists(gff):
-        tc.add_attribute_to_gff(gff, gff_out, "Name", "Annotation", rm_annotation)
+        tc.add_attribute_to_gff(gff, gff_out, "Name", "annotation", rm_annotation)
     else:
         print(F"gff3 file {gff} does not exist, no annotation added to gff3 file")
 
@@ -193,7 +193,7 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
     # get consensus sequences for clustering
     consensus = {}
     consensus_dimers = {}
-    for seq_id, seq, cons in tc.gff3_to_fasta(gff3, fasta, "Consensus_sequence"):
+    for seq_id, seq, cons in tc.gff3_to_fasta(gff3, fasta, "consensus_sequence"):
         mult = round(1 + 10000 / len(cons))
         consensus[seq_id] = cons * mult
         consensus_dimers[seq_id] = cons * 4
@@ -221,17 +221,15 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
         ssrs_description[k] = tc.get_ssrs_description(fdimer)
         ssrs_seq[k] = " ".join([i.split(" ")[0] for i in  ssrs_description[k].split(
                 "\n")])
+
     # find unique ssrs seq
     ssrs_clusters = {}
     ssrs_representative = {}
     for k, ssrs in ssrs_seq.items():
         if not ssrs in ssrs_representative:
             ssrs_representative[ssrs] = k
-    print('ssrs_representative', ssrs_representative)
     for k, ssrs in ssrs_seq.items():
         ssrs_clusters[k] = ssrs_representative[ssrs]
-    for k, v in ssrs_clusters.items():
-        print(v, k, ssrs_seq[k], ssrs_description[k])
 
     # recalculate description for each ssrs_cluster
     dimers_ssrs_clusters = {}
@@ -272,7 +270,6 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
     for k in ssrs_id:
         clusters_final[k] = ssrs_clusters[k]
         clusters1[k] = k
-    print(clusters_final)
     # get total size of each cluster, store in dict
     cluster_size = tc.get_cluster_size(gff3, clusters_final)
 
@@ -303,7 +300,7 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
 
     tc.add_attribute_to_gff(gff3_out, gff_tmp, "Name", "repeat_type", ssrs_info)
     os.rename(gff_tmp, gff3_out)
-    tc.add_attribute_to_gff(gff3_out, gff_tmp, "Name", "SSR", ssrs_description_final)
+    tc.add_attribute_to_gff(gff3_out, gff_tmp, "Name", "ssr", ssrs_description_final)
     os.rename(gff_tmp, gff3_out)
 
     # save also first round of clustering for debugging

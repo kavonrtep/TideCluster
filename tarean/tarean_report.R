@@ -133,7 +133,7 @@ summary_df$type <- sapply(summary_df$TRC, function(x) {
 })
 # add SSR sequence
 summary_df$SSRs <- sapply(summary_df$TRC, function(x) {
-  gsub(",", "<br>", unique(gff[gff$attributes$Name == x, ]$attributes$SSR))
+  gsub(",", "<br>", unique(gff[gff$attributes$Name == x, ]$attributes$ssr))
 })
 
 minmedmax <- paste0("min:    ",summary_df$min_array_length,"<br>",
@@ -142,7 +142,7 @@ minmedmax <- paste0("min:    ",summary_df$min_array_length,"<br>",
 summary_df$size_of_arrays <- minmedmax
 summary_df$Consensus <- consensus
 summary_df$Annotation <- sapply(summary_df$TRC, function(x) {
-  ann <- unique(gff[gff$attributes$Name == x, ]$attributes$Annotation)
+  ann <- unique(gff[gff$attributes$Name == x, ]$attributes$annotation)
   if (is.null(ann)){
     ann <- ""
   }
