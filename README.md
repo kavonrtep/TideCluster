@@ -61,18 +61,18 @@ options:
     Example of usage:
     
     # first run tidehunter on fasta file to generate raw GFF3 output
-    TideCluster.py -c 10 tidehunter -f test.fasta -pr prefix 
+    TideCluster.py tidehunter -c 10 -f test.fasta -pr prefix 
     
     # then run clustering on the output from previous step to cluster similar tandem repeats
-    TideCluster.py -c 10 clustering -f test.fasta -pr prefix -d -m 5000
+    TideCluster.py clustering -c 10 -f test.fasta -pr prefix -d -m 5000
     
     # then run annotation on the clustered output to annotate clusters with reference
     # library of tandem repeats in RepeatMasker format
-    TideCluster.py -c 10 annotation -pr prefix -l library.fasta
+    TideCluster.py annotation -c 10 -pr prefix -l library.fasta
     
     # then run TAREAN on the annotated output to extract representative consensus
     # and generate html report
-    TideCluster.py -c 10 tarean -f test.fasta -pr prefix
+    TideCluster.py  tarean -c 10 -f test.fasta -pr prefix
     
     Recommended parameters for TideHunter:
     short monomers: -T "-p 10 -P 39 -c 5 -e 0.25"
