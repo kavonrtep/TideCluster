@@ -677,7 +677,7 @@ def save_fasta_dict_to_file(fasta_dict, fasta_file):
     """
     with open(fasta_file, 'w') as f:
         for k, v in fasta_dict.items():
-            f.write(">{}\n{}\n".format(k, v))
+            f.write(">{}\n{}\n".format(k, v.upper()))
 
 
 # run mmseqs2 on consensus sequences
@@ -796,6 +796,9 @@ def group_sequences_by_orientation(sequences, k):
     :param k: kmers size
     :return:
     """
+    # some sequences may have lower case letters, change them to upper case
+    for i in sequences:
+        sequences[i] = sequences[i].upper()
     groups = {'forward': [], 'reverse': []}
     reference = max(list(sequences.values()), key=len)
     ref_kmers = generate_kmers(reference, k)
@@ -826,7 +829,7 @@ def reverse_complement(dna):
                   'W': 'W', 'K': 'M', 'M': 'K', 'B': 'V', 'D': 'H', 'H': 'D', 'V': 'B',
                   'N': 'N'}
 
-    return ''.join(complement[base] for base in reversed(dna))
+    return ''.join(complement[base] for base in reversed(dna.upper()))
 
 def generate_kmers(dna, k):
     """
