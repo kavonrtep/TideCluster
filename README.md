@@ -158,6 +158,9 @@ options:
   -pr PREFIX, --prefix PREFIX
                         Prefix is used as a base name for output files.If --gff is not provided, prefix will be also usedto identify GFF3 files from previous clustering/annotation step
   -c CPU, --cpu CPU     Number of CPUs to use
+  -M MIN_TOTAL_LENGTH, --min_total_length MIN_TOTAL_LENGTH
+                        Minimum combined length of tandem repeat arrays within a single cluster, required for inclusion in TAREAN analysis.Default (50000)
+                        
 ```
 
 ## Run all steps
@@ -179,6 +182,8 @@ options:
                         additional arguments for TideHunter in quotes, default value: -p 40 -P 3000 -c 5 -e 0.25)
   -nd, --no_dust        Do not use dust filter in blastn when clustering
   -c CPU, --cpu CPU     Number of CPUs to use
+  -M MIN_TOTAL_LENGTH, --min_total_length MIN_TOTAL_LENGTH
+                        Minimum combined length of tandem repeat arrays within a single cluster, required for inclusion in TAREAN analysis.Default (50000)
 ```
 
 ## Example for full pipeline
