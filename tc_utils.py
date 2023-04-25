@@ -588,7 +588,7 @@ class TideHunterFeature:
     def gff3(self):
         """return line in gff3 format
         """
-        columns = [self.seq_name, "TideHunter", "repeat_region", self.start, self.end,
+        columns = [self.seq_name, "TideHunter", "tandem_repeat", self.start, self.end,
                    self.aver_match, ".", "."]
         attributes = {"ID": self.repeat_ID, "consensus_sequence": self.consensus,
                       "consensus_length": self.cons_length,
@@ -1107,6 +1107,37 @@ def get_cluster_size(fin, clusters):
     return cluster_size
 
 
+def get_cluster_size2(fin, clusters):
+    """
+    get cluster size
+    :param fin: input gff
+    :param clusters: clusters dictionary id:cluster_id
+    :return: cluster size as total length of intervals
+    Calculate total size of region for particular cluster, note that regions can overlap
+    but each region will be counted only once.
+    """
+    # first read all regions and sort them by chromosome and start position for each
+    # cluster
+    cluster_regions = {}
+    with open(fin, 'r') as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            gff3_feature = Gff3Feature(line)
+            cluster_id = clusters[gff3_feature.attributes_dict['ID']]
+            if cluster_id not in cluster_regions:
+                cluster_regions[cluster_id] = []
+            cluster_regions[cluster_id].append((gff3_feature.seqid,
+                                                gff3_feature.start,
+                                                gff3_feature.end))
+    # merge overlapping regions before calculating size
+    cluster_size = {}
+    for cluster_id in cluster_regions:
+        cluster_regions[cluster_id] = merge_genomic_intervals(cluster_regions[cluster_id])
+        # calculate size
+        cluster_size[cluster_id] = sum([end - start for seqid, start, end in cluster_regions[cluster_id]])
+    return cluster_size
+
 def add_attribute_to_gff(fin, fout, attr2match, new_attr, attr_dict):
     """
     add attribute to gff file
@@ -1191,7 +1222,7 @@ def merge_overlapping_gff3_intervals(gff3_file, gff3_out_file):
                 intervals.append((j.start, j.end))
             intervals = merge_intervals(intervals)
             for start, end in intervals:
-                gff_line = (F'{i[0]}\tTideCluster\trepeat_region'
+                gff_line = (F'{i[0]}\tTideCluster\ttandem_repeat'
                             F'\t{start}\t{end}\t{1}\t.\t.\tName={i[1]}\n')
 
                 f.write(gff_line)
@@ -1215,6 +1246,24 @@ def merge_intervals(intervals):
         else:
             # Add the current interval to the list of merged intervals
             merged.append((start, end))
+    return merged
+
+def merge_genomic_intervals(intervals):
+    """
+    :param intervals:list of (seqid, start, end) tuples
+    :return:
+    list of merged (seqid, start, end) tuples
+    """
+    # same as merge_intervals but uses also seqid
+    # split it by seqid and merge each seqid separately using merge_intervals
+    intervals_dict = {}
+    for seqid, start, end in intervals:
+        if seqid not in intervals_dict:
+            intervals_dict[seqid] = []
+        intervals_dict[seqid].append((start, end))
+    merged = []
+    for seqid in intervals_dict:
+        merged += [(seqid, start, end) for start, end in merge_intervals(intervals_dict[seqid])]
     return merged
 
 def filter_gff_remove_duplicates(gff3_file):
@@ -1253,7 +1302,7 @@ def filter_gff_remove_duplicates(gff3_file):
     else:
         return gff3_file
 
-def filter_gff_by_length(gff3_file, min_length=1000):
+def filter_gff_by_length(gff3_file, gff_short, min_length=1000):
     """
     Filter gff3 file by size of intervals
     :param gff3_file:
@@ -1261,14 +1310,17 @@ def filter_gff_by_length(gff3_file, min_length=1000):
     :return: filtered gff3 file path
     """
     gff_out = tempfile.NamedTemporaryFile(delete=False).name
-    with open(gff3_file, 'r') as f1, open(gff_out, 'w') as f2:
+    with open(gff3_file, 'r') as f1, open(gff_out, 'w') as f2, open(gff_short, 'w') as f3:
         for line in f1:
             if line.startswith("#"):
                 f2.write(line)
+                f3.write(line)
                 continue
             gff3_feature = Gff3Feature(line)
             if gff3_feature.end - gff3_feature.start > min_length:
                 f2.write(line)
+            else:
+                f3.write(line)
     return gff_out
 
 
@@ -1289,10 +1341,11 @@ def save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer):
 
 def run_cmd(cmd):
     try:
-        # run command and capture waring and error messages
+        # run command and capture warning and error messages
         # if command fails, print error message and return error
         subprocess.check_call(cmd, shell=True, stderr=subprocess.PIPE)
         # store stderr in variable
     except subprocess.CalledProcessError as e:
+        print(e.stderr)
         return [cmd, 'error']
     return [cmd, 'ok']

@@ -20,7 +20,7 @@ from version import __version__
 assert sys.version_info >= (3, 6), "Python 3.6 or newer is required"
 
 
-def tarean(prefix, gff, fasta=None, cpu=4):
+def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000):
     """
     Run tarean on genomic sequences specified in gff3 file
     from gff record extract sequence end analyse it with tarean algorithm
@@ -56,11 +56,18 @@ def tarean(prefix, gff, fasta=None, cpu=4):
     l_debug = 0
     cmd_list = []
     print("preparaing sequences for TAREAN")
+    omitted_clusters  = []
     for k, v in fasta_dict.items():
         l_debug += 1
         v_basename = os.path.basename(v)
         with open(v, "r") as f:
             seqs = tc.read_single_fasta_to_dictionary(f)
+        total_length = sum([len(i) for i in seqs.values()])/2 # it is dimer!!
+        if total_length < min_total_length:
+            print(F"total length of sequences in {k} is less than {min_total_length} nt, "
+                  F"skipping")
+            omitted_clusters.append((k, total_length, len(seqs)))
+            continue
         # does seqs contain only one sequence?
         if len(seqs) > 1:
             # more than one sequence in fasta file, set orientation
@@ -76,6 +83,18 @@ def tarean(prefix, gff, fasta=None, cpu=4):
         cmd = F"{script_path}/tarean/tarean.R -i {v} -s 0 -n {1} -o {tarean_out}"
         cmd_list.append(cmd)
     # run cmd tarean in parallel using multiprocessing module
+    if len(omitted_clusters) > 0:
+        with open(F"{tarean_dir}/omitted_clusters.txt", "w") as f:
+            f.write("cluster_id\ttotal_length\tnumber_of_arrays\n")
+            # sort by total length
+            omitted_clusters.sort(key=lambda x: x[1], reverse=True)
+            for i in omitted_clusters:
+                f.write(F"{i[0]}\t{i[1]}\t{i[2]}\n")
+
+    if len(cmd_list) == 0:
+        print("No remaining sequences for TAREAN analysis; exiting")
+        return
+
     print("running TAREAN")
     with Pool(cpu) as p:
         total_jobs = len(cmd_list)
@@ -103,7 +122,7 @@ def tarean(prefix, gff, fasta=None, cpu=4):
     # final report:
     cmd = (F"{script_path}/tarean/tarean_report.R -i {tarean_dir} -o"
            F" {prefix}_tarean_report -g {gff}")
-    print("Making final report")
+    print("Making final report.")
     tc.run_cmd(cmd)
 
 
@@ -173,7 +192,10 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
         gff3 = prefix + "_tidehunter.gff3"
     if min_length is not None:
         print('running filtering on gff3 file')
-        gff3 = tc.filter_gff_by_length(gff3, min_length=min_length)
+        gff3 = tc.filter_gff_by_length(gff3,
+                                       gff_short=prefix + "_tidehunter_short.gff3",
+                                       min_length=min_length
+                                       )
 
     # filtering on duplicates in gff3 file
     gff3 = tc.filter_gff_remove_duplicates(gff3)
@@ -271,7 +293,7 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
         clusters_final[k] = ssrs_clusters[k]
         clusters1[k] = k
     # get total size of each cluster, store in dict
-    cluster_size = tc.get_cluster_size(gff3, clusters_final)
+    cluster_size = tc.get_cluster_size2(gff3, clusters_final)
 
     # representative id sorted by cluster size
     representative_id = sorted(cluster_size, key=cluster_size.get, reverse=True)
@@ -408,8 +430,8 @@ if __name__ == "__main__":
         )
 
     parser_clustering.add_argument(
-        "-m", "--min_length", help="Minimum length of array tandem repeat to be "
-                                   "inlcuded in clustering step. Shorter arrays are "
+        "-m", "--min_length", help="Minimum length of tandem repeat array to be "
+                                   "included in clustering step. Shorter arrays are "
                                    "discarded, default (%(default)s)",
         required=False,
         default=5000, type=int
@@ -490,6 +512,13 @@ if __name__ == "__main__":
     parser_tarean.add_argument(
         "-c", "--cpu", type=int, default=4, help="Number of CPUs to use"
         )
+    parser_tarean.add_argument(
+        "-M", "--min_total_length", type=int, default=50000,
+            help=("Minimum combined length of tandem repeat arrays within a single "
+                  "cluster, required for inclusion in TAREAN analysis."
+                  "Default (%(default)s)")
+            )
+
 
     parser_run_all = subparsers.add_parser(
         'run_all', help='Run all steps of TideCluster'
@@ -524,6 +553,13 @@ if __name__ == "__main__":
     parser_run_all.add_argument(
         "-c", "--cpu", type=int, default=4, help="Number of CPUs to use"
         )
+
+    parser_run_all.add_argument(
+        "-M", "--min_total_length", type=int, default=50000,
+            help=("Minimum combined length of tandem repeat arrays within a single "
+                  "cluster, required for inclusion in TAREAN analysis."
+                  "Default (%(default)s)")
+            )
 
     parser.description = """Wrapper of TideHunter
     This script enable to run TideHunter on large fasta files in parallel. It splits
@@ -584,7 +620,8 @@ if __name__ == "__main__":
             )
     elif cmd_args.command == "tarean":
         tarean(
-            cmd_args.prefix, cmd_args.gff, cmd_args.fasta, cmd_args.cpu
+            cmd_args.prefix, cmd_args.gff, cmd_args.fasta, cmd_args.cpu,
+            cmd_args.min_total_length
             )
     elif cmd_args.command == "run_all":
         tidehunter(
@@ -594,7 +631,8 @@ if __name__ == "__main__":
                      not cmd_args.no_dust, cmd_args.cpu)
         if cmd_args.library:
             annotation(cmd_args.prefix, cmd_args.library, None, None, cmd_args.cpu)
-        tarean(cmd_args.prefix, None, cmd_args.fasta, cmd_args.cpu)
+        tarean(cmd_args.prefix, None, cmd_args.fasta, cmd_args.cpu,
+               cmd_args.min_total_length)
 
 
 

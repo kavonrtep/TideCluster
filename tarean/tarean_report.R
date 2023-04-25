@@ -187,19 +187,32 @@ html_out <- paste0(args$output, ".html")
 csv_out <- paste0(args$output, ".tsv")
 cat(htmlheader, file = html_out)
 
-is_ssrs <- !is.na(summary_df_out$SSRs)
-print(is_ssrs)
 
-if (sum(is_ssrs) > 0){
+is_ssrs <-  x <-  sapply(summary_df_out$SSRs, function(x) {
+    if (length(x)==0){
+      FALSE
+    }else{
+      if (is.na(x)){
+        return(FALSE)
+      }else{
+        return(TRUE)
+      }
+    }
+  }
+ )
+
+
+if (sum(!is_ssrs) > 0){
   summary_df_out_tr <- summary_df_out[!is_ssrs,]
   HTML.title("Tandem Repeats TAREAN Summary", file = html_out)
-  HTML(summary_df_out, file = html_out, title = "TAREAN report",
+  HTML(summary_df_out_tr, file = html_out, title = "TAREAN report",
        caption = "TAREAN report", row.names = FALSE, classfirstline="sticky-header",
        align = 'left'
   )
+
 }
 
-if (sum(!is_ssrs) > 0){
+if (sum(is_ssrs) > 0){
   summary_df_out_ssrs <- summary_df_out[is_ssrs,]
   # exclude TAREAN logo and graph,..., it is misleading
   summary_df_out_ssrs$Graph <- NULL
