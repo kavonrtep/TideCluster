@@ -1,13 +1,14 @@
 """ Utilities for the project. """
-import concurrent.futures
+import glob
 import os
 import subprocess
 import tempfile
 from collections import OrderedDict
-from itertools import cycle, permutations, combinations
+from itertools import cycle
 from shutil import rmtree
 import re
 import networkx as nx
+
 
 def get_kmers(dna, k):
     """ Return all kmers of length k from dna.
@@ -17,71 +18,13 @@ def get_kmers(dna, k):
     """
     kmers = {}
     for seq in dna.values():
-        for i in range(len(seq)-k+1):
-            kmer = seq[i:i+k]
+        for i in range(len(seq) - k + 1):
+            kmer = seq[i:i + k]
             if kmer in kmers:
                 kmers[kmer] += 1
             else:
                 kmers[kmer] = 1
     return kmers
-
-def kmers2debruijn(kmers):
-    """ Return debruijn graph from kmers.
-    param kmers: list of kmers
-    return: dictionary of nodes
-    """
-    graph = nx.DiGraph()
-    for kmer in kmers:
-        edge_weight = kmers[kmer]
-        # use negative weigh for finding paths
-        graph.add_edge(kmer[:-1], kmer[1:], weight= 1/edge_weight)
-    # add weight to nodes:
-    for node in graph.nodes():
-        all_edges = graph.edges(node, data=True)
-        total_weight =  abs(sum(1/edge[2]['weight'] for edge in all_edges))
-        graph.nodes[node]['weight'] = total_weight
-    return graph
-
-
-def smallest_circular_paths(G):
-
-    cycles = nx.simple_cycles(G)
-    cycles = sorted(
-        cycles, key=lambda cycle: sum(
-            G[u][v]['weight'] for u, v in zip(cycle, cycle[1:] + cycle[:1])
-            ), reverse=True
-        )
-    paths = []
-    while cycles:
-        cycle = cycles.pop(0)
-        H = G.copy()
-        H.remove_edges_from(zip(cycle, cycle[1:] + cycle[:1]))
-        H.remove_nodes_from([v for v in cycle if H.degree[v] == 0])
-        while True:
-            subcycles = nx.simple_cycles(H)
-            if not subcycles:
-                break
-            subcycles = sorted(
-                subcycles, key=lambda subcycle: sum(
-                    H[u][v]['weight'] for u, v in
-                    zip(subcycle, subcycle[1:] + subcycle[:1])
-                    ), reverse=True
-                )
-            subcycle = subcycles[0]
-            H.remove_edges_from(zip(subcycle, subcycle[1:] + subcycle[:1]))
-            H.remove_nodes_from([v for v in subcycle if H.degree[v] == 0])
-            cycles.insert(0, subcycle)
-        paths.append(cycle)
-    if len(paths) == 1:
-        return paths
-    else:
-        assigned = set()
-        result = []
-        for path in paths:
-            unassigned = set(path) - assigned
-            result.append([v for v in path if v in unassigned])
-            assigned |= unassigned
-        return result
 
 
 class Gff3Feature:
@@ -107,14 +50,15 @@ class Gff3Feature:
                 try:
                     key, value = item.split('=')
                     self._attributes_dict[key] = value
-                except:
+                except ValueError:
                     print(item)
                     print(self.attributes)
                     raise
 
         self._attributes_str = ';'.join(
-            ['{}={}'.format(key, value) for key, value in self._attributes_dict.items()]
-            )
+                ['{}={}'.format(key, value) for key, value in
+                 self._attributes_dict.items()]
+                )
 
     @property
     def attributes_dict(self):
@@ -139,28 +83,30 @@ class Gff3Feature:
          :return:
         """
         self._attributes_str = ';'.join(
-            ['{}={}'.format(key, value) for key, value in self._attributes_dict.items()]
-            )
+                ['{}={}'.format(key, value) for key, value in
+                 self._attributes_dict.items()]
+                )
         return self._attributes_str
 
     @attributes_dict.setter
     def attributes_dict(self, value):
         self._attributes_dict = value
         self._attributes_str = ';'.join(
-            ['{}={}'.format(key, value) for key, value in self._attributes_dict.items()]
-            )
+                ['{}={}'.format(key, value) for key, value in
+                 self._attributes_dict.items()]
+                )
 
     def __str__(self):
         return '\t'.join(
-            [self.seqid, self.source, self.type, str(self.start), str(self.end),
-             self.score, self.strand, self.frame, self.attributes_str]
-            ) + '\n'
+                [self.seqid, self.source, self.type, str(self.start), str(self.end),
+                 self.score, self.strand, self.frame, self.attributes_str]
+                ) + '\n'
 
     def __repr__(self):
         return '\t'.join(
-            [self.seqid, self.source, self.type, str(self.start), str(self.end),
-             self.score, self.strand, self.frame, self.attributes_str]
-            ) + '\n'
+                [self.seqid, self.source, self.type, str(self.start), str(self.end),
+                 self.score, self.strand, self.frame, self.attributes_str]
+                ) + '\n'
 
     def __eq__(self, other):
         return self.line_recalculated() == other.line_recalculated()
@@ -189,9 +135,9 @@ class Gff3Feature:
         string with recalculated line
         """
         return '\t'.join(
-            [self.seqid, self.source, self.type, str(self.start), str(self.end),
-             self.score, self.strand, self.frame, self.attributes_str]
-            ) + '\n'
+                [self.seqid, self.source, self.type, str(self.start), str(self.end),
+                 self.score, self.strand, self.frame, self.attributes_str]
+                ) + '\n'
 
     def __lt__(self, other):
         width = self.end - self.start
@@ -228,6 +174,91 @@ class Gff3Feature:
         return '\t'.join(columns + attributes) + '\n'
 
 
+def split_gff3_by_cluster_name(gff3_file, dirname):
+    """
+    Split gff3 file by cluster name
+    :param gff3_file:
+    :param dirname: output dir where gff3 files will exported
+
+    :return:
+    """
+    # create directory if not exists
+    if not os.path.exists(dirname):
+        os.makedirs(dirname)
+    else:
+        # if not empty, remove all files
+        # this is necessary as we use append mode
+        for file in os.listdir(dirname):
+            os.remove(os.path.join(dirname, file))
+
+    with open(gff3_file) as f:
+        for line in f:
+            if line.startswith('#'):
+                continue
+            else:
+                feature = Gff3Feature(line)
+                cluster_name = feature.attributes_dict['Name']
+                with open(
+                        os.path.join(dirname, F'{cluster_name}.gff3'),
+                        'a'
+                        ) as out:
+                    out.write(feature.print_line())
+
+
+def annotate_gff(gff, gff_out, library, cpu=1):
+    """
+    Run annotation on sequences included in gff3, sequences are part of gff attribute
+    "consensus_sequence". consensus sequences are extracted from gff3 file and saved
+    as dimers and analyzed by RepeatMasker against custom library
+    :param gff: gff3 file with tidehunter results containing consensus sequences
+    :param gff_out: gff3 file with updated annotation  information
+    :param library: custom library for RepeatMasker
+    :param cpu: number of cpu cores to use
+    :return:
+    """
+    # read gff3 file and make dictionary with dimer of consensus sequences
+    consensus_sequences = {}
+    with open(gff, "r") as f:
+        for i in f:
+            if i.startswith("#"):
+                continue
+            gff_record = Gff3Feature(i)
+            try:
+                id_name = gff_record.attributes_dict['ID']
+            except KeyError:
+                print(F"ID attribute not found in gff, \ngff line:\n{i}")
+                exit(1)
+            try:
+                consensus_sequences[id_name] = gff_record.attributes_dict[
+                                                   "consensus_sequence"] * 2
+            except KeyError:
+                print(F"consensus_sequence attribute not found in gff, \ngff line:\n{i}")
+                exit(1)
+    # save consensus sequences to fasta file
+    tmp_consensus_file = tempfile.NamedTemporaryFile(delete=False).name
+    save_fasta_dict_to_file(consensus_sequences, tmp_consensus_file)
+    # run repeatmasker
+    cmd = (F"RepeatMasker -pa {cpu} -lib {library} -e ncbi -s -no_is -norna "
+           F"-nolow {tmp_consensus_file}")
+    print(cmd)
+    subprocess.run(cmd, shell=True)
+    rm_file = tmp_consensus_file + ".out"
+    # all rm generated files:
+    all_rm_files = glob.glob(tmp_consensus_file + ".*")
+
+    seq_lengths = {k: len(v) for k, v in consensus_sequences.items()}
+    prefix = gff_out.replace("_annotation.gff3", "")
+    rm_annotation = get_repeatmasker_annotation(
+            rm_file, seq_lengths, prefix,
+            parse_id=False
+            )
+    add_attribute_to_gff(gff, gff_out, "ID", "annotation", rm_annotation)
+    # remove tmp files
+    os.remove(tmp_consensus_file)
+    for file in all_rm_files:
+        os.remove(file)
+
+
 class RepeatMaskerFeature:
     """
     class for parsing repeatmasker ouput from .out file
@@ -247,12 +278,13 @@ class RepeatMaskerFeature:
         self.family = items[11]
 
 
-def get_repeatmasker_annotation(rm_file, seq_lengths, prefix):
+def get_repeatmasker_annotation(rm_file, seq_lengths, prefix, parse_id=True):
     """
     :parse repeatmasker output and calculate proportion of each annotation
     :param rm_file:
     :param seq_lengths:
     :param prefix:
+    :param parse_id: if True, parse ID from repeatmasker output, if False, use as it is
     :return:
     """
     seq_rm_info = {}
@@ -278,7 +310,10 @@ def get_repeatmasker_annotation(rm_file, seq_lengths, prefix):
     trc_consensus_count = {}  # how many consensus sequences are in each TRC
     # scan all consensus sequences id
     for seqid in seq_lengths:
-        trc_id = "TRC_" + seqid.split("_")[1]
+        if parse_id:
+            trc_id = "TRC_" + seqid.split("_")[1]
+        else:
+            trc_id = seqid
         if trc_id not in trc_consensus_count:
             trc_consensus_count[trc_id] = 0
         trc_consensus_count[trc_id] += 1
@@ -307,16 +342,16 @@ def get_repeatmasker_annotation(rm_file, seq_lengths, prefix):
                 continue
             # sort keys by values
             key_sorted = sorted(
-                annot_summary[trc_id], key=annot_summary[trc_id].get, reverse=True
-                )
+                    annot_summary[trc_id], key=annot_summary[trc_id].get, reverse=True
+                    )
             for i, v in enumerate(key_sorted):
                 p = round(annot_summary[trc_id][v], 3)
                 if i > 0:
                     # round to 2 decimal places
-                    annot_description[trc_id] += F", {v} ({round(p * 100,1)}%25)"
+                    annot_description[trc_id] += F", {v} ({round(p * 100, 1)}%25)"
                     f.write(F"\t{v}\t{annot_summary[trc_id][v]}")
                 else:
-                    annot_description[trc_id] = F"{v} ({round(p*100,1)}%25)"
+                    annot_description[trc_id] = F"{v} ({round(p * 100, 1)}%25)"
                     f.write(F"{trc_id}\t{v}\t{annot_summary[trc_id][v]}")
             f.write("\n")
     print("Annotation exported to: " + annot_table)
@@ -481,8 +516,8 @@ def recalculate_gff3_coordinates(gff3_file, matching_table):
                 else:
                     feature = Gff3Feature(line)
                     new_coords = get_new_header_and_coordinates(
-                        feature.seqid, feature.start, feature.end, matching_table
-                        )
+                            feature.seqid, feature.start, feature.end, matching_table
+                            )
                     for new_header, new_start, new_end, sequence_length in new_coords:
                         if new_start >= 1 and new_end <= sequence_length:
                             feature.seqid = new_header
@@ -505,8 +540,8 @@ def write_temp_fasta_chunks(fasta_seq_size, fasta_file, chunk_size):
     """
     number_of_chunks = len(fasta_seq_size)
     seq_id_size_sorted = [i[0] for i in sorted(
-        fasta_seq_size.items(), key=lambda x: int(x[1]), reverse=True
-        )]
+            fasta_seq_size.items(), key=lambda x: int(x[1]), reverse=True
+            )]
     number_of_temp_files = int(os.path.getsize(fasta_file) / chunk_size) + 1
     if number_of_temp_files > number_of_chunks:
         number_of_temp_files = number_of_chunks
@@ -536,8 +571,8 @@ def run_tidehunter(fasta_file, tidehunter_arguments):
     """
     # verify tidehunter version
     tidehunter_version = subprocess.check_output(
-        "TideHunter -v", shell=True
-        ).decode().strip()
+            "TideHunter -v", shell=True
+            ).decode().strip()
     assert tidehunter_version == "1.4.3", "TideHunter version 1.4.3 is required"
 
     # run tidehunter
@@ -572,27 +607,29 @@ class TideHunterFeature:
         """recalculate coordinates in the table using matching table
         """
         ori_name, ori_start, ori_end, _ = get_original_header_and_coordinates(
-            self.seq_name, self.start, self.end, matching_table
-            )
+                self.seq_name, self.start, self.end, matching_table
+                )
         self.seq_name = ori_name
         self.start = ori_start
         self.end = ori_end
 
     def __str__(self):
         return "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}".format(
-            self.seq_name, self.repeat_ID, self.seq_length, self.start, self.end,
-            self.cons_length, self.copy_numer, self.aver_match, self.full_length,
-            self.sub_position, self.consensus
-            )
+                self.seq_name, self.repeat_ID, self.seq_length, self.start, self.end,
+                self.cons_length, self.copy_numer, self.aver_match, self.full_length,
+                self.sub_position, self.consensus
+                )
 
     def gff3(self):
         """return line in gff3 format
         """
         columns = [self.seq_name, "TideHunter", "tandem_repeat", self.start, self.end,
                    self.aver_match, ".", "."]
-        attributes = {"ID": self.repeat_ID, "consensus_sequence": self.consensus,
-                      "consensus_length": self.cons_length,
-                      "copy_number": self.copy_numer, "cverage_match": self.aver_match}
+        attributes = {
+            "ID": self.repeat_ID, "consensus_sequence": self.consensus,
+            "consensus_length": self.cons_length,
+            "copy_number": self.copy_numer, "cverage_match": self.aver_match
+            }
 
         # put attributes in the right order and format, some are floats or ints - must be
         # converted to string
@@ -642,6 +679,7 @@ def gff3_to_fasta(gff3_file, fasta_file, additonal_attribute=None):
     extract fasta sequences from gff3 file
     it is generator, returns one sequence at time and seq ID plus additional attribute
     if provided
+    :param additonal_attribute: yield additional attribute from gff3 file
     :param gff3_file: path to gff3 file
     :param fasta_file: path to fasta file
     :return:
@@ -654,8 +692,8 @@ def gff3_to_fasta(gff3_file, fasta_file, additonal_attribute=None):
                 continue
             gff3_feature: Gff3Feature = Gff3Feature(line)
             s = get_seq_from_fasta(
-                fasta_dict, gff3_feature.seqid, gff3_feature.start, gff3_feature.end
-                )
+                    fasta_dict, gff3_feature.seqid, gff3_feature.start, gff3_feature.end
+                    )
             if "ID" not in gff3_feature.attributes_dict:
                 gff3_feature.attributes_dict["ID"] = (gff3_feature.seqid + "_" +
                                                       str(gff3_feature.start) + "_" +
@@ -665,7 +703,6 @@ def gff3_to_fasta(gff3_file, fasta_file, additonal_attribute=None):
                        gff3_feature.attributes_dict[additonal_attribute]]
             else:
                 yield [gff3_feature.attributes_dict['ID'], s]
-
 
 
 def save_fasta_dict_to_file(fasta_dict, fasta_file):
@@ -738,7 +775,9 @@ def get_connected_component_clusters(pairs, representative=False):
     """
     find connected components in graph
     :param pairs: list of pairs
+    :param representative: return clusters as dictionary with representative
     :return: clusters as list of lists or dictionary with representative
+
     """
     # Create a NetworkX graph from the list of edges
     g = nx.Graph()
@@ -759,6 +798,7 @@ def get_connected_component_clusters(pairs, representative=False):
     else:
         return clusters
 
+
 def extract_sequences_from_gff3(gff3_file, fasta_file, output_dir):
     """
     extract sequences from gff3 file
@@ -775,7 +815,7 @@ def extract_sequences_from_gff3(gff3_file, fasta_file, output_dir):
         for f in os.listdir(output_dir):
             try:
                 os.remove(F"{output_dir}/{f}")
-            except:
+            except OSError:
                 pass
     fasta_files = {}
     for seq_id, seq, name in gff3_to_fasta(gff3_file, fasta_file, "Name"):
@@ -808,28 +848,37 @@ def group_sequences_by_orientation(sequences, k):
         rc_seq = reverse_complement(seq)
 
         kmers = generate_kmers(seq, k)
-        kmers_sorted = sorted(kmers, key=lambda key:kmers[key], reverse=True)
+        kmers_sorted = sorted(kmers, key=lambda key: kmers[key], reverse=True)
         kmers = set(list(kmers_sorted[0:int(len(kmers_sorted) * 0.5)]))
 
         rc_kmers = generate_kmers(rc_seq, k)
-        rc_kmers_sorted = sorted(rc_kmers, key=lambda key:rc_kmers[key], reverse=True)
+        rc_kmers_sorted = sorted(rc_kmers, key=lambda key: rc_kmers[key], reverse=True)
         rc_kmers = set(rc_kmers_sorted[0:int(len(rc_kmers_sorted) * 0.5)])
 
         overlap = len(kmers.intersection(ref_kmers))
         rc_overlap = len(rc_kmers.intersection(ref_kmers))
-        if  overlap > rc_overlap:
+        if overlap > rc_overlap:
             groups['forward'].append(i)
         else:
             groups['reverse'].append(i)
     return groups
 
+
 def reverse_complement(dna):
+    """
+    reverse complement of dna sequence, including ambiguous bases
+    :param dna:
+    :return: reverse complement of dna sequence
+    """
     # complement including all IUPAC codes
-    complement = {'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'R': 'Y', 'Y': 'R', 'S': 'S',
-                  'W': 'W', 'K': 'M', 'M': 'K', 'B': 'V', 'D': 'H', 'H': 'D', 'V': 'B',
-                  'N': 'N'}
+    complement = {
+        'A': 'T', 'C': 'G', 'G': 'C', 'T': 'A', 'R': 'Y', 'Y': 'R', 'S': 'S',
+        'W': 'W', 'K': 'M', 'M': 'K', 'B': 'V', 'D': 'H', 'H': 'D', 'V': 'B',
+        'N': 'N'
+        }
 
     return ''.join(complement[base] for base in reversed(dna.upper()))
+
 
 def generate_kmers(dna, k):
     """
@@ -847,15 +896,11 @@ def generate_kmers(dna, k):
     return kmers
 
 
-
-
-
-
-
-def run_blastn(sequences, dust = False, cpu=4):
+def run_blastn(sequences, dust=False, cpu=4):
     """
     run blastn on fasta file
     :param cpu:
+    :param dust: dust filter for blastn
     :param sequences : dictionary with sequences
     :return: dictionary with clusters
     """
@@ -891,6 +936,7 @@ def run_blastn(sequences, dust = False, cpu=4):
     rmtree(tmp_dir)
     return pairs
 
+
 def get_ssrs_proportions(sequences):
     """
     Run dustmasker on fasta file to identifie simple repeats from masking. if
@@ -919,30 +965,45 @@ def get_ssrs_proportions(sequences):
                 dust[seq_id] = 0
                 lengths[seq_id] = 0
             else:
-                lengths[seq_id] +=len(line.strip())
+                lengths[seq_id] += len(line.strip())
                 dust[seq_id] += sum(1 for char in line.strip() if char.islower())
     ssrs_prop = {}
-    for id in dust:
-        dust[id] /= lengths[id]
-        ssrs_prop[id] = 0
-        if dust[id] > 0.8:
-            ssrs = find_ssrs(sequences[id])
-            ssrs_prop[id] = single_sequence_ssrs_proportion(ssrs)
+    for id_name in dust:
+        dust[id_name] /= lengths[id_name]
+        ssrs_prop[id_name] = 0
+        if dust[id_name] > 0.8:
+            ssrs = find_ssrs(sequences[id_name])
+            ssrs_prop[id_name] = single_sequence_ssrs_proportion(ssrs)
     rmtree(tmp_dir)
     return ssrs_prop
 
 
 def homopolymer(motif, motiflength):
-    #return true if motif is repeat of single nucleotide
+
+    """
+    return true if motif is repeat of single nucleotide
+    :param motif:
+    :param motiflength:
+    :return:
+    """
     reps = motiflength - 1
     return True if re.search(r'([gatc])\1{%d}' % reps, motif) else False
 
+
 def novel(position, locations):
+    """
+    check if position is novel
+    :param position:
+    :param locations:
+    :return:
+    """
     if position in locations:
         return False
     else:
         locations[position] = True
         return True
+
+
 def find_ssrs(sequence, specs=None):
     """
     :param sequence: string
@@ -959,7 +1020,7 @@ def find_ssrs(sequence, specs=None):
     locations = {}
     for i in range(len(specs)):
         motiflength, minreps = specs[i]
-        regexp = r'(([gatc]{%d})\2{%d,})' % (motiflength, minreps-1)
+        regexp = r'(([gatc]{%d})\2{%d,})' % (motiflength, minreps - 1)
         for match in re.finditer(regexp, sequence.lower()):
             ssr = match.group(1)
             motif = match.group(2).lower()
@@ -970,16 +1031,19 @@ def find_ssrs(sequence, specs=None):
             end = match.end()
             start = end - ssrlength + 1
             if novel(start, locations):
-                results.append({
-                    'ssr_number': len(results) + 1,
-                    'motif_length': motiflength,
-                    'motif_sequence': motif,
-                    'repeats': repeats,
-                    'start': start,
-                    'end': end,
-                    'seq_length': len(sequence) - sequence.count('N'),
-                    })
+                results.append(
+                        {
+                            'ssr_number': len(results) + 1,
+                            'motif_length': motiflength,
+                            'motif_sequence': motif,
+                            'repeats': repeats,
+                            'start': start,
+                            'end': end,
+                            'seq_length': len(sequence) - sequence.count('N'),
+                            }
+                        )
     return results
+
 
 def normalize_motif(motif):
     """
@@ -989,13 +1053,16 @@ def normalize_motif(motif):
     :return: normalized motif
     """
     doubled_motif = (motif + motif).upper()
-    rc_motif = reverse_complement(doubled_motif)
-    fm = min(doubled_motif[i:i+len(motif)] for i in range(len(motif)))
-    rcm = min(rc_motif[i:i+len(motif)] for i in range(len(motif)))
+    rc_motif: str = reverse_complement(doubled_motif)
+    fm = min(doubled_motif[i:i + len(motif)] for i in range(len(motif)))
+    rcm = min(rc_motif[i:i + len(motif)] for i in range(len(motif)))
     return min(fm, rcm)
 
+
 def sum_up_ssrs_motifs(results):
-    # sum up motifs
+    """sum up motifs
+    :param results: list of dictionaries with ssr results
+    """
     motifs = {}
     for i in results:
         motif = i['motif_sequence']
@@ -1005,7 +1072,14 @@ def sum_up_ssrs_motifs(results):
         else:
             motifs[motif] = i['repeats']
     return motifs
+
+
 def get_ssrs_description_multiple(seq_strs):
+    """
+    return description of ssrs in multiple sequences
+    :param seq_strs:
+    :return:
+    """
     specs = [(2, 3),  # dinucl. with >= 9 repeats
              (3, 3),  # trinucl. with >= 6 repeats
              (4, 3),  # tetranucl. with >= 5 repeats
@@ -1015,18 +1089,25 @@ def get_ssrs_description_multiple(seq_strs):
     for seq_str in seq_strs:
         ssrs += find_ssrs(seq_str, specs)
     motif_count = sum_up_ssrs_motifs(ssrs)
-    L = sum([len(seq_str) for seq_str in seq_strs])
-    motif_percent = {k: 100 * v * len(k) / L for k, v in motif_count.items()}
+    length = sum([len(seq_str) for seq_str in seq_strs])
+    motif_percent = {k: 100 * v * len(k) / length for k, v in motif_count.items()}
     desc = ""
     # iterate over sorted motifs by percent
-    for motif, percent in sorted(motif_percent.items(),
-                                 key=lambda x: x[1],
-                                 reverse=True):
+    for motif, percent in sorted(
+            motif_percent.items(),
+            key=lambda x: x[1],
+            reverse=True
+            ):
         desc += F"{motif} ({percent:.1f}%25), "
     return desc[:-2]
 
 
 def get_ssrs_description(seq_str):
+    """
+    return description of ssrs in single sequence
+    :param seq_str:
+    :return:
+    """
     specs = [(2, 3),  # dinucl. with >= 9 repeats
              (3, 3),  # trinucl. with >= 6 repeats
              (4, 3),  # tetranucl. with >= 5 repeats
@@ -1037,12 +1118,13 @@ def get_ssrs_description(seq_str):
     motif_percent = {k: 100 * v * len(k) / len(seq_str) for k, v in motif_count.items()}
     desc = ""
     # iterate over sorted motifs by percent
-    for motif, percent in sorted(motif_percent.items(),
-                                 key=lambda x: x[1], reverse=True):
+    for motif, percent in sorted(
+            motif_percent.items(),
+            key=lambda x: x[1], reverse=True
+            ):
         desc += F"{motif} ({percent:.2f}%25), "
     # remove_last_comma
     return desc[:-2]
-
 
 
 def single_sequence_ssrs_proportion(ssrs):
@@ -1061,12 +1143,16 @@ def single_sequence_ssrs_proportion(ssrs):
     # calculate proportion of True values
     return sum(is_ssr) / len(is_ssr)
 
-def find_clusters_by_blast_connected_component(consensus_representative, dust=False,
-                                               cpu=4):
+
+def find_clusters_by_blast_connected_component(
+        consensus_representative, dust=False,
+        cpu=4
+        ):
     """
     find clusters by blastn, return dictionary with clusters
     cluaste are connected components in graph
     :param cpu:
+    :param dust: use dust filter
     :param consensus_representative:
     :return: clusters
     """
@@ -1084,7 +1170,6 @@ def find_clusters_by_blast_connected_component(consensus_representative, dust=Fa
             clusters[v] = v_representative
 
     return clusters
-
 
 
 def get_cluster_size(fin, clusters):
@@ -1127,16 +1212,21 @@ def get_cluster_size2(fin, clusters):
             cluster_id = clusters[gff3_feature.attributes_dict['ID']]
             if cluster_id not in cluster_regions:
                 cluster_regions[cluster_id] = []
-            cluster_regions[cluster_id].append((gff3_feature.seqid,
-                                                gff3_feature.start,
-                                                gff3_feature.end))
+            cluster_regions[cluster_id].append(
+                    (gff3_feature.seqid,
+                     gff3_feature.start,
+                     gff3_feature.end)
+                    )
     # merge overlapping regions before calculating size
     cluster_size = {}
     for cluster_id in cluster_regions:
         cluster_regions[cluster_id] = merge_genomic_intervals(cluster_regions[cluster_id])
         # calculate size
-        cluster_size[cluster_id] = sum([end - start for seqid, start, end in cluster_regions[cluster_id]])
+        cluster_size[cluster_id] = sum(
+                [end - start for seqid, start, end in cluster_regions[cluster_id]]
+                )
     return cluster_size
+
 
 def add_attribute_to_gff(fin, fout, attr2match, new_attr, attr_dict):
     """
@@ -1248,6 +1338,7 @@ def merge_intervals(intervals):
             merged.append((start, end))
     return merged
 
+
 def merge_genomic_intervals(intervals):
     """
     :param intervals:list of (seqid, start, end) tuples
@@ -1263,8 +1354,10 @@ def merge_genomic_intervals(intervals):
         intervals_dict[seqid].append((start, end))
     merged = []
     for seqid in intervals_dict:
-        merged += [(seqid, start, end) for start, end in merge_intervals(intervals_dict[seqid])]
+        merged += [(seqid, start, end) for start, end in
+                   merge_intervals(intervals_dict[seqid])]
     return merged
+
 
 def filter_gff_remove_duplicates(gff3_file):
     """
@@ -1281,7 +1374,9 @@ def filter_gff_remove_duplicates(gff3_file):
                 continue
             gff3_feature = Gff3Feature(line)
             gff_data[gff3_feature.attributes_dict['ID']] = gff3_feature
-    gff_data = OrderedDict(sorted(gff_data.items(), key=lambda t: (t[1].seqid, t[1].start)))
+    gff_data = OrderedDict(
+            sorted(gff_data.items(), key=lambda t: (t[1].seqid, t[1].start))
+            )
     duplicated_ids = set()
     for i, (k1, v1) in enumerate(gff_data.items()):
         if i == len(gff_data) - 1:
@@ -1302,11 +1397,13 @@ def filter_gff_remove_duplicates(gff3_file):
     else:
         return gff3_file
 
+
 def filter_gff_by_length(gff3_file, gff_short, min_length=1000):
     """
     Filter gff3 file by size of intervals
     :param gff3_file:
     :param min_length:
+    :param gff_short: path to output gff3 file with short intervals
     :return: filtered gff3 file path
     """
     gff_out = tempfile.NamedTemporaryFile(delete=False).name
@@ -1339,7 +1436,13 @@ def save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer):
         f = os.path.join(consensus_dir, cluster_id + "_dimers.fasta")
         save_fasta_dict_to_file(cons_cls_dimer[cluster_id], f)
 
+
 def run_cmd(cmd):
+    """
+    runs shell command and returns status
+    :param cmd:
+    :return: list
+    """
     try:
         # run command and capture warning and error messages
         # if command fails, print error message and return error
