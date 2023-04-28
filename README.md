@@ -18,7 +18,7 @@ the clustering step and are analyzed separately.
 
 **Annotation step**: Consensus sequences from TideHunter for each cluster are examined by 
 RepeatMasker against a library of tandem repeats. The resulting annotation for each 
-tandem repeat is used to update the information in the GFF3 file.
+tandem repeat is used to update the information in the GFF3 file. This step is optional.
 
 **TAREAN step**: In this final step, the Tandem Repeat Analyzer (TAREAN) estimates 
 consensus sequences using a k-mer-based approach on the original sequences from the reference. Consensus sequences of simple sequence repeats are evaluated separately, as TAREAN performs poorly on tandem repeats with short monomers. The results of the analysis are saved in an HTML summary.
