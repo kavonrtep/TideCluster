@@ -593,6 +593,8 @@ if __name__ == "__main__":
                   "Default (%(default)s)")
             )
 
+    #TODO - create command - reannotate GFF3
+
     parser.description = """Wrapper of TideHunter
     This script enable to run TideHunter on large fasta files in parallel. It splits
     fasta file into chunks and run TideHunter on each chunk. Identified tandem repeat 

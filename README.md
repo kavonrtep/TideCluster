@@ -4,10 +4,10 @@ TideCluster is a software tool designed to identify tandem repeats in genome
 assemblies by utilizing Tidehunter to detect tandem repeats clustering these repeats
 based on similarity using mmseqs2 and NCBI BLAST. The software runs in four steps as outlined below:
 
-Tidehunter step: In this initial step, Tidehunter is utilized to identify tandem 
+**Tidehunter step**: In this initial step, Tidehunter is utilized to identify tandem 
 repeats. As TideHunter's performance diminishes with larger sequences, the input fasta file is divided into smaller overlapping segments, with each segment analyzed individually. Results from individual segments are parsed and merged into a single GFF3 file. Tandem repeats detected in this step are often fragmented into multiple overlapping pieces.
 
-Clustering step: Prior to clustering, all arrays that do not meet the minimum length 
+**Clustering step**: Prior to clustering, all arrays that do not meet the minimum length 
 requirement are removed from the analysis and saved in a separate GFF3 file. Arrays 
 exceeding the minimum length requirement are clustered based on similarity. 
 Clustering occurs in two stages. First, mmseqs2 is employed in the initial round of 
@@ -16,12 +16,15 @@ followed by graph-based  clustering. The GFF3 file from the Tidehunter step is u
 to include cluster assignment information. Simple sequence repeats are excluded from 
 the clustering step and are analyzed separately.
 
-Annotation step: Consensus sequences from TideHunter for each cluster are examined by 
+**Annotation step**: Consensus sequences from TideHunter for each cluster are examined by 
 RepeatMasker against a library of tandem repeats. The resulting annotation for each 
 tandem repeat is used to update the information in the GFF3 file.
 
-TAREAN Step: In this final step, the Tandem Repeat Analyzer (TAREAN) estimates 
+**TAREAN step**: In this final step, the Tandem Repeat Analyzer (TAREAN) estimates 
 consensus sequences using a k-mer-based approach on the original sequences from the reference. Consensus sequences of simple sequence repeats are evaluated separately, as TAREAN performs poorly on tandem repeats with short monomers. The results of the analysis are saved in an HTML summary.
+
+![./workflow_scheme.svg](./workflow_scheme.svg)
+*TideCluster workflow scheme*
 
 ## Installation
 
@@ -237,5 +240,16 @@ TideCluster.py run_all -c 40 -pr cen6_sat -f CEN6_ver_220406.fasta -l library.fa
 
 ## Credits
 
-TideCluster utilizes Tidehunter [https://github.com/Xinglab/TideHunter] for tandem repeat detection.
+TideCluster utilizes Tidehunter [https://github.com/Xinglab/TideHunter] for tandem repeat detection and TAREAN for reconstruction of consensus sequences of tandem repeats.
+If you use TideCluster please cite:
+- https://github.com/kavonrtep/TideCluster
+- TAREAN: a computational tool for identification and characterization of satellite DNA from unassembled short reads (https://doi.org/10.1093/nar/gkx257) 
+- TideHunter: efficient and sensitive tandem repeat detection from noisy long-reads using seed-and-chain (https://doi.org/10.1093/bioinformatics/btz376)
 
+### Authors
+
+Petr Novak, Jiri Macas,  Laboratory of Molecular Cytogenetics, Biology Centre CAS, Czech Republic
+
+## License
+
+GNU General Public License v3.0
