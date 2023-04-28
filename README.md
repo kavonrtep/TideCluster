@@ -23,8 +23,9 @@ tandem repeat is used to update the information in the GFF3 file.
 **TAREAN step**: In this final step, the Tandem Repeat Analyzer (TAREAN) estimates 
 consensus sequences using a k-mer-based approach on the original sequences from the reference. Consensus sequences of simple sequence repeats are evaluated separately, as TAREAN performs poorly on tandem repeats with short monomers. The results of the analysis are saved in an HTML summary.
 
-![./workflow_scheme.svg](./workflow_scheme.svg)
-*TideCluster workflow scheme*
+| ![./workflow_scheme.svg](./workflow_scheme.svg) |
+|:-----------------------------------------------:|
+|           TideCluster workflow scheme           |
 
 ## Installation
 
