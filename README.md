@@ -1,17 +1,27 @@
 # TideCluster
 
-TideCluster is a software tool designed to identify tandem repeats in genome assemblies by utilizing Tidehunter for tandem repeat detection in smaller overlapping windows and clustering these repeats based on similarity using mmseqs2 and NCBI BLAST. The software runs in four steps as outlined below:
+TideCluster is a software tool designed to identify tandem repeats in genome 
+assemblies by utilizing Tidehunter to detect tandem repeats clustering these repeats
+based on similarity using mmseqs2 and NCBI BLAST. The software runs in four steps as outlined below:
 
-Tidehunter Step - In this first step, Tidehunter is run on a fasta file. This generates a GFF3 file that contains all the detected tandem repeats.
+Tidehunter step: In this initial step, Tidehunter is utilized to identify tandem 
+repeats. As TideHunter's performance diminishes with larger sequences, the input fasta file is divided into smaller overlapping segments, with each segment analyzed individually. Results from individual segments are parsed and merged into a single GFF3 file. Tandem repeats detected in this step are often fragmented into multiple overlapping pieces.
 
-Clustering Step - This step is divided into two parts. Firstly, mmseqs2 is used to 
-cluster the repeats, and then graph-based clustering is performed based on all-to-all NCBI-BLAST comparison. The GFF3 file from the Tidehunter step is updated based on the clustering results.
+Clustering step: Prior to clustering, all arrays that do not meet the minimum length 
+requirement are removed from the analysis and saved in a separate GFF3 file. Arrays 
+exceeding the minimum length requirement are clustered based on similarity. 
+Clustering occurs in two stages. First, mmseqs2 is employed in the initial round of 
+clustering. The second round involves an all-to-all comparison using NCBI-BLAST, 
+followed by graph-based  clustering. The GFF3 file from the Tidehunter step is updated 
+to include cluster assignment information. Simple sequence repeats are excluded from 
+the clustering step and are analyzed separately.
 
-Annotation Step - The annotation step uses a reference library of tandem repeats. The representative consensus sequences, as reported by TideHunter, are annotated using RepeatMasker. The resulting annotation for each tandem repeat is added to the GFF3 file.
+Annotation step: Consensus sequences from TideHunter for each cluster are examined by 
+RepeatMasker against a library of tandem repeats. The resulting annotation for each 
+tandem repeat is used to update the information in the GFF3 file.
 
-TAREAN Step - In this final step, the Tandem Repeat Analyzer is used to estimate 
-consensus sequences using a k-mer-based approach on original sequences from the 
-reference. This step also generates an HTML summary.
+TAREAN Step: In this final step, the Tandem Repeat Analyzer (TAREAN) estimates 
+consensus sequences using a k-mer-based approach on the original sequences from the reference. Consensus sequences of simple sequence repeats are evaluated separately, as TAREAN performs poorly on tandem repeats with short monomers. The results of the analysis are saved in an HTML summary.
 
 ## Installation
 

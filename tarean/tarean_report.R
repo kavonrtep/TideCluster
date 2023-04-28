@@ -201,6 +201,11 @@ is_ssrs <-  x <-  sapply(summary_df_out$SSRs, function(x) {
   }
  )
 
+# remove HTML encoding of "%" character in SSRs and Annotation columns - this encoding
+# was there to avoid problems in GFF3 output
+summary_df_out$SSRs <- gsub("%25", "%", summary_df_out$SSRs)
+summary_df_out$Annotation <- gsub("%25", "%", summary_df_out$Annotation)
+
 
 if (sum(!is_ssrs) > 0){
   summary_df_out_tr <- summary_df_out[!is_ssrs,]
