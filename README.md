@@ -1,4 +1,8 @@
 # TideCluster
+[![DOI](https://zenodo.org/badge/601111441.svg)](https://zenodo.org/badge/latestdoi/601111441)
+[![Anaconda-Server Badge](https://anaconda.org/petrnovak/tidecluster/badges/version.svg)](https://anaconda.org/petrnovak/tidecluster)
+
+
 
 TideCluster is a software tool designed to identify tandem repeats in genome 
 assemblies by utilizing Tidehunter to detect tandem repeats clustering these repeats
