@@ -185,8 +185,9 @@ names(summary_df_out) <- include_cols[names(summary_df_out)]
 
 html_out <- paste0(args$output, ".html")
 csv_out <- paste0(args$output, ".tsv")
+credits <- readLines(paste0(script.dir,"/../credits.html"))
 cat(htmlheader, file = html_out)
-
+cat(credits, file = html_out, append = TRUE)
 
 is_ssrs <-  x <-  sapply(summary_df_out$SSRs, function(x) {
     if (length(x)==0){
@@ -214,7 +215,6 @@ if (sum(!is_ssrs) > 0){
        caption = "TAREAN report", row.names = FALSE, classfirstline="sticky-header",
        align = 'left'
   )
-
 }
 
 if (sum(is_ssrs) > 0){

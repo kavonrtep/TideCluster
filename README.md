@@ -2,10 +2,15 @@
 
 TideCluster is a software tool designed to identify tandem repeats in genome 
 assemblies by utilizing Tidehunter to detect tandem repeats clustering these repeats
-based on similarity using mmseqs2 and NCBI BLAST. The software runs in four steps as outlined below:
+based on similarity using mmseqs2 and NCBI BLAST. The software runs in four steps as  
+outlined below:
 
 **Tidehunter step**: In this initial step, Tidehunter is utilized to identify tandem 
-repeats. As TideHunter's performance diminishes with larger sequences, the input fasta file is divided into smaller overlapping segments, with each segment analyzed individually. Results from individual segments are parsed and merged into a single GFF3 file. Tandem repeats detected in this step are often fragmented into multiple overlapping pieces.
+repeats. As TideHunter's performance diminishes with larger sequences, the input fasta 
+file is divided into smaller overlapping segments, with each segment analyzed 
+individually.  Results from individual segments are parsed and merged into a single 
+GFF3 file.  Tandem repeats detected in this step are often fragmented into multiple  
+overlapping pieces.
 
 **Clustering step**: Prior to clustering, all arrays that do not meet the minimum length 
 requirement are removed from the analysis and saved in a separate GFF3 file. Arrays 
@@ -21,7 +26,10 @@ RepeatMasker against a library of tandem repeats. The resulting annotation for e
 tandem repeat is used to update the information in the GFF3 file.
 
 **TAREAN step**: In this final step, the Tandem Repeat Analyzer (TAREAN) estimates 
-consensus sequences using a k-mer-based approach on the original sequences from the reference. Consensus sequences of simple sequence repeats are evaluated separately, as TAREAN performs poorly on tandem repeats with short monomers. The results of the analysis are saved in an HTML summary.
+consensus sequences using a k-mer-based approach on the original sequences from the  
+reference. Consensus sequences of simple sequence repeats are evaluated separately,  
+as TAREAN performs poorly on tandem repeats with short monomers. The results of the  
+analysis are saved in an HTML summary.
 
 | ![./workflow_scheme.svg](./workflow_scheme.svg) |
 |:-----------------------------------------------:|
@@ -30,9 +38,11 @@ consensus sequences using a k-mer-based approach on the original sequences from 
 ## Installation
 
 TideCluster is available on Anaconda repository. To install TideCluster run we 
-recommend to install it using [Mamba](https://github.com/mamba-org/mamba) an extremely fast replacement for the Conda package manager
+recommend to install it using [Mamba](https://github.com/mamba-org/mamba) an extremely 
+fast replacement for the Conda package manager
 
-In case you do not have Mamba installed, you can install it using conda to you base environment:
+In case you do not have Mamba installed, you can install it using conda to your base 
+environment:
 
 ```bash
 conda install -n base -c conda-forge mamba
