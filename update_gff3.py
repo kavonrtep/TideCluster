@@ -5,6 +5,9 @@ This script take gff3 and update attribute using conversion table.
 
 import argparse
 import tc_utils as tc
+# include version number
+from version import __version__
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -22,6 +25,7 @@ if __name__ == "__main__":
             '-a', '--attribute_name', default="Name",
             help='attribute name to update, default attribute is "%(default)s"'
             )
+    parser.add_argument('-v', '--version', action='version', version=__version__)
 
     args = parser.parse_args()
     ori_attribute = args.attribute_name + "_old"
