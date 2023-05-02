@@ -212,7 +212,7 @@ options:
 
 ## Example for full pipeline
 
-```bash
+```help
 TideCluster.py tidehunter -c 40 -pr cen6_sat -f CEN6_ver_220406.fasta 
 TideCluster.py clustering -c 40 -pr cen6_sat -f CEN6_ver_220406.fasta
 TideCluster.py annotation -c 40 -pr cen6_sat -l library.fasta
@@ -248,6 +248,32 @@ TideCluster.py run_all -c 40 -pr cen6_sat -f CEN6_ver_220406.fasta -l library.fa
 - `prefix_tarean_report.html` - HTML report with tandem repeat annotations. 
 - `prefix_tarean_report.tsv` - File with tandem repeat annotations in a tab-delimited format.
 - `prefix_tarean` - Directory containing subdirectories with detailed TAREAN output for each TRC cluster.
+
+
+## Updating gff3 file based on manual annotation
+If you want to update GFF3 file with manual annotation, you can use `update_gff3.py` 
+script. This script will update "Name" attribute in GFF3" based on the conversion 
+table. Conversion table is tab-delimited file with two columns. First column is 
+original value is Name attribute and the second column is new value for Name.
+
+
+
+```help
+usage: update_gff3.py [-h] -g GFF3 -t TABLE -o OUTPUT [-a ATTRIBUTE_NAME]
+
+Update gff3 attributes based on conversion table.
+
+options:
+  -h, --help            show this help message and exit
+  -g GFF3, --gff3 GFF3  gff3 file
+  -t TABLE, --table TABLE
+                        Conversion table as tab-delimited file. First column if original attribute value, second column is new attribute value.
+  -o OUTPUT, --output OUTPUT
+                        output file gff3
+  -a ATTRIBUTE_NAME, --attribute_name ATTRIBUTE_NAME
+                        attribute name to update, default attribute is "Name"
+
+```
 
 ## Credits
 

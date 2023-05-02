@@ -20,7 +20,7 @@ if __name__ == "__main__":
     parser.add_argument('-o', '--output', required=True, help='output file gff3')
     parser.add_argument(
             '-a', '--attribute_name', default="Name",
-            help='attribute name to update'
+            help='attribute name to update, default attribute is "%(default)s"'
             )
 
     args = parser.parse_args()
