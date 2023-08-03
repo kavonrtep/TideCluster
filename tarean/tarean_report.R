@@ -2,6 +2,7 @@
 library(optparse, quietly = TRUE)
 library(R2HTML, quietly = TRUE)
 library(hwriter, quietly = TRUE)
+library(Biostrings, quietly = TRUE)
 # Parse command line arguments
 option_list <- list(
   make_option(c('-i', '--input_dir'), action = 'store', type = 'character', help
@@ -85,6 +86,8 @@ logo_link <- character()
 n_gap50 <- numeric()
 consensus <- character()
 
+consensus_library <- character()
+consensus_cutoff <- 0.5
 
 for (i in seq_along(tarean_dirs)) {
   td_full <- paste0(args$input_dir, "/", tarean_dirs[i])
@@ -108,8 +111,20 @@ for (i in seq_along(tarean_dirs)) {
   n_gap50[i] <- summary[j, "n_gap50"]
   consensus[i] <- summary[j, "consensus"]
 
+  include <- summary$total_score > consensus_cutoff
+  if (sum(include) > 0){
+    consensus_top <- summary$consensus[include]
+    consensus_top <- gsub("\n", "", gsub("<pre>", "", gsub("</pre>", "", consensus_top)))
+    consensus_top_dimer <- paste0(consensus_top, consensus_top)
+    names(consensus_top_dimer) <- paste0("cons_", summary$kmer[include], "_",summary$variant[include],"#", TRC[i])
+    consensus_library <- c(consensus_library, consensus_top_dimer)
+  } else {
+    message("No consensus sequences with score < ", consensus_cutoff, " for ", TRC[i])
+  }
 }
-
+consensus_library <- DNAStringSet(consensus_library)
+writeXStringSet(consensus_library,
+                file = paste0(args$output, "_consensus_dimer_library.fasta"))
 gff <- read_gff3(args$gff_file)
 
 
@@ -235,7 +250,9 @@ if (sum(is_ssrs) > 0){
 
 HTMLEndFile(file = html_out)
 
-
+# reformat consensus sequence for tsv output
+# the html tags and end of line characters must be removed
+consensus_best <- gsub("\n", "",  gsub("<pre>", "", summary_df_out$Consensus))
 
 write.table(apply(summary_df, 2, as.character),
             file = csv_out, sep = "\t",
