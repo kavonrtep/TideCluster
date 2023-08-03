@@ -364,7 +364,7 @@ def read_fasta_sequence_size(fasta_file):
     with open(fasta_file, 'r') as f:
         for line in f:
             if line[0] == '>':
-                header = line.strip().split(' ')[0][1:]  # remove part of name after space
+                header = line.strip().split()[0][1:]  # remove part of name after space
                 fasta_dict[header] = 0
             else:
                 fasta_dict[header] += len(line.strip())
@@ -385,7 +385,7 @@ def read_single_fasta_to_dictionary(fh):
     header = None
     for line in fh:
         if line[0] == '>':
-            header = line.strip().split(' ')[0][1:]  # remove part of name after space
+            header = line.strip().split()[0][1:]  # remove part of name after space
             fasta_dict[header] = []
         else:
             if header is None:
@@ -551,7 +551,7 @@ def write_temp_fasta_chunks(fasta_seq_size, fasta_file, chunk_size):
     with open(fasta_file, 'r') as f:
         for line in f:
             if line[0] == '>':
-                header = line.strip().split(' ')[0][1:]
+                header = line.strip().split()[0][1:]
                 # append to file
                 with open(seq_id_file_path_dict[header], 'a') as fout:
                     fout.write(line)

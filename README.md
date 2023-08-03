@@ -59,6 +59,17 @@ mamba create -n tidecluster -c conda-forge -c bioconda -c petrnovak tidecluster
 ```
 
 
+If you are getting `Illegal instruction` error message from TideHunter, try to compile 
+TideHunter from source and replace TideHunter conda binary with newly compiled binary. In 
+activated TideCluster environment run:
+```bash
+wget https://github.com/yangao07/TideHunter/releases/download/v1.4.3/TideHunter-v1.4.3.tar.gz
+tar -zxvf TideHunter-v1.4.3.tar.gz && cd TideHunter-v1.4.3
+make
+cp bin/TideHunter $CONDA_PREFIX/bin
+```
+
+
 
 ## Usage
 
@@ -256,9 +267,9 @@ TideCluster.py run_all -c 40 -pr cen6_sat -f CEN6_ver_220406.fasta -l library.fa
 
 ## Updating gff3 file based on manual annotation
 If you want to update GFF3 file with manual annotation, you can use `update_gff3.py` 
-script. This script will update "Name" attribute in GFF3" based on the conversion 
+script. This script will update "Name" attribute in GFF3 based on the conversion 
 table. Conversion table is tab-delimited file with two columns. First column is 
-original value is Name attribute and the second column is new value for Name.
+original value of Name attribute and the second column is a new value.
 
 
 
