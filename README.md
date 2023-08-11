@@ -263,6 +263,10 @@ TideCluster.py run_all -c 40 -pr cen6_sat -f CEN6_ver_220406.fasta -l library.fa
 - `prefix_tarean_report.html` - HTML report with tandem repeat annotations. 
 - `prefix_tarean_report.tsv` - File with tandem repeat annotations in a tab-delimited format.
 - `prefix_tarean` - Directory containing subdirectories with detailed TAREAN output for each TRC cluster.
+- `prefix_consensus_dimer_library.fasta` - FASTA file with consensus sequences for 
+  each TRC cluster. This sequences can be used as a library for similarity based 
+  annotation using RepeatMasker. 
+  
 
 
 ## Updating gff3 file based on manual annotation
