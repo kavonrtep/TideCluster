@@ -294,7 +294,7 @@ options:
 
 ```
 
-## Reannotation of tandem repeats usinf similarity based approach
+## Reannotation of tandem repeats using similarity based approach
 
 `TideCluster.py tarean` step produces FASTA file with representative sequences for each 
 TRC which can be used as library for similarity based annotation using RepeatMasker. 
