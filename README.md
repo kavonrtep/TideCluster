@@ -330,7 +330,7 @@ options:
 
 TideCluster utilizes Tidehunter [https://github.com/Xinglab/TideHunter] for tandem repeat detection and TAREAN for reconstruction of consensus sequences of tandem repeats.
 If you use TideCluster please cite:
-- https://github.com/kavonrtep/TideCluster
+- https://github.com/kavonrtep/TideCluster [![DOI](https://zenodo.org/badge/601111441.svg)](https://zenodo.org/badge/latestdoi/601111441)
 - TAREAN: a computational tool for identification and characterization of satellite DNA from unassembled short reads (https://doi.org/10.1093/nar/gkx257) 
 - TideHunter: efficient and sensitive tandem repeat detection from noisy long-reads using seed-and-chain (https://doi.org/10.1093/bioinformatics/btz376)
 
