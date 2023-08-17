@@ -1,8 +1,10 @@
 #!/usr/bin/env Rscript
 library(optparse, quietly = TRUE)
-library(R2HTML, quietly = TRUE)
-library(hwriter, quietly = TRUE)
-library(Biostrings, quietly = TRUE)
+suppressPackageStartupMessages({
+  library(R2HTML, quietly = TRUE)
+  library(hwriter, quietly = TRUE)
+  library(Biostrings, quietly = TRUE)
+})
 # Parse command line arguments
 option_list <- list(
   make_option(c('-i', '--input_dir'), action = 'store', type = 'character', help
@@ -87,7 +89,7 @@ n_gap50 <- numeric()
 consensus <- character()
 
 consensus_library <- character()
-consensus_cutoff <- 0.5
+consensus_cutoff <- 0.25
 
 for (i in seq_along(tarean_dirs)) {
   td_full <- paste0(args$input_dir, "/", tarean_dirs[i])
@@ -123,10 +125,49 @@ for (i in seq_along(tarean_dirs)) {
   }
 }
 consensus_library <- DNAStringSet(consensus_library)
-writeXStringSet(consensus_library,
-                file = paste0(args$output, "_consensus_dimer_library.fasta"))
+# rename sequences - keep syntax TRC_INDEX#TRC_INDEX
+names(consensus_library) <- sapply(strsplit(names(consensus_library), "#"), function(x) paste0(x[2], "#", x[2]))
+
+
 gff <- read_gff3(args$gff_file)
 
+parse_ssr_string <- function(input_string) {
+  # Split the string by comma and space
+  parts <- unlist(strsplit(input_string, ", "))
+  # Extract sequences using regular expressions
+  sequences <- gsub(" \\(.*", "", parts)
+  # Extract percentages using regular expressions
+  percentages <- as.numeric(gsub(".*\\(|%25\\)", "", parts))
+  include <- percentages > 10
+  sequences <- sequences[include]
+  sequences <- sapply(sequences, function(x)paste(rep(x, 200), collapse=""))
+  return(sequences)
+}
+
+
+# get info about SSRS - if repeat type is SSR - these must be replaced in concentus library
+# because tarean consensus is not usually correct for SSRs
+ssr_seq_all <- c()
+
+ssr_gff <- gff[gff$attributes$repeat_type == "SSR",]
+if (nrow(ssr_gff)>0){
+  # get just one line for each TRC
+  ssr_gff <- ssr_gff[!duplicated(ssr_gff$attributes$Name),,drop=FALSE]
+  for (ss in 1:nrow(ssr_gff)){
+    ssr_seq <- parse_ssr_string(ssr_gff$attributes$ssr[ss])
+    names(ssr_seq) <- rep(ssr_gff$attributes$Name[ss], length(ssr_seq))
+    ssr_seq_all <- c(ssr_seq_all, ssr_seq)
+  }
+  ssr_seq_all <- DNAStringSet(ssr_seq_all)
+  names(ssr_seq_all) <- paste0(names(ssr_seq_all), "#", names(ssr_seq_all))
+  # replace sequences in consensus library, but do not add new ones
+  include <- names(ssr_seq_all) %in% names(consensus_library)
+  consensus_library <- consensus_library[!names(consensus_library) %in% names(ssr_seq_all)]
+  consensus_library <- c(consensus_library, ssr_seq_all[include])
+}
+
+writeXStringSet(consensus_library,
+                file = paste0(args$output, "_consensus_dimer_library.fasta"))
 
 
 summary_df <- data.frame(INDEX, TRC,monomer_length, kmer, total_score, n_gap50,
@@ -195,6 +236,7 @@ include_cols <- c("TRC_with_link"="TRC",
                   "logo_link" = "Logo")
 
 summary_df_out <- summary_df[, names(include_cols)]
+
 # rename columns
 names(summary_df_out) <- include_cols[names(summary_df_out)]
 
@@ -222,6 +264,10 @@ is_ssrs <-  x <-  sapply(summary_df_out$SSRs, function(x) {
 summary_df_out$SSRs <- gsub("%25", "%", summary_df_out$SSRs)
 summary_df_out$Annotation <- gsub("%25", "%", summary_df_out$Annotation)
 
+
+if ("character(0)" %in% summary_df_out$SSRs){
+  summary_df_out$SSRs[summary_df_out$SSRs == "character(0)"] <- ""
+}
 
 if (sum(!is_ssrs) > 0){
   summary_df_out_tr <- summary_df_out[!is_ssrs,]
