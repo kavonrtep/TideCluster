@@ -1,6 +1,8 @@
 """ Utilities for the project. """
 import glob
+import itertools
 import os
+import shutil
 import subprocess
 import tempfile
 from collections import OrderedDict
@@ -8,6 +10,127 @@ from itertools import cycle
 from shutil import rmtree
 import re
 import networkx as nx
+
+class GRange:
+    def __init__(self, seqid, start, end, name, strand):
+        self.seqid = seqid
+        self.start = start
+        self.end = end
+        self.name = name
+        self.strand = strand
+    def __repr__(self):
+        return f"GRange(seqid={self.seqid}, start={self.start}, end={self.end}, name={self.name}, strand={self.strand})"
+    def print_bed(self):
+        return f"{self.seqid}\t{self.start}\t{self.end}\t{self.name}\t0\t{self.strand}"
+
+    def print_gff3(self):
+        return f"{self.seqid}\tRepeatMasker\trepeat\t{self.start}\t{self.end}\t.\t{self.strand}\t.\tName={self.name}"
+
+    def overlap(self, other):
+        return self.seqid == other.seqid and self.start <= other.end and self.end >= other.start
+
+    def within(self, other):
+        return self.seqid == other.seqid and self.start >= other.start and self.end <= other.end
+
+
+def read_gff3_to_grange_list(gff3_file):
+    granges = []
+    with open(gff3_file) as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            gff_record = Gff3Feature(line)
+            granges.append(GRange(gff_record.seqid,
+                                  gff_record.start,
+                                  gff_record.end,
+                                  gff_record.attributes_dict["Name"],
+                                  gff_record.strand))
+    return granges
+
+def split_intervals(granges):
+    events = []
+    for grange in granges:
+        events.append((grange.seqid, grange.start, 1, grange))  # 1 for start
+        events.append((grange.seqid, grange.end, -1, grange))  # -1 for end
+    # Sort events by seqid, position, and type (start before end)
+    events.sort(key=lambda x: (x[0], x[1], -x[2]))
+    split = []
+    active_granges = set()
+    prev_pos = None
+    prev_seqid = None
+    count = 0
+    last_end = None
+    for seqid, pos, event_type, grange in events:
+        # Reset active granges and counters for a new seqid
+        if prev_seqid and seqid != prev_seqid:
+            active_granges.clear()
+            count = 0
+            last_end = None
+        if count > 0 and prev_pos is not None:
+            end_pos = pos if event_type == -1 else pos - 1
+            if last_end is not None and prev_pos <= last_end:
+                prev_pos = last_end + 1
+            new_grange = GRange(seqid=prev_seqid, start=prev_pos, end=end_pos, name="", strand="")
+            ori_names = [g.name for g in active_granges]
+            names = "|".join(set(ori_names))
+            new_grange.name = names
+            ori_strands = [g.strand for g in active_granges]
+            strand = set(ori_strands)
+            if len(strand) == 1:
+                new_grange.strand = strand.pop()
+            else:
+                new_grange.strand = "."
+            split.append(new_grange)
+            last_end = end_pos
+        if event_type == 1:
+            active_granges.add(grange)
+        else:
+            active_granges.remove(grange)
+        count += event_type
+        prev_pos = pos
+        prev_seqid = seqid
+    return split
+
+
+def filter_intervals(gr_filter, gr):
+    """
+    Filters intervals in listB based on listA.
+
+    Args:
+    - gr_filter (list of GRange): List of GRange intervals to use as a filter.
+    - gr (list of GRange): List of GRange intervals to be filtered.
+
+    Returns:
+    - List of Grange intervals from listB that are within intervals in listA.
+    """
+
+
+    # Split and sort lists by seqid and start position
+    dict_filter = {}
+    dict_gr = {}
+    for grange in gr_filter:
+        dict_filter.setdefault(grange.seqid, []).append(grange)
+    for grange in gr:
+        dict_gr.setdefault(grange.seqid, []).append(grange)
+
+    for seqid in dict_filter:
+        dict_filter[seqid].sort(key=lambda x: x.start)
+    for seqid in dict_gr:
+        dict_gr[seqid].sort(key=lambda x: x.start)
+
+    filtered = []
+
+    for seqid in dict_filter:
+        if seqid not in dict_gr:
+            continue
+        for grange_out in dict_gr[seqid]:
+            for grange_filter in dict_filter[seqid]:
+                if grange_out.name == grange_filter.name:
+                    if grange_out.within(grange_filter):
+                        filtered.append(grange_out)
+                        break
+
+    return filtered
 
 
 def get_kmers(dna, k):
@@ -568,22 +691,89 @@ def run_tidehunter(fasta_file, tidehunter_arguments):
     require TideHunter to be in PATH
     version of TideHunter must be 1.4.3
     return path to tidehunter output file
+    For large files it splits fasta file into chunks and run tidehunter on each chunk
+    to limit memory usage, on large files, tidehunter is consuming excessive amount of memory
+
     """
     # verify tidehunter version
     tidehunter_version = subprocess.check_output(
             "TideHunter -v", shell=True
             ).decode().strip()
     assert tidehunter_version == "1.4.3", "TideHunter version 1.4.3 is required"
+    # check size of fasta file, if > 1GB, split into chunks to limit memory usage
+    # each sequence in fasta ~ 500000nt
+    file_size = os.path.getsize(fasta_file)
+    file_size_limit = 50000000
+    if file_size > file_size_limit:
+        # split fasta file into parts
+        # run tidehunter on each part
+        # merge results
+        #
+        print("splitting fasta file into parts")
+        number_of_parts = int(file_size / file_size_limit) + 1
+        print("Number of parts:", number_of_parts)
+        fasta_file_parts = split_fasta_to_parts(fasta_file, number_of_parts)
+        print("Number of parts:", len(fasta_file_parts))
+        tidehunter_parts = []
+        for f in fasta_file_parts:
+            tmp_file_out = f + ".out"
+            tidehunter_cmd = (F"TideHunter -f 2 -o {tmp_file_out} {tidehunter_arguments}"
+                              F" {f}")
+            print("running TideHunter")
+            print(tidehunter_cmd)
+            subprocess.check_call(tidehunter_cmd, shell=True)
+            tidehunter_parts.append(tmp_file_out)
+        # merge results
+        print("merging TideHunter results")
+        tidehunter_out = fasta_file + ".out"
+        with open(fasta_file + ".out", 'w') as fout:
+            for p in tidehunter_parts:
+                with open(p, 'r') as fin:
+                    for line in fin:
+                        fout.write(line)
+        # remove directory with temporary files (all files are in the same directory)
+        tmp_dir_name = os.path.dirname(fasta_file_parts[0])
+        shutil.rmtree(tmp_dir_name)
+    else:
+        # run tidehunter on all
+        tidehunter_out = fasta_file + ".out"
+        tidehunter_cmd = (F"TideHunter -f 2 -o {tidehunter_out} {tidehunter_arguments}"
+                          F" {fasta_file}")
 
-    # run tidehunter
-    tmp_file = fasta_file + ".out"
-    tidehunter_cmd = (F"TideHunter -f 2 -o {tmp_file} {tidehunter_arguments}"
-                      F" {fasta_file}")
+        print("running TideHunter")
+        print(tidehunter_cmd)
+        subprocess.check_call(tidehunter_cmd, shell=True)
 
-    print("running TideHunter")
-    print(tidehunter_cmd)
-    subprocess.check_call(tidehunter_cmd, shell=True)
-    return tmp_file
+    return tidehunter_out
+
+def split_fasta_to_parts(fasta_file, number_of_parts):
+    """split fasta file to parts
+    :param fasta_file:
+    :param number_of_parts:
+    :return: List of paths to temporary fasta files
+
+    """
+    with open(fasta_file, 'r') as f:
+        s = read_single_fasta_to_dictionary(f)
+    l = len(s)
+    chunk_size = int(l / number_of_parts) + 1
+    # check sanity of chunk size
+    if chunk_size < 1:
+        chunk_size = 1
+    tmp_dir = tempfile.mkdtemp()
+    file_list = []
+    n = 0
+    while True:
+        k = list(itertools.islice(s.keys(), chunk_size))
+        s_part = {i: s.pop(i) for i in k}
+        f_out = F"{tmp_dir}/part_{n}.fasta"
+        save_fasta_dict_to_file(s_part, f_out)
+        file_list.append(f_out)
+        if len(s) == 0:
+            break
+        n += 1
+    return file_list
+
 
 
 class TideHunterFeature:
@@ -1282,13 +1472,37 @@ def add_cluster_info_to_gff3(fin, fout, clusters):
             f2.write(gff3_feature.print_line())
     return consensus_clusters, consensus_clusters_dimers
 
+def extend_gff3_intervals(gff3_file, gff3_out_file, rep_size, extend_prop=0.05):
+    """
+    extend gff3 intervals by rep_size * extend_prop
+    :param gff3_file:
+    :param gff3_out_file:
+    :param rep_size: dict with repeat sizes
+    :param extend_prop:
+    :return: None
 
-def merge_overlapping_gff3_intervals(gff3_file, gff3_out_file):
+    This is helper function to for evaluation which TRC region to keep
+    """
+    with open(gff3_file, 'r') as f1, open(gff3_out_file, 'w') as f2:
+        for line in f1:
+            if line.startswith("#"):
+                f2.write(line)
+                continue
+            gff3_feature = Gff3Feature(line)
+            size1 = rep_size[gff3_feature.attributes_dict['Name']]
+            size2 = (gff3_feature.end - gff3_feature.start) * 2 * extend_prop
+            size_ext = int(min(size1, size2))
+            gff3_feature.start = max(1, gff3_feature.start - size_ext)
+            gff3_feature.end += size_ext
+            f2.write(gff3_feature.print_line())
+
+def merge_overlapping_gff3_intervals(gff3_file, gff3_out_file, use_strand=False):
     """
     merge overlapping intervals in gff3 file
     merge only if they have same Cluster_ID
     :param gff3_file: path to gff3 file
     :param gff3_out_file: path to output gff3 file
+    :param use_strand: if True, merge only intervals on the same strand
     :return: nothing
     """
     # read gff3 file, split to lists by cluster ID and seqname
@@ -1298,22 +1512,34 @@ def merge_overlapping_gff3_intervals(gff3_file, gff3_out_file):
             if line.startswith("#"):
                 continue
             gff3_feature = Gff3Feature(line)
-            cluster_id = gff3_feature.attributes_dict['Cluster_ID']
+            # Cluster_ID could be missing in some gff3 files, use Name instead
+            if 'Cluster_ID' not in gff3_feature.attributes_dict:
+                cluster_id = gff3_feature.attributes_dict['Name']
+            else:
+                cluster_id = gff3_feature.attributes_dict['Cluster_ID']
             seqname = gff3_feature.seqid
-            seq_cluster_id = (seqname, cluster_id)
+            strand = gff3_feature.strand
+            if use_strand:
+                seq_cluster_id = (seqname, cluster_id,strand)
+            else:
+                seq_cluster_id = (seqname, cluster_id)
             if seq_cluster_id not in gff3_dict:
                 gff3_dict[seq_cluster_id] = []
             gff3_dict[seq_cluster_id].append(gff3_feature)
     with open(gff3_out_file, 'w') as f:
         f.write("##gff-version 3\n")
         for i in gff3_dict:
+            if use_strand:
+                strand = i[2]
+            else:
+                strand = "."
             intervals = []
             for j in gff3_dict[i]:
                 intervals.append((j.start, j.end))
             intervals = merge_intervals(intervals)
             for start, end in intervals:
                 gff_line = (F'{i[0]}\tTideCluster\ttandem_repeat'
-                            F'\t{start}\t{end}\t{1}\t.\t.\tName={i[1]}\n')
+                            F'\t{start}\t{end}\t{1}\t{strand}\t.\tName={i[1]}\n')
 
                 f.write(gff_line)
 
