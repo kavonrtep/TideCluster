@@ -270,7 +270,7 @@ TideCluster.py run_all -c 40 -pr cen6_sat -f CEN6_ver_220406.fasta -l library.fa
 
 
 ## Updating gff3 file based on manual annotation
-If you want to update GFF3 file with manual annotation, you can use `update_gff3.py` 
+If you want to update GFF3 file with manual annotation, you can use `tc_update_gff3.py` 
 script. This script will update "Name" attribute in GFF3 based on the conversion 
 table. Conversion table is tab-delimited file with two columns. First column is 
 original value of Name attribute and the second column is a new value.
@@ -278,7 +278,7 @@ original value of Name attribute and the second column is a new value.
 
 
 ```help
-usage: update_gff3.py [-h] -g GFF3 -t TABLE -o OUTPUT [-a ATTRIBUTE_NAME]
+usage: tc_update_gff3.py [-h] -g GFF3 -t TABLE -o OUTPUT [-a ATTRIBUTE_NAME]
 
 Update gff3 attributes based on conversion table.
 
@@ -293,6 +293,38 @@ options:
                         attribute name to update, default attribute is "Name"
 
 ```
+
+## Reannotation of tandem repeats usinf similarity based approach
+
+`TideCluster.py tarean` step produces FASTA file with representative sequences for each 
+TRC which can be used as library for similarity based annotation using RepeatMasker. 
+This library file is available in `prefix_consensus_dimer_library.fasta`.
+Similarity based annotation can fill gaps in annotation of tandem repeats provided by 
+TideCluster/TideHunter. To reannotate tandem repeats using RepeatMasker, you can use 
+tc_reannotate.py script. This script will run RepeatMasker using TRC library and then 
+filter RepeatMasker output to retain only high-quality TRC hits. Overlapping TRC hits
+are merged and regions shorter than twice the monomer length are excluded from the output.
+
+### Usage:
+
+```help
+usage: tc_reannotate.py [-h] (-r REPEATMASKER_FILE | -s REF_SEQ) -f FASTA_FILE [-c CPU] -o OUTPUT [-d]
+
+options:
+  -h, --help            show this help message and exit
+  -r REPEATMASKER_FILE, --repeatmasker_file REPEATMASKER_FILE
+                        RepeatMasker output file
+  -s REF_SEQ, --ref_seq REF_SEQ
+                        FASTA file to annotated by TRC library
+  -f FASTA_FILE, --fasta_file FASTA_FILE
+                        Fasta file wiht TRC library used for RepeatMasker search
+  -c CPU, --cpu CPU     Number of CPUs to use
+  -o OUTPUT, --output OUTPUT
+                        GFF3 output file
+  -d, --debug           Keep temp files for debuging
+
+```
+
 
 ## Credits
 

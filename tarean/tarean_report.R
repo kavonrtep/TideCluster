@@ -166,8 +166,8 @@ if (nrow(ssr_gff)>0){
   consensus_library <- c(consensus_library, ssr_seq_all[include])
 }
 
-writeXStringSet(consensus_library,
-                file = paste0(args$output, "_consensus_dimer_library.fasta"))
+lib_file_name <- paste0(gsub("_tarean_report$","", args$output), "_consensus_dimer_library.fasta")
+writeXStringSet(consensus_library, file = lib_file_name)
 
 
 summary_df <- data.frame(INDEX, TRC,monomer_length, kmer, total_score, n_gap50,
