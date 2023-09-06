@@ -1671,10 +1671,12 @@ def run_cmd(cmd):
     """
     try:
         # run command and capture warning and error messages
+        result = subprocess.run(cmd, shell=True, stderr=subprocess.PIPE)
         # if command fails, print error message and return error
-        subprocess.check_call(cmd, shell=True, stderr=subprocess.PIPE)
-        # store stderr in variable
+        if result.returncode != 0:
+            print(result.stderr.decode('utf-8'))
+            return [cmd, 'error']
     except subprocess.CalledProcessError as e:
-        print(e.stderr)
+        print(e.stderr.decode('utf-8'))
         return [cmd, 'error']
     return [cmd, 'ok']

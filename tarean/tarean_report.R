@@ -92,6 +92,7 @@ consensus_library <- character()
 consensus_cutoff <- 0.25
 
 for (i in seq_along(tarean_dirs)) {
+
   td_full <- paste0(args$input_dir, "/", tarean_dirs[i])
   INDEX[i] <- as.numeric(gsub("TRC_", "",
                            gsub("[.]fasta_tarean",
@@ -141,6 +142,9 @@ parse_ssr_string <- function(input_string) {
   include <- percentages > 10
   sequences <- sequences[include]
   sequences <- sapply(sequences, function(x)paste(rep(x, 200), collapse=""))
+  if (length(sequences) == 0){
+    sequences <- ""
+  }
   return(sequences)
 }
 
@@ -150,16 +154,22 @@ parse_ssr_string <- function(input_string) {
 ssr_seq_all <- c()
 
 ssr_gff <- gff[gff$attributes$repeat_type == "SSR",]
+
 if (nrow(ssr_gff)>0){
   # get just one line for each TRC
   ssr_gff <- ssr_gff[!duplicated(ssr_gff$attributes$Name),,drop=FALSE]
+
   for (ss in 1:nrow(ssr_gff)){
     ssr_seq <- parse_ssr_string(ssr_gff$attributes$ssr[ss])
     names(ssr_seq) <- rep(ssr_gff$attributes$Name[ss], length(ssr_seq))
     ssr_seq_all <- c(ssr_seq_all, ssr_seq)
   }
+
+
+
   ssr_seq_all <- DNAStringSet(ssr_seq_all)
   names(ssr_seq_all) <- paste0(names(ssr_seq_all), "#", names(ssr_seq_all))
+
   # replace sequences in consensus library, but do not add new ones
   include <- names(ssr_seq_all) %in% names(consensus_library)
   consensus_library <- consensus_library[!names(consensus_library) %in% names(ssr_seq_all)]
