@@ -149,7 +149,7 @@ parse_ssr_string <- function(input_string) {
 }
 
 
-# get info about SSRS - if repeat type is SSR - these must be replaced in concentus library
+# get info about SSRS - if repeat type is SSR - these must be replaced in consensus library
 # because tarean consensus is not usually correct for SSRs
 ssr_seq_all <- c()
 
@@ -157,11 +157,11 @@ ssr_gff <- gff[gff$attributes$repeat_type == "SSR",]
 
 if (nrow(ssr_gff)>0){
   # get just one line for each TRC
-  ssr_gff <- ssr_gff[!duplicated(ssr_gff$attributes$Name),,drop=FALSE]
+  ssr_gff_repr <- ssr_gff[!duplicated(ssr_gff$attributes$Name),,drop=FALSE]
 
-  for (ss in 1:nrow(ssr_gff)){
-    ssr_seq <- parse_ssr_string(ssr_gff$attributes$ssr[ss])
-    names(ssr_seq) <- rep(ssr_gff$attributes$Name[ss], length(ssr_seq))
+  for (ss in 1:nrow(ssr_gff_repr)){
+    ssr_seq <- parse_ssr_string(ssr_gff_repr$attributes$ssr[ss])
+    names(ssr_seq) <- rep(ssr_gff_repr$attributes$Name[ss], length(ssr_seq))
     ssr_seq_all <- c(ssr_seq_all, ssr_seq)
   }
 
@@ -288,20 +288,91 @@ if (sum(!is_ssrs) > 0){
   )
 }
 
-if (sum(is_ssrs) > 0){
-  summary_df_out_ssrs <- summary_df_out[is_ssrs,]
-  # exclude TAREAN logo and graph,..., it is misleading
-  summary_df_out_ssrs$Graph <- NULL
-  summary_df_out_ssrs$Logo <- NULL
-  summary_df_out_ssrs$Score <- NULL
-  summary_df_out_ssrs$"Monomer size" <- NULL
-  summary_df_out_ssrs$Consensus <- NULL
+
+extract_summary_table <- function (gff){
+  # atrributes$annotation could be NULL
+  if (is.null(gff$attributes$annotation)){
+    gff$attributes$annotation <- ""
+  }
+  # SSRs could be NULL
+  gff$attributes$ssr <- ifelse(is.na(gff$attributes$ssr),
+                               "",
+                               gff$attributes$ssr)
+  gff_parts <- split(gff, gff$attributes$Name)
+
+  summmary_df_out <- data.frame(
+    TRC = names(gff_parts),
+    "Total size" = sapply(gff_parts, function(x) {
+      sum(x$end - x$start)
+    }),
+    SSRs = sapply(gff_parts, function(x) {
+      gsub(",", "<br>", unique(x$attributes$ssr))
+    }),
+    Annotation = sapply(gff_parts, function(x) {
+      unique(x$attributes$annotation)
+    }),
+    "Number of arrays" = sapply(gff_parts, function(x) {
+      length(x$attributes$Name)
+    }),
+    "Size of arrays" = sapply(gff_parts, function(x) {
+      minmedmax <- paste0("min:    ",min(x$end - x$start),"<br>",
+                          "median: ",   round(median(x$end - x$start)), "<br>",
+                          "max:    ", max(x$end - x$start))
+      minmedmax
+    }),
+    stringsAsFactors = FALSE, check.names = FALSE
+  )
+  # format for html - replace %25 with %
+  summmary_df_out$SSRs <- gsub("%25", "%", summmary_df_out$SSRs)
+  summmary_df_out$Annotation <- gsub("%25", "%", summmary_df_out$Annotation)
+  return(summmary_df_out)
+}
+
+
+if (nrow(ssr_gff)>0){
+  # report SSRs
+  print(ssr_gff)
+  print("-------------------")
+  summmary_df_out_ssr <- extract_summary_table(ssr_gff)
+  print(summmary_df_out_ssr)
   HTML.title("Simple Sequence Repeats Summary", file = html_out)
-  HTML(summary_df_out_ssrs, file = html_out, title = "TAREAN report",
+  HTML(summmary_df_out_ssr, file = html_out, title = "TAREAN report",
        caption = "TAREAN report - SSRs", row.names = FALSE, classfirstline="sticky-header",
        align = 'left')
-
 }
+
+# exluded TRC:
+excl <- c(TRC, unique(ssr_gff$attributes$Name))
+gff_rest <- gff[!gff$attributes$Name %in% excl,]
+print('gff_rest')
+print(gff_rest)
+if (nrow(gff_rest)>0){
+    # report other TRs
+    summmary_df_out_rest <- extract_summary_table(gff_rest)
+    HTML.title("Other Tandem Repeats", file = html_out)
+    HTML(summmary_df_out_rest, file = html_out, title = "TAREAN report",
+         caption = "TAREAN report - other TRs", row.names = FALSE, classfirstline="sticky-header",
+         align = 'left')
+}
+
+
+
+
+
+
+# if (sum(is_ssrs) > 0){
+#   summary_df_out_ssrs <- summary_df_out[is_ssrs,]
+#   # exclude TAREAN logo and graph,..., it is misleading
+#   summary_df_out_ssrs$Graph <- NULL
+#   summary_df_out_ssrs$Logo <- NULL
+#   summary_df_out_ssrs$Score <- NULL
+#   summary_df_out_ssrs$"Monomer size" <- NULL
+#   summary_df_out_ssrs$Consensus <- NULL
+#   HTML.title("Simple Sequence Repeats Summary", file = html_out)
+#   HTML(summary_df_out_ssrs, file = html_out, title = "TAREAN report",
+#        caption = "TAREAN report - SSRs", row.names = FALSE, classfirstline="sticky-header",
+#        align = 'left')
+# }
 
 
 HTMLEndFile(file = html_out)

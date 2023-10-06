@@ -849,6 +849,35 @@ def fasta_to_dict(fasta_file):
     fasta_dict = {k: "".join(v) for k, v in fasta_dict.items()}
     return fasta_dict
 
+def fasta_to_list(fasta_file):
+    """
+    convert fasta file to list
+    :param fasta_file:
+    :return: list of tuples with name and sequences
+    use this instead of fasta_todit if there are duplicated names in fasta file
+
+    """
+    fasta_list = []
+    with open(fasta_file, 'r') as f:
+        for line in f:
+            if line.startswith(">"):
+                seq_name = line.split()[0].replace(">", "")
+                fasta_list.append([seq_name, ""])
+            else:
+                fasta_list[-1][1] += line.strip()
+    return fasta_list
+
+def save_fasta_list_to_file(fasta_list, fasta_file):
+    """
+    save fasta list to file
+    :param fasta_list: list
+    :param fasta_file: str
+    :return:
+    """
+    with open(fasta_file, 'w') as f:
+        for name, seq in fasta_list:
+            f.write(F">{name}\n{seq}\n")
+
 
 def get_seq_from_fasta(fasta_dict, seq_id, start=None, end=None):
     """
@@ -1066,7 +1095,6 @@ def reverse_complement(dna):
         'W': 'W', 'K': 'M', 'M': 'K', 'B': 'V', 'D': 'H', 'H': 'D', 'V': 'B',
         'N': 'N'
         }
-
     return ''.join(complement[base] for base in reversed(dna.upper()))
 
 
@@ -1169,7 +1197,6 @@ def get_ssrs_proportions(sequences):
 
 
 def homopolymer(motif, motiflength):
-
     """
     return true if motif is repeat of single nucleotide
     :param motif:
@@ -1201,12 +1228,22 @@ def find_ssrs(sequence, specs=None):
     :return: list of tuples with motif and number of repeats
     """
     if specs is None:
-        specs = [(2, 9),  # dinucl. with >= 9 repeats
+        specs = [(1,20),
+                 (2, 9),  # dinucl. with >= 9 repeats
                  (3, 6),  # trinucl. with >= 6 repeats
                  (4, 5),  # tetranucl. with >= 5 repeats
                  (5, 5),  # pentanucl. with >= 5 repeats
-                 (6, 6)]  # hexanucl. with >= 6 repeats
+                 (6, 5),  # hexanucl. with >= 5 repeats
+                 (7, 5),  # heptanucl. with >= 5 repeats
+                 (8, 5),  # octanucl. with >= 5 repeats
+                 (9, 5),  # nonanucl. with >= 5 repeats
+                 (10, 5),  # decanucl. with >= 5 repeats
+                 (11, 5),  # undecanucl. with >= 5 repeats
+                 (12, 5),  # dodecanucl. with >= 5 repeats
+                 (13, 5),  # tridecanucl. with >= 5 repeats
+                 (14, 5)]  # tetradecanucl. with >= 5 repeats
     results = []
+    homopolymers = []
     locations = {}
     for i in range(len(specs)):
         motiflength, minreps = specs[i]
@@ -1215,6 +1252,22 @@ def find_ssrs(sequence, specs=None):
             ssr = match.group(1)
             motif = match.group(2).lower()
             if homopolymer(motif, motiflength):
+                if motiflength == 1:
+                    ssrlength = len(ssr)
+                    repeats = ssrlength // motiflength
+                    end = match.end()
+                    start = end - ssrlength + 1
+                    homopolymers.append(
+                            {
+                                'ssr_number': len(results) + 1,
+                                'motif_length': motiflength,
+                                'motif_sequence': motif,
+                                'repeats': repeats,
+                                'start': start,
+                                'end': end,
+                                'seq_length': len(sequence) - sequence.count('N'),
+                                }
+                            )
                 continue
             ssrlength = len(ssr)
             repeats = ssrlength // motiflength
@@ -1232,6 +1285,8 @@ def find_ssrs(sequence, specs=None):
                             'seq_length': len(sequence) - sequence.count('N'),
                             }
                         )
+    if len(homopolymers) > 0 and len(results) == 0:
+        results += homopolymers
     return results
 
 
@@ -1249,8 +1304,32 @@ def normalize_motif(motif):
     return min(fm, rcm)
 
 
+
+def get_unique_motifs(motifs):
+    """
+    return unique motifs
+    :param motifs: list
+    :return: motifs: list
+    exclude motifs which are multiple of shorter motif
+    """
+    motifs.sort(key=len)  # Sort motifs by length to ensure shorter motifs are checked first
+    unique_motifs = []
+
+    for i, motif in enumerate(motifs):
+        is_unique = True
+        for shorter_motif in unique_motifs:
+            if len(motif) % len(shorter_motif) == 0 and shorter_motif * (
+                    len(motif) // len(shorter_motif)) == motif:
+                is_unique = False
+                break
+        if is_unique:
+            unique_motifs.append(motif)
+    return unique_motifs
+
+
 def sum_up_ssrs_motifs(results):
-    """sum up motifs
+    """
+    sum up motifs
     :param results: list of dictionaries with ssr results
     """
     motifs = {}
@@ -1261,6 +1340,10 @@ def sum_up_ssrs_motifs(results):
             motifs[motif] += i['repeats']
         else:
             motifs[motif] = i['repeats']
+    unique_motifs = get_unique_motifs(list(motifs.keys()))
+    # keep only unique motifs
+    motifs = {k: motifs[k] for k in unique_motifs}
+
     return motifs
 
 
@@ -1270,14 +1353,9 @@ def get_ssrs_description_multiple(seq_strs):
     :param seq_strs:
     :return:
     """
-    specs = [(2, 3),  # dinucl. with >= 9 repeats
-             (3, 3),  # trinucl. with >= 6 repeats
-             (4, 3),  # tetranucl. with >= 5 repeats
-             (5, 3),  # pentanucl. with >= 5 repeats
-             (6, 3)]  # hexanucl. with >= 6 repeats
     ssrs = []
     for seq_str in seq_strs:
-        ssrs += find_ssrs(seq_str, specs)
+        ssrs += find_ssrs(seq_str)
     motif_count = sum_up_ssrs_motifs(ssrs)
     length = sum([len(seq_str) for seq_str in seq_strs])
     motif_percent = {k: 100 * v * len(k) / length for k, v in motif_count.items()}
@@ -1298,13 +1376,10 @@ def get_ssrs_description(seq_str):
     :param seq_str:
     :return:
     """
-    specs = [(2, 3),  # dinucl. with >= 9 repeats
-             (3, 3),  # trinucl. with >= 6 repeats
-             (4, 3),  # tetranucl. with >= 5 repeats
-             (5, 3),  # pentanucl. with >= 5 repeats
-             (6, 3)]  # hexanucl. with >= 6 repeats
-    ssrs = find_ssrs(seq_str, specs)
+    ssrs = find_ssrs(seq_str)
+
     motif_count = sum_up_ssrs_motifs(ssrs)
+
     motif_percent = {k: 100 * v * len(k) / len(seq_str) for k, v in motif_count.items()}
     desc = ""
     # iterate over sorted motifs by percent
@@ -1661,6 +1736,7 @@ def save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer):
         save_fasta_dict_to_file(cons_cls[cluster_id], f)
         f = os.path.join(consensus_dir, cluster_id + "_dimers.fasta")
         save_fasta_dict_to_file(cons_cls_dimer[cluster_id], f)
+
 
 
 def run_cmd(cmd):

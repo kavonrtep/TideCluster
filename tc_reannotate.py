@@ -32,7 +32,7 @@ def get_seq_lengths(fasta_file):
 
     seq_lengths_unique = {}
     for seq_name in seq_lengths:
-        seq_name_unique = seq_name.split()[0].split("#")[0]
+        seq_name_unique = seq_name.split()[0].split("#")[1]
         if seq_name_unique not in seq_lengths_unique:
             seq_lengths_unique[seq_name_unique] = seq_lengths[seq_name]
         elif seq_lengths_unique[seq_name_unique] < seq_lengths[seq_name]:
@@ -88,7 +88,7 @@ def main():
     group.add_argument(
         "-r", "--repeatmasker_file", help="RepeatMasker output file", type=str)
     group.add_argument(
-        "-s", "--ref_seq", help="FASTA file to annotated by TRC library", type=str
+        "-s", "--ref_seq", help="FASTA file to be annotated by TRC library", type=str
         )
 
     parser.add_argument(
@@ -112,11 +112,33 @@ def main():
 
     # create temp directory
     temp_dir = tempfile.mkdtemp()
+    # adjust length of sequences with shorted monomers
+    seq_lengths = get_seq_lengths(args.fasta_file)
+    # seq_lengths store original  length of sequences
+    print(seq_lengths)
+
+    input_library = tc.fasta_to_list(args.fasta_file)
+    updated_library = []
+    for n, s in input_library:
+        if len(s) < 4000:
+            N = 4000 // len(s)
+            if N > 1:
+                updated_library.append((n, s * N))
+            else:
+                updated_library.append((n, s))
+        else:
+            updated_library.append((n, s))
+
+    # write adjusted library to temp file in temp directory
+    rm_library = F"{temp_dir}/rm_library.fasta"
+    tc.save_fasta_list_to_file(updated_library, rm_library)
+
     if args.ref_seq:
         # run RepeatMasker in temp directory
         cmds = (F"RepeatMasker -dir {temp_dir} {args.ref_seq} "
-                F"-nolow -no_is -e ncbi  -lib {args.fasta_file} -pa {args.cpu}")
+                F"-nolow -no_is -e ncbi  -lib {rm_library} -pa {args.cpu}")
         print("Running RepeatMasker...")
+        print(cmds)
         os.system(cmds)
         # list files in temp directory
         files = os.listdir(temp_dir)
@@ -124,8 +146,7 @@ def main():
 
 
     # get length of sequences in fasta file - this is the length of sat dimers
-    seq_lengths = get_seq_lengths(args.fasta_file)
-    print(seq_lengths)
+
     # intermediate files - in temp directory:
 
     rm_gff3 = F"{temp_dir}/rm.gff3"

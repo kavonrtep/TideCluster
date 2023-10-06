@@ -57,6 +57,21 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000):
     fasta_dict = tc.extract_sequences_from_gff3(gff, fasta, tarean_dir_fasta)
     l_debug = 0
     cmd_list = []
+
+    ssr = {}
+    with open(gff, "r") as f:
+        for i in f:
+            if i.startswith("#"):
+                continue
+            gff_record = tc.Gff3Feature(i)
+            if "ssr" in gff_record.attributes:
+                ssr[gff_record.attributes_dict['Name']] = gff_record.attributes_dict[
+                    "ssr"]
+    print("SSR info:")
+    print(ssr)
+
+
+
     print("preparaing sequences for TAREAN")
     omitted_clusters = []
     for k, v in fasta_dict.items():
@@ -83,7 +98,10 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000):
         # save oriented sequences to file
         tc.save_fasta_dict_to_file(seqs, v)
         # get current script path
-
+        # do not run if ssrs
+        if k in ssr:
+            print(F"{k} is SSR, skipping")
+            continue
         tarean_out = F"{tarean_dir}/{v_basename}_tarean"
         cmd = F"{script_path}/tarean/tarean.R -i {v} -s 0 -n {1} -o {tarean_out}"
         cmd_list.append(cmd)
@@ -110,21 +128,14 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000):
 
     print("TAREAN finished")
     # get SSR info for tarean report from gff3 file
-    ssr = {}
-    with open(gff, "r") as f:
-        for i in f:
-            if i.startswith("#"):
-                continue
-            gff_record = tc.Gff3Feature(i)
-            if "ssr" in gff_record.attributes:
-                ssr[gff_record.attributes_dict['Name']] = gff_record.attributes_dict[
-                    "ssr"]
+
     # export SSR info to csv file
     with open(F"{tarean_dir}/SSRS_summary.csv", "w") as f:
         for k, v in ssr.items():
             f.write(F"{k}\t{v}\n")
 
     # final report:
+    print(cmd)
     cmd = (F"{script_path}/tarean/tarean_report.R -i {tarean_dir} -o"
            F" {prefix}_tarean_report -g {gff}")
     print("Making final report.")
@@ -250,7 +261,6 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
     # run dustmasker first, sequences which are completely masked
     # will not be used in clastering.
     mask_prop = tc.get_ssrs_proportions(consensus_dimers)
-
     # if count mask_prop above 0.9
     ssrs_id = [k for k, v in mask_prop.items() if v > 0.9]
     # remove ssrs from consensus sequences, they will be added back later
@@ -269,7 +279,6 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
                         "\n"
                         )]
                 )
-
     # find unique ssrs seq
     ssrs_clusters = {}
     ssrs_representative = {}
@@ -278,19 +287,16 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
             ssrs_representative[ssrs] = k
     for k, ssrs in ssrs_seq.items():
         ssrs_clusters[k] = ssrs_representative[ssrs]
-
     # recalculate description for each ssrs_cluster
     dimers_ssrs_clusters = {}
     for n, repre_id in ssrs_clusters.items():
         if repre_id not in dimers_ssrs_clusters:
             dimers_ssrs_clusters[repre_id] = []
         dimers_ssrs_clusters[repre_id].append(ssrs_dimers[n])
-
     # recalculating ssrs description
     ssrs_cluster_description = {}
     for k, v in dimers_ssrs_clusters.items():
         ssrs_cluster_description[k] = tc.get_ssrs_description_multiple(v)
-
     if len(consensus) == 0:
         print("No tandem repeats left after dustmasking, skipping clustering")
     # first round of clustering by mmseqs2
