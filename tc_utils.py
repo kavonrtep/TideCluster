@@ -518,6 +518,35 @@ def read_single_fasta_to_dictionary(fh):
     return fasta_dict
 
 
+def read_single_fasta_as_generator(fh):
+    """
+    Read fasta file as a generator
+    :param fh: - file handle
+    :yield:
+    header, sequence
+    """
+    # Verify that fh is a file handle
+    if not hasattr(fh, 'read'):
+        raise TypeError("fh must be a file handle")
+
+    header = None
+    sequence = []
+    for line in fh:
+        if line[0] == '>':
+            if header is not None:
+                yield header, ''.join(sequence)
+                sequence = []
+            header = line.strip().split()[0][1:]  # Remove part of name after space
+        else:
+            if header is None:
+                raise ValueError('Fasta file does not start with header')
+            sequence.append(line.strip())
+
+    if header is not None:
+        yield header, ''.join(sequence)
+
+
+
 def split_fasta_to_chunks(fasta_file, chunk_size=100000000, overlap=100000):
     """
     Split fasta file to chunks, sequences longer than chunk size are split to overlaping
@@ -551,13 +580,14 @@ def split_fasta_to_chunks(fasta_file, chunk_size=100000000, overlap=100000):
             matching_table.append([header, 0, 0, size, new_header])
     # read sequences from fasta files and split them to chunks according to matching table
     # open output and input files, use with statement to close files
-    fasta_dict = read_single_fasta_to_dictionary(open(fasta_file, 'r'))
+    # fasta_dict = read_single_fasta_to_dictionary(open(fasta_file, 'r'))
     with open(fasta_file_split, 'w') as fh_out:
-        for header in fasta_dict:
-            matching_table_part = [x for x in matching_table if x[0] == header]
-            for header2, i, start, end, new_header in matching_table_part:
-                fh_out.write('>' + new_header + '\n')
-                fh_out.write(fasta_dict[header][start:end] + '\n')
+        with open(fasta_file) as fh:
+            for header, sequence in read_single_fasta_as_generator(fh):
+                matching_table_part = [x for x in matching_table if x[0] == header]
+                for header2, i, start, end, new_header in matching_table_part:
+                    fh_out.write('>' + new_header + '\n')
+                    fh_out.write(sequence[start:end] + '\n')
     return fasta_file_split, matching_table
 
 

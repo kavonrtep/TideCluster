@@ -295,11 +295,15 @@ extract_summary_table <- function (gff){
     gff$attributes$annotation <- ""
   }
   # SSRs could be NULL
-  gff$attributes$ssr <- ifelse(is.na(gff$attributes$ssr),
-                               "",
-                               gff$attributes$ssr)
+  if (is.null(gff$attributes$ssr)){
+    gff$attributes$ssr <- ""
+  }else{
+  # or it coud be NA
+    gff$attributes$ssr <- ifelse(is.na(gff$attributes$ssr),
+                                 "",
+                                 gff$attributes$ssr)
+  }
   gff_parts <- split(gff, gff$attributes$Name)
-
   summmary_df_out <- data.frame(
     TRC = names(gff_parts),
     "Total size" = sapply(gff_parts, function(x) {
@@ -347,32 +351,15 @@ gff_rest <- gff[!gff$attributes$Name %in% excl,]
 print('gff_rest')
 print(gff_rest)
 if (nrow(gff_rest)>0){
+    print("reporting other TRs")
     # report other TRs
     summmary_df_out_rest <- extract_summary_table(gff_rest)
+    print(summmary_df_out_rest)
     HTML.title("Other Tandem Repeats", file = html_out)
     HTML(summmary_df_out_rest, file = html_out, title = "TAREAN report",
          caption = "TAREAN report - other TRs", row.names = FALSE, classfirstline="sticky-header",
          align = 'left')
 }
-
-
-
-
-
-
-# if (sum(is_ssrs) > 0){
-#   summary_df_out_ssrs <- summary_df_out[is_ssrs,]
-#   # exclude TAREAN logo and graph,..., it is misleading
-#   summary_df_out_ssrs$Graph <- NULL
-#   summary_df_out_ssrs$Logo <- NULL
-#   summary_df_out_ssrs$Score <- NULL
-#   summary_df_out_ssrs$"Monomer size" <- NULL
-#   summary_df_out_ssrs$Consensus <- NULL
-#   HTML.title("Simple Sequence Repeats Summary", file = html_out)
-#   HTML(summary_df_out_ssrs, file = html_out, title = "TAREAN report",
-#        caption = "TAREAN report - SSRs", row.names = FALSE, classfirstline="sticky-header",
-#        align = 'left')
-# }
 
 
 HTMLEndFile(file = html_out)
