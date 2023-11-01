@@ -10,6 +10,7 @@ import glob
 import os
 import subprocess
 import sys
+import tempfile
 from multiprocessing import Pool
 import tc_utils as tc
 import argparse
@@ -67,10 +68,6 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000):
             if "ssr" in gff_record.attributes:
                 ssr[gff_record.attributes_dict['Name']] = gff_record.attributes_dict[
                     "ssr"]
-    print("SSR info:")
-    print(ssr)
-
-
 
     print("preparaing sequences for TAREAN")
     omitted_clusters = []
@@ -135,7 +132,6 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000):
             f.write(F"{k}\t{v}\n")
 
     # final report:
-    print(cmd)
     cmd = (F"{script_path}/tarean/tarean_report.R -i {tarean_dir} -o"
            F" {prefix}_tarean_report -g {gff}")
     print("Making final report.")
@@ -249,18 +245,21 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
         print("No tandem repeats found in gff3 file after filtering, exiting")
         exit(0)
     # get consensus sequences for clustering
-    consensus = {}
-    consensus_dimers = {}
-    for seq_id, seq, cons in tc.gff3_to_fasta(gff3, fasta, "consensus_sequence"):
-        mult = round(1 + 10000 / len(cons))
-        consensus[seq_id] = cons * mult
-        consensus_dimers[seq_id] = cons * 4
-        if len(consensus[seq_id]) > 10000:
-            consensus[seq_id] = consensus[seq_id][0:10000]
-
+    consensus_file = tempfile.NamedTemporaryFile(delete=False).name
+    consensus_dimers_file = tempfile.NamedTemporaryFile(delete=False).name
+    with open(consensus_file, "w") as f, open(consensus_dimers_file, "w") as f2:
+        for seq_id, seq, cons in tc.gff3_to_fasta(gff3, fasta, "consensus_sequence"):
+            mult = round(1 + 10000 / len(cons))
+            consensus = cons * mult
+            consensus_dimers = cons * 4
+            if len(consensus) > 10000:
+                consensus = consensus[0:10000]
+            # write consensus sequence to file
+            f.write(F">{seq_id}\n{consensus}\n")
+            f2.write(F">{seq_id}\n{consensus_dimers}\n")
     # run dustmasker first, sequences which are completely masked
-    # will not be used in clastering.
-    mask_prop = tc.get_ssrs_proportions(consensus_dimers)
+    # will not be used in clustering.
+    mask_prop = tc.get_ssrs_proportions(consensus_dimers_file)
     # if count mask_prop above 0.9
     ssrs_id = [k for k, v in mask_prop.items() if v > 0.9]
     # remove ssrs from consensus sequences, they will be added back later
@@ -268,17 +267,29 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
     ssrs_description = {}
     ssrs_seq = {}
     ssrs_dimers = {}
-    for k in ssrs_id:
-        consensus.pop(k, None)
-        fdimer = consensus_dimers.pop(k, None)
-        ssrs_dimers[k] = fdimer
-        # for each ssrs caclulate ssr proportions
-        ssrs_description[k] = tc.get_ssrs_description(fdimer)
-        ssrs_seq[k] = " ".join(
-                [i.split(" ")[0] for i in ssrs_description[k].split(
-                        "\n"
-                        )]
-                )
+    # iterate over consensus_file and consensus_dimers_file
+    consensus_file_filtered = tempfile.NamedTemporaryFile(delete=False).name
+    consensus_dimers_file_filtered = tempfile.NamedTemporaryFile(delete=False).name
+    with open(consensus_file, "r") as f, open(consensus_dimers_file, "r") as f2:
+        for id, seq in tc.read_single_fasta_as_generator(f):
+            if id not in ssrs_id:
+                with open(consensus_file_filtered, "a") as f_out:
+                    f_out.write(F">{id}\n{seq}\n")
+    with open(consensus_dimers_file, "r") as f, open(consensus_dimers_file_filtered, "a") as f2:
+        for id, seq in tc.read_single_fasta_as_generator(f):
+            if id not in ssrs_id:
+                f2.write(F">{id}\n{seq}\n")
+            else:
+                # NOTE if there are high proportion is simple
+                # repeats, this could use a lot of memory!
+                ssrs_dimers[id] = seq
+                ssrs_description[id] = tc.get_ssrs_description(seq)
+                ssrs_seq[id] = " ".join(
+                        [i.split(" ")[0] for i in ssrs_description[id].split(
+                                "\n"
+                                )]
+                        )
+
     # find unique ssrs seq
     ssrs_clusters = {}
     ssrs_representative = {}
@@ -297,17 +308,18 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
     ssrs_cluster_description = {}
     for k, v in dimers_ssrs_clusters.items():
         ssrs_cluster_description[k] = tc.get_ssrs_description_multiple(v)
-    if len(consensus) == 0:
+    if os.path.getsize(consensus_file_filtered) == 0:
         print("No tandem repeats left after dustmasking, skipping clustering")
     # first round of clustering by mmseqs2
-    clusters1 = tc.find_cluster_by_mmseqs2(consensus, cpu=cpu)
-
+    clusters1 = tc.find_cluster_by_mmseqs2(consensus_file_filtered, cpu=cpu)
     representative_id = set(clusters1.values())
-    consensus_representative = {k: consensus_dimers[k] for k in representative_id}
+    consensus_fasta_representative = tempfile.NamedTemporaryFile(delete=False).name
+    tc.filter_fasta_file(consensus_dimers_file_filtered, consensus_fasta_representative,
+                          representative_id
+                          )
     # second round of clustering by blastn
-
     clusters2 = tc.find_clusters_by_blast_connected_component(
-            consensus_representative, dust=dust, cpu=cpu
+            consensus_fasta_representative, dust=dust, cpu=cpu
             )
     # combine clusters
     clusters_final = clusters1.copy()
@@ -371,6 +383,12 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
     tc.save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer, )
     consensus_dir = prefix + "_consensus_1"
     tc.save_consensus_files(consensus_dir, cons_cls1, cons_cls_dimer1_)
+    # remove all temporary files
+    os.remove(consensus_file)
+    os.remove(consensus_dimers_file)
+    os.remove(consensus_file_filtered)
+    os.remove(consensus_dimers_file_filtered)
+    os.remove(consensus_fasta_representative)
 
 
 def tidehunter(fasta, tidehunter_arguments, prefix, cpu=4):

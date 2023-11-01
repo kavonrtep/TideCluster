@@ -967,38 +967,36 @@ def save_fasta_dict_to_file(fasta_dict, fasta_file):
 
 
 # run mmseqs2 on consensus sequences
-def find_cluster_by_mmseqs2(sequences, cpu=4):
+def find_cluster_by_mmseqs2(fasta_file, cpu=4):
     """
     run mmseqs2 on consensus sequences
     :param cpu:
     :param sequences:
     :return: clusters
     """
-    if len(sequences) == 0:
+    # check fasta file size
+    if os.path.getsize(fasta_file) == 0:
         return {}
+
     print("Clustering by mmseqs2")
-
     tmp_dir = tempfile.mkdtemp()
-    input_fasta_file = tempfile.NamedTemporaryFile(mode='w', delete=False)
-    save_fasta_dict_to_file(sequences, input_fasta_file.name)
 
-    cmd = (F'mmseqs easy-cluster {input_fasta_file.name} {input_fasta_file.name}.clu'
+    cmd = (F'mmseqs easy-cluster {fasta_file} {fasta_file}.clu'
            F' {tmp_dir} --cluster-mode 0 -v 1 '
            F'--mask 0  -s 1 --threads {cpu}')
     subprocess.check_call(cmd, shell=True)
 
     # read clusters to dictionary
-    with open(F"{input_fasta_file.name}.clu_cluster.tsv", 'r') as f:
+    with open(F"{fasta_file}.clu_cluster.tsv", 'r') as f:
         clusters = {}
         for line in f:
             cluster, seq_id = line.split()
             clusters[seq_id] = cluster
     # remove temporary files
-    os.remove(F"{input_fasta_file.name}.clu_all_seqs.fasta")
-    os.remove(F"{input_fasta_file.name}.clu_cluster.tsv")
-    os.remove(F"{input_fasta_file.name}.clu_rep_seq.fasta")
+    os.remove(F"{fasta_file}.clu_all_seqs.fasta")
+    os.remove(F"{fasta_file}.clu_cluster.tsv")
+    os.remove(F"{fasta_file}.clu_rep_seq.fasta")
     rmtree(tmp_dir)
-    os.remove(input_fasta_file.name)
     return clusters
 
 
@@ -1144,7 +1142,7 @@ def generate_kmers(dna, k):
     return kmers
 
 
-def run_blastn(sequences, dust=False, cpu=4):
+def run_blastn(fasta_file, dust=False, cpu=4):
     """
     run blastn on fasta file
     :param cpu:
@@ -1153,9 +1151,11 @@ def run_blastn(sequences, dust=False, cpu=4):
     :return: dictionary with clusters
     """
     tmp_dir = tempfile.mkdtemp()
-    fasta_file = F'{tmp_dir}/seqs.fasta'
+    # make symbolic link to fasta file
+
+    fasta_file_symlink = F'{tmp_dir}/seqs.fasta'
+    os.symlink(fasta_file, fasta_file_symlink)
     blast_out = F'{tmp_dir}/blastn.out'
-    save_fasta_dict_to_file(sequences, fasta_file)
     # make blast database
     cmd = F"makeblastdb -in {tmp_dir}/seqs.fasta -dbtype nucl"
     subprocess.check_call(cmd, shell=True, stdout=subprocess.DEVNULL)
@@ -1163,7 +1163,8 @@ def run_blastn(sequences, dust=False, cpu=4):
     dust = "yes" if dust else "no"
     outfmt = "'6 qseqid sseqid pident length evalue bitscore qlen slen'"
     # run blastn
-    cmd = (F"blastn -task blastn -query {fasta_file} -db {fasta_file} -outfmt {outfmt}"
+    cmd = (F"blastn -task blastn -query {fasta_file_symlink} -db {fasta_file_symlink} -outfmt"
+           F" {outfmt}"
            F" -out {blast_out} -num_threads {cpu} -evalue 1e-20 -perc_identity 75"
            F" -word_size 9 -max_target_seqs 1000000 -dust {dust}"
            F" -gapextend 1 -gapopen 2 -reward 1 -penalty -1")
@@ -1178,14 +1179,14 @@ def run_blastn(sequences, dust=False, cpu=4):
                 if int(length) / min([int(qlen), int(slen)]) > 0.8:
                     pairs.add(tuple(sorted([qseqid, sseqid])))
     # add self hits separately, so they are in the graph later
-    for seq_id in sequences:
-        pairs.add((seq_id, seq_id))
-
+    with open(fasta_file, 'r') as f:
+        for id, s in read_single_fasta_as_generator(f):
+            pairs.add((id, id))
     rmtree(tmp_dir)
     return pairs
 
 
-def get_ssrs_proportions(sequences):
+def get_ssrs_proportions(fasta_file):
     """
     Run dustmasker on fasta file to identifie simple repeats from masking. if
     repeats is masked by more than 80% of the sequence, then ths sequnece is
@@ -1195,9 +1196,7 @@ def get_ssrs_proportions(sequences):
     :return: dictionary with dustmasker results
     """
     tmp_dir = tempfile.mkdtemp()
-    fasta_file = F'{tmp_dir}/seqs.fasta'
     dust_out = F'{tmp_dir}/dust.out'
-    save_fasta_dict_to_file(sequences, fasta_file)
     # run dustmasker
     cmd = (F"dustmasker -in {fasta_file} -out {dust_out} -outfmt fasta -window 64 "
            F"-level 20")
@@ -1216,12 +1215,19 @@ def get_ssrs_proportions(sequences):
                 lengths[seq_id] += len(line.strip())
                 dust[seq_id] += sum(1 for char in line.strip() if char.islower())
     ssrs_prop = {}
+    dust08_seqs = F'{tmp_dir}/dust08_seqs.fasta'
+    dust08_id = []
     for id_name in dust:
         dust[id_name] /= lengths[id_name]
         ssrs_prop[id_name] = 0
         if dust[id_name] > 0.8:
-            ssrs = find_ssrs(sequences[id_name])
-            ssrs_prop[id_name] = single_sequence_ssrs_proportion(ssrs)
+            dust08_id.append(id_name)
+    # filter fasta file in dust08_id
+    with open(fasta_file, 'r') as f, open(dust08_seqs, 'w') as fout:
+        for id, s in read_single_fasta_as_generator(f):
+            if id in dust08_id:
+                ssrs = find_ssrs(s)
+                ssrs_prop[id] = single_sequence_ssrs_proportion(ssrs)
     rmtree(tmp_dir)
     return ssrs_prop
 
@@ -1440,7 +1446,7 @@ def single_sequence_ssrs_proportion(ssrs):
 
 
 def find_clusters_by_blast_connected_component(
-        consensus_representative, dust=False,
+        fasta_file, dust=False,
         cpu=4
         ):
     """
@@ -1451,10 +1457,12 @@ def find_clusters_by_blast_connected_component(
     :param consensus_representative:
     :return: clusters
     """
-    if len(consensus_representative) == 0:
+    # check fasta file size
+    if os.path.getsize(fasta_file) == 0:
         return {}
+
     print("Clustering by BLASTN")
-    pairs = run_blastn(consensus_representative, dust=dust, cpu=cpu)
+    pairs = run_blastn(fasta_file, dust=dust, cpu=cpu)
     # graph = make_graph(pairs)
     # components = find_connected_components(graph)
     components = get_connected_component_clusters(pairs)
@@ -1786,3 +1794,16 @@ def run_cmd(cmd):
         print(e.stderr.decode('utf-8'))
         return [cmd, 'error']
     return [cmd, 'ok']
+
+def filter_fasta_file(input_fasta, output_fasta, ids):
+    """
+    filter fasta file by ids
+    :param input_fasta:
+    :param output_fasta:
+    :param ids:
+    :return: None
+    """
+    with open(input_fasta, 'r') as f1, open(output_fasta, 'w') as f2:
+        for id, seq in read_single_fasta_as_generator(f1):
+            if id in ids:
+                f2.write(F">{id}\n{seq}\n")

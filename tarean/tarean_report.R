@@ -335,10 +335,7 @@ extract_summary_table <- function (gff){
 
 if (nrow(ssr_gff)>0){
   # report SSRs
-  print(ssr_gff)
-  print("-------------------")
   summmary_df_out_ssr <- extract_summary_table(ssr_gff)
-  print(summmary_df_out_ssr)
   HTML.title("Simple Sequence Repeats Summary", file = html_out)
   HTML(summmary_df_out_ssr, file = html_out, title = "TAREAN report",
        caption = "TAREAN report - SSRs", row.names = FALSE, classfirstline="sticky-header",
@@ -348,13 +345,9 @@ if (nrow(ssr_gff)>0){
 # exluded TRC:
 excl <- c(TRC, unique(ssr_gff$attributes$Name))
 gff_rest <- gff[!gff$attributes$Name %in% excl,]
-print('gff_rest')
-print(gff_rest)
 if (nrow(gff_rest)>0){
-    print("reporting other TRs")
     # report other TRs
     summmary_df_out_rest <- extract_summary_table(gff_rest)
-    print(summmary_df_out_rest)
     HTML.title("Other Tandem Repeats", file = html_out)
     HTML(summmary_df_out_rest, file = html_out, title = "TAREAN report",
          caption = "TAREAN report - other TRs", row.names = FALSE, classfirstline="sticky-header",
@@ -370,4 +363,5 @@ consensus_best <- gsub("\n", "",  gsub("<pre>", "", summary_df_out$Consensus))
 
 write.table(apply(summary_df, 2, as.character),
             file = csv_out, sep = "\t",
-            row.names = FALSE, quote = FALSE)
+            row.names = FALSE, quote = TRUE)
+
