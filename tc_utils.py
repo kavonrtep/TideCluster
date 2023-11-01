@@ -783,6 +783,40 @@ def split_fasta_to_parts(fasta_file, number_of_parts):
     :return: List of paths to temporary fasta files
 
     """
+    total_sequences = len(read_fasta_sequence_size(fasta_file))
+    tmp_dir = tempfile.mkdtemp()
+    file_list = []
+    chunk_size = int(total_sequences / number_of_parts)
+    if total_sequences % number_of_parts != 0:
+        chunk_size += 1
+
+    print("Number of sequences:", total_sequences)
+    print("Number of parts:", number_of_parts)
+    print("Chunk size:", chunk_size)
+    with open(fasta_file, 'r') as f:
+        fasta_gen = read_single_fasta_as_generator(f)
+        for n in range(number_of_parts):
+            f_out = F"{tmp_dir}/part_{n}.fasta"
+            file_list.append(f_out)
+            with open(f_out, 'w') as out_file:
+                for _ in range(chunk_size):
+                    try:
+                        header, sequence = next(fasta_gen)
+                        out_file.write(">" + header + "\n")
+                        out_file.write(sequence + "\n")
+                    except StopIteration:
+                        break
+    print(file_list)
+    return file_list
+
+
+def split_fasta_to_parts2(fasta_file, number_of_parts):
+    """split fasta file to parts
+    :param fasta_file:
+    :param number_of_parts:
+    :return: List of paths to temporary fasta files
+
+    """
     with open(fasta_file, 'r') as f:
         s = read_single_fasta_to_dictionary(f)
     l = len(s)
