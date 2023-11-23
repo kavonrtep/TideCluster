@@ -1001,11 +1001,12 @@ def save_fasta_dict_to_file(fasta_dict, fasta_file):
 
 
 # run mmseqs2 on consensus sequences
-def find_cluster_by_mmseqs2(fasta_file, cpu=4):
+def find_cluster_by_mmseqs2(fasta_file, cpu=4, memory_limit=64000):
     """
     run mmseqs2 on consensus sequences
     :param cpu:
     :param sequences:
+    :param memory_limit: in megabytes
     :return: clusters
     """
     # check fasta file size
@@ -1017,7 +1018,9 @@ def find_cluster_by_mmseqs2(fasta_file, cpu=4):
 
     cmd = (F'mmseqs easy-cluster {fasta_file} {fasta_file}.clu'
            F' {tmp_dir} --cluster-mode 0 -v 1 '
-           F'--mask 0  -s 1 --threads {cpu}')
+           F'--mask 0  -s 1 --threads {cpu} '
+           F'--split-memory-limit {memory_limit}'
+           )
     subprocess.check_call(cmd, shell=True)
 
     # read clusters to dictionary
