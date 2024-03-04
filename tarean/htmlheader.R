@@ -25,7 +25,7 @@ htmlheader <- "
 		
 		}
 		td, th { color:#363636;
-		padding:1.4em;
+		padding:1.0em;
 		}
 		tr { border:1px dotted gray;
 		}

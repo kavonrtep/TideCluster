@@ -253,8 +253,8 @@ names(summary_df_out) <- include_cols[names(summary_df_out)]
 html_out <- paste0(args$output, ".html")
 csv_out <- paste0(args$output, ".tsv")
 credits <- readLines(paste0(script.dir,"/../credits.html"))
-cat(htmlheader, file = html_out)
 cat(credits, file = html_out, append = TRUE)
+cat(htmlheader, file = html_out)
 
 is_ssrs <-  x <-  sapply(summary_df_out$SSRs, function(x) {
     if (length(x)==0){
