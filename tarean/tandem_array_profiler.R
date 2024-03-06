@@ -1,8 +1,5 @@
 #!/usr/bin/env Rscript
 library(optparse)
-options(warn = 2)
-
-
 
 # input parameter:
 #   - directory with fasta files
@@ -16,8 +13,8 @@ option_list <-  list(
               help="Directory with fasta files", metavar="character"),
   make_option(c("-c", "--cpu"), type="integer", default=1,
               help="Number of cpu", metavar="integer"),
-  make_option(c("-o", "--output"), type="character", default=NULL,
-              help="Output directory", metavar="character")
+  make_option(c("-p", "--prefix"), type="character", default=NULL,
+              help="Output prefix", metavar="character")
 )
 opt_parser <- OptionParser(option_list=option_list)
 opt <- parse_args(opt_parser)
@@ -33,8 +30,8 @@ script.dir <- normalizePath(dirname(script.name))
 
 
 # check if all required arguments are provided - input directory and output directory
-if (is.null(opt$dir) || is.null(opt$output)) {
-  stop("Error: Input directory and output directory must be provided.")
+if (is.null(opt$dir) || is.null(opt$prefix)) {
+  stop("Error: Input directory and prefix must be provided.")
 }
 
 suppressPackageStartupMessages({
@@ -45,7 +42,9 @@ suppressPackageStartupMessages({
 })
 
 # creat output directory if it does not exist
-dir.create(opt$output, showWarnings = FALSE)
+output_dir <- paste0(opt$prefix, "_trap")
+prefix <- opt$prefix
+dir.create(output_dir, showWarnings = FALSE)
 
 
 ## FUNCTIONS
@@ -261,7 +260,7 @@ ID_split <- strsplit(peaks_best$ID, "_|:")
 peaks_best$seqid <- sapply(ID_split, function(x){N=length(x); paste0(x[3:(N-2)], collapse = "_")})
 peaks_best$start <- as.numeric(sapply(ID_split, function(x){N=length(x); x[N-1]}))
 peaks_best$end <- as.numeric(sapply(ID_split, function(x){N=length(x); x[N]}))
-peaks_best$TRC_index <- as.numeric(sapply(strsplit(peaks_best$TRC_ID, "_"), "[", 2))
+peaks_best$TRC_index <- as.numeric(sapply(strsplit(peaks_best$ID, "_"), "[", 2))
 # sort by TRC_index
 top3_peaks <- top3_peaks[order(peaks_best$TRC_index),]
 peaks_best <- peaks_best[order(peaks_best$TRC_index),]
@@ -277,21 +276,21 @@ colnames(best_peaks_concise) <- c("TRC_ID", "seqid", "start", "end", "monomer_si
 
 
 
-save.image(file = paste0(opt$output, "/tcr.RData"))
-write.table(peaks_best, file = paste0(opt$output, "/best_peak_stat.csv"), sep = "\t", quote = FALSE, row.names = FALSE)
-write.table(best_peaks_concise, file = paste0(opt$output, "/top3_peaks.csv"), sep = "\t", quote = FALSE, row.names = FALSE)
-saveRDS(profile_list, file = paste0(opt$output, "/peaks_list.RDS"))
+save.image(file = paste0(output_dir, "/tcr.RData"))
+write.table(peaks_best, file = paste0(output_dir, "/best_peak_stat.csv"), sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(best_peaks_concise, file = paste0(output_dir, "/top3_peaks.csv"), sep = "\t", quote = FALSE, row.names = FALSE)
+saveRDS(profile_list, file = paste0(output_dir, "/peaks_list.RDS"))
 
 
 xmax <- 10000
 
-dir.create(paste0(opt$output, "/profile_plots/"), showWarnings = FALSE)
+dir.create(paste0(output_dir, "/profile_plots/"), showWarnings = FALSE)
 
 for (trc in unique(best_peaks_concise$TRC_ID)) {
   ind <- which(best_peaks_concise$TRC_ID == trc)
   prof_trc_list <- profile_list[ind]
   xmax <- max(peaks_max_position[ind]) * 1.3
-  outpng <- paste0(opt$output, "/profile_plots/profile_", trc, ".png")
+  outpng <- paste0(output_dir, "/profile_plots/profile_", trc, ".png")
   prof_trc_matrix <- sapply(prof_trc_list, function(x) {
     x <- x[1:xmax]
     x[is.na(x)] <- 0
@@ -332,7 +331,7 @@ for (trc in unique(best_peaks_concise$TRC_ID)) {
 
   # store par setting
 
-  pngout <- paste0(opt$output, "/profile_plots/profile_top3_", trc, ".png")
+  pngout <- paste0(output_dir, "/profile_plots/profile_top3_", trc, ".png")
   png(pngout, width = 600, height = 100)
   par(mar = c(3,0,0,0), cex=0.8)
   prf <- rowSums(prof_trc_matrix)/max(rowSums(prof_trc_matrix))
@@ -352,8 +351,8 @@ for (trc in unique(best_peaks_concise$TRC_ID)) {
 }
 
 # make html report:
-
-html_out <- paste0(opt$output, "/trc_report.html")
+# html_out <- paste0(output_dir, "/trap_report.html")
+html_out <- paste0(output_dir, "_report.html")
 # first list all unique TRC_ID, sort it by numerical suffix
 trc_list <- unique(best_peaks_concise$TRC_ID)
 trc_list <- trc_list[order(as.numeric(gsub(".*_", "", trc_list)))]
@@ -380,10 +379,10 @@ trc_df$number_of_regions <- sapply(trc_df$TRC_ID, function(x) {
 
 # link image <img> to monomer size profile of top3 peaks for each TRC_ID
 trc_df$monomer_size_profile <- sapply(trc_df$TRC_ID, function(x) {
-  x <- paste0("<img src=\"profile_plots/profile_top3_", x, ".png\" width=\"600\">")
+  x <- paste0("<img src=\"",output_dir, "/profile_plots/profile_top3_", x, ".png\" width=\"600\">")
   return(x)
 })
-trc_df$TRC_ID <- paste0("<a href=\"trc_", trc_df$TRC_ID, ".html\">", trc_df$TRC_ID, "</a>")
+trc_df$TRC_ID <- paste0("<a href=\"",output_dir, "/trc_", trc_df$TRC_ID, ".html\">", trc_df$TRC_ID, "</a>")
 # trc_df$TRC_ID <- paste0("<a href=\"#", trc_df$TRC_ID, "\">", trc_df$TRC_ID, "</a>")
 
 source(paste0(script.dir, "/htmlheader.R")) # set htmlheader variable
@@ -401,21 +400,22 @@ HTML("<br>", file = html_out)
 
 
 for (trc in trc_list){
-  html_out_trc <- paste0(opt$output, "/trc_", trc, ".html")
+  html_out_trc <- paste0(output_dir, "/trc_", trc, ".html")
   # start html report
   cat(htmlheader, file = html_out_trc)
   HTML.title(trc, file = html_out_trc, HR = 1)
-
   cat("<h2 id=\"", trc, "\">", trc, "</h2>", file = html_out_trc, append = TRUE, sep = "")
-
   # make section for each TRC_ID
   # add link to the main page, (relative)
-  HTML("<a href=\"trc_report.html\">Back to main Tandem Repeat Array Profile report</a>", file = html_out_trc)
+  HTML(paste0("<a href=\"../",prefix, "_trap_report.html\">Back to main Tandem Repeat Array Profile report</a>"), file = html_out_trc)
   # include image with profile
   png_rel_path <- paste0("profile_plots/profile_", trc, ".png")
   # use original size of the image
   HTMLInsertGraph(file = html_out_trc, GraphFileName = png_rel_path, Align="left", Width = 1000)
   df1 <- best_peaks_concise[best_peaks_concise$TRC_ID == trc,, drop = FALSE]
+  colnames(df1)[colnames(df1) == "monomer_size"] <- "monomer size<br>(primary estimate)"
+  colnames(df1)[colnames(df1) == "monomer_size_2"] <- "monomer size 2<br>(alternative estimate)"
+  colnames(df1)[colnames(df1) == "monomer_size_3"] <- "monomer size 3<br>(alternative estimate)"
   # columns start and end are numerical, the number should be printent completelly without scientific notation
   df1$start <- format(df1$start, scientific = FALSE)
   df1$end <- format(df1$end, scientific = FALSE)
@@ -428,6 +428,6 @@ for (trc in trc_list){
 HTMLEndFile(file = html_out)
 
 
-save.image(paste0(opt$output, "/all_data.RData"))
+save.image(paste0(output_dir, "/all_data.RData"))
 
 

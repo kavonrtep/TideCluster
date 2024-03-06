@@ -20,7 +20,8 @@ from version import __version__
 assert sys.version_info >= (3, 6), "Python 3.6 or newer is required"
 
 
-def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000):
+def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
+           version=__version__):
     """
     Run tarean on genomic sequences specified in gff3 file
     from gff record extract sequence end analyse it with tarean algorithm
@@ -56,6 +57,8 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000):
         os.mkdir(tarean_dir_fasta)
 
     fasta_dict = tc.extract_sequences_from_gff3(gff, fasta, tarean_dir_fasta)
+    # get total length of all sequences in fasta file
+    input_fasta_length = sum([i for i in tc.read_fasta_sequence_size(fasta).values()])
     l_debug = 0
     cmd_list = []
 
@@ -71,13 +74,17 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000):
 
     print("preparaing sequences for TAREAN")
     omitted_clusters = []
+    trc_total_length = int(0)
+    trc_total_length_omitted = 0
     for k, v in fasta_dict.items():
         l_debug += 1
         v_basename = os.path.basename(v)
         with open(v, "r") as f:
             seqs = tc.read_single_fasta_to_dictionary(f)
         total_length = sum([len(i) for i in seqs.values()]) / 2  # it is dimer!!
+        trc_total_length += total_length
         if total_length < min_total_length:
+            trc_total_length_omitted += total_length
             print(
                     F"total length of sequences in {k} is less than {min_total_length} "
                     F"nt, "
@@ -111,8 +118,54 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000):
             for i in omitted_clusters:
                 f.write(F"{i[0]}\t{i[1]}\t{i[2]}\n")
 
+        # tandem repeat array profiles
+    cmd = (F"{script_path}/tarean/tandem_array_profiler.R -d {prefix}_tarean/fasta"
+           F" -p {prefix} -c {cpu}")
+    print("Making tandem repeat array profiles.")
+    tc.run_cmd(cmd)
+
+
+    # copy index.html as prefix_index.html
+    html_src = script_path + "/tarean/index.html"
+    html_dst = F"{prefix}_index.html"
+    # Format string to report analysis settings (from args and version)
+    settings = (F"Input file                 : {args.fasta}\n"
+                F"Prefix                     : {args.prefix}\n"
+                F"Minimum TRC total length   : {args.min_total_length}\n"
+                F"Minimum array length       : {args.min_length}\n"
+                F"Dust filter                : {'no' if args.no_dust else 'yes'}\n"
+                F"TideHunter arguments       : {args.tidehunter_arguments}\n"
+                F"CPU                        : {args.cpu}\n"
+                F"Library                    : {args.library}\n"
+                F"TideCluster version        : {version}\n")
+
+    # create summar with number of clusters, number of omitted clusters, number of SSRs
+    # total length all clusters, total length of reference
+    summary = (
+        F"Number of TRCs                  : {l_debug}\n"
+        F"Number of TRCs above threshold  : {len(omitted_clusters)}\n"
+        F"Number of SSRs in TRCs          : {len(ssr)}\n"
+        F"Total length of TRCs            : {int(trc_total_length)} nt\n"
+        F"Number of TRAs                  :"
+        F" {sum([len(i) for i in fasta_dict.values()])}\n"
+        F"Input sequence length           : {input_fasta_length} nt\n"
+    )
+    print (fasta_dict)
+
+    # replace all PREFIX_PLACEHOLDER with prefix value and save to new file
+    # replace all SETTINGS_PLACEHOLDER with settings value and save to new file
+    with open(html_src, "r") as f, open(html_dst, "w") as f2:
+        for line in f:
+            new_line = line.replace("PREFIX_PLACEHOLDER", prefix)
+            new_line = new_line.replace("SETTINGS_PLACEHOLDER", settings)
+            new_line = new_line.replace("SUMMARY_PLACEHOLDER", summary)
+            f2.write(new_line)
+
     if len(cmd_list) == 0:
         print("No remaining sequences for TAREAN analysis; exiting")
+        with open(F"{prefix}_tarean_report.html", "w") as f:
+            f.write("No TRC passed the minimum total length threshold for TAREAN "
+                    "analysis. ")
         return
 
     print("running TAREAN")
@@ -131,11 +184,13 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000):
         for k, v in ssr.items():
             f.write(F"{k}\t{v}\n")
 
-    # final report:
+    # final tarean report:
     cmd = (F"{script_path}/tarean/tarean_report.R -i {tarean_dir} -o"
            F" {prefix}_tarean_report -g {gff}")
-    print("Making final report.")
+    print("Making final tarean report.")
     tc.run_cmd(cmd)
+
+
 
 
 def annotation(prefix, library, gff=None, consensus_dir=None, cpu=1):
@@ -683,7 +738,9 @@ if __name__ == "__main__":
                 gff=cmd_args.gff,
                 fasta=cmd_args.fasta,
                 cpu=cmd_args.cpu,
-                min_total_length=cmd_args.min_total_length
+                min_total_length=cmd_args.min_total_length,
+                args=cmd_args,
+                version=__version__
                 )
     elif cmd_args.command == "run_all":
         tidehunter(
@@ -706,7 +763,9 @@ if __name__ == "__main__":
                 fasta=cmd_args.fasta,
                 gff=None,
                 cpu=cmd_args.cpu,
-                min_total_length=cmd_args.min_total_length
+                min_total_length=cmd_args.min_total_length,
+                args=cmd_args,
+                version=__version__
                 )
 
     else:
