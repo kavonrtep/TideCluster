@@ -42,7 +42,7 @@ suppressPackageStartupMessages({
 })
 
 # creat output directory if it does not exist
-output_dir <- paste0(opt$prefix, "_trap")
+output_dir <- paste0(opt$prefix, "_kite")
 prefix <- opt$prefix
 dir.create(output_dir, showWarnings = FALSE)
 
@@ -303,9 +303,9 @@ for (trc in unique(best_peaks_concise$TRC_ID)) {
   par(xaxs = "i", yaxs = "i", mar = c(5, 5, 5, 5))
 
   n_regions <- ncol(prof_trc_matrix)
-  plot(NA, xlim = c(1, xmax), ylim = c(1, ncol(prof_trc_matrix)+1),
-       main = paste0(trc, " (number of regions: ", n_regions, ")"), type='n',
-       axes = FALSE, frame.plot = TRUE, xlab="Monomer length [bp] ", ylab = "TRC region",
+  plot(NA, xlim = c(1,xmax), ylim = rev(c(1, ncol(prof_trc_matrix)+1)),
+       main = paste0(trc, " (Number of arays: ", n_regions, ")"), type='n',
+       axes = FALSE, frame.plot = TRUE, xlab="Monomer length [bp] ", ylab = "TRC array index",
        log = "x"
   )
 
@@ -325,6 +325,7 @@ for (trc in unique(best_peaks_concise$TRC_ID)) {
 
   ax <- pretty(c(1, xmax), n = 20)
   axis(1, las=2, at=log_ticks, labels=log_ticks)
+  axis(2, at = 1:ncol(prof_trc_matrix) + 0.5, labels = 1:ncol(prof_trc_matrix))
   dev.off()
 
   # make plot from top3 peaks, one plot for each TRC_ID
@@ -351,7 +352,7 @@ for (trc in unique(best_peaks_concise$TRC_ID)) {
 }
 
 # make html report:
-# html_out <- paste0(output_dir, "/trap_report.html")
+# html_out <- paste0(output_dir, "/kite_report.html")
 html_out <- paste0(output_dir, "_report.html")
 # first list all unique TRC_ID, sort it by numerical suffix
 trc_list <- unique(best_peaks_concise$TRC_ID)
@@ -388,9 +389,26 @@ trc_df$TRC_ID <- paste0("<a href=\"",output_dir, "/trc_", trc_df$TRC_ID, ".html\
 source(paste0(script.dir, "/htmlheader.R")) # set htmlheader variable
 # add header
 cat(htmlheader, file = html_out)
-HTML.title("Tandem Repeat Array Profile report", file = html_out, HR = 1)
+HTML.title("K-Mer Interval Tandem Repeat Estimation (KITE)", file = html_out, HR = 1)
+HTML("
+The Monomer Size Estimate Score Plot displays weighted scores for
+ estimated monomer sizes in tandem repeat clusters (TRC).
+  Points represent monomer size estimates, where the score reflects the estimate's
+  significance derived from k-mer interval analysis.
+  Peaks indicate probable monomer sizes, with higher scores
+   denoting stronger evidence.
+   For scores for each tandem repeat array within the TRC,
+    follow the provided link to see detailed report.
+", file = html_out)
+
+
 # add table with TRC_ID and link to subsections within the report
 # for each TRC_ID add link to the corresponding section (in HTML.title below)
+# adjust column names for html output
+colnames(trc_df)[colnames(trc_df) == "monomer_size"] <- "Monomer size <br> primary estimate"
+colnames(trc_df)[colnames(trc_df) == "number_of_regions"] <- "Number of arrays"
+colnames(trc_df)[colnames(trc_df) == "monomer_size_profile"] <- "Monomer Size Estimate Score Plot"
+
 
 HTML(trc_df, header = c("TRC_ID"), rownames = FALSE, align = "c", file = html_out)
 HTML("<br>", file = html_out)
@@ -404,18 +422,27 @@ for (trc in trc_list){
   # start html report
   cat(htmlheader, file = html_out_trc)
   HTML.title(trc, file = html_out_trc, HR = 1)
-  cat("<h2 id=\"", trc, "\">", trc, "</h2>", file = html_out_trc, append = TRUE, sep = "")
   # make section for each TRC_ID
   # add link to the main page, (relative)
-  HTML(paste0("<a href=\"../",prefix, "_trap_report.html\">Back to main Tandem Repeat Array Profile report</a>"), file = html_out_trc)
+  # HTML(paste0("<a href=\"../",prefix, "_kite_report.html\">Back to main K-Mer Interval Tandem Repeat Estimation (KITE)</a>"), file = html_out_trc)
   # include image with profile
+  HTML("
+  This heatmap displays the estimate scores for monomer sizes
+  across individual tandem repeat arrays in a TRC, with each
+  array represented by a row. Shades from white to grey signify
+   score intensity, where darker shades denote higher scores. Table
+   below provide three best monomer size estimates for each array.
+
+  ", file = html_out_trc)
   png_rel_path <- paste0("profile_plots/profile_", trc, ".png")
   # use original size of the image
   HTMLInsertGraph(file = html_out_trc, GraphFileName = png_rel_path, Align="left", Width = 1000)
   df1 <- best_peaks_concise[best_peaks_concise$TRC_ID == trc,, drop = FALSE]
-  colnames(df1)[colnames(df1) == "monomer_size"] <- "monomer size<br>(primary estimate)"
-  colnames(df1)[colnames(df1) == "monomer_size_2"] <- "monomer size 2<br>(alternative estimate)"
-  colnames(df1)[colnames(df1) == "monomer_size_3"] <- "monomer size 3<br>(alternative estimate)"
+  df1$"TRC array index" <- 1:nrow(df1)
+  colnames(df1)[colnames(df1) == "monomer_size"] <- "Monomer size<br>(primary estimate)"
+  colnames(df1)[colnames(df1) == "monomer_size_2"] <- "Monomer size 2<br>(alternative estimate)"
+  colnames(df1)[colnames(df1) == "monomer_size_3"] <- "Monomer size 3<br>(alternative estimate)"
+  colnames(df1)[colnames(df1) == "array_length"] <- "Array length [nt]"
   # columns start and end are numerical, the number should be printent completelly without scientific notation
   df1$start <- format(df1$start, scientific = FALSE)
   df1$end <- format(df1$end, scientific = FALSE)

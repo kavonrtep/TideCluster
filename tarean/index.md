@@ -9,10 +9,12 @@
      }
      ul li {
          margin-bottom: 0px;
-         padding: 10px;
+         padding: 5px;
      }   
 
      body {
+       font-family: Verdana, sans-serif;
+       font-size: 13px;
        width: 100%;
        max-width: 700px;
        margin: 30px;
@@ -71,7 +73,7 @@
 
 ## Tandem Repeat Analysis (TAREAN)
 
-[report](PREFIX_PLACEHOLDER_tarean_report.html)
+[**Report**](PREFIX_PLACEHOLDER_tarean_report.html)
 
 Report includes TAREAN analysis for all tandem repeat clusters (TRCs) pass the threshold of the minimamal combined length of tandem repeat arrays within a single cluster
 
@@ -80,16 +82,17 @@ Report includes TAREAN analysis for all tandem repeat clusters (TRCs) pass the t
 - Basic **TRC statistics** (number of arrays, total length, minimal and maximal length of arrays)
 
 
-## Tandem Repeats Arrays Profiles (TRAP)
+## K-Mer Interval Tandem Repeat Estimation (KITE)
 
-[report](PREFIX_PLACEHOLDER_trap_report.html)
+[**Report**](PREFIX_PLACEHOLDER_kite_report.html)
 
-The Tandem Repeats Arrays Profiles (TRAP) method is applied to examine individual Tandem Repeat Arrays (TRAs) within each TRC. Unlike TAREAN, which estimates monomer sizes for the whole TRC, TRAP employs a distinct method that determines monomer sizes based on the distances between all repetitive k-mers throughout the tandem repeat array and each tandem array is analyzed individually. This approach provide the detection of higher-order repeats and also captures the variability in monomer size across different tandem repeat arrays. TRAP analysis include:
+The K-Mer Interval Tandem Repeat Estimation (KITE) method is applied to analyze individual Tandem Repeat Arrays (TRAs) within each TRC. In contrast to TAREAN, which provides monomer size estimates for the entire TRC, KITE also estimates monomer sizes for each array by evaluating the distances between all repetitive k-mers across the tandem repeat array, with each tandem array analyzed individually. This method facilitates the detection of higher-order repeats and captures the variability in monomer size across different tandem repeat arrays. The KITE analysis includes: 
 
-- **Monomers size estimate** for whole TRC. Due to distinct methodology, this estimate can slightly differ from the TAREAN estimate. 
-- **Monomer size estimates for individual TRA**. These estimates include:
-  - **Primary estimate** with the highest score
-  - **Alternative estimates** with lower scores which can be indicative of **higher-order repeats**
+- **Monomer size estimate for the entire TRC** : This estimate may differ from the TAREAN estimate due to the different methodologies employed. 
+- **Monomer size estimates for individual TRAs** : These estimates are provided as: 
+  - **Primary estimate** : The estimate with the highest score. 
+  - **Alternative estimates** : Estimates with lower scores, these estimates help in identifying **higher-order repeats**.
+
 
 
 ## Credits

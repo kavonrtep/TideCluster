@@ -16,6 +16,10 @@ htmlheader <- "
 		color:#fff;
 		font:normal 10px verdana, arial, helvetica, sans-serif;
 		}
+		 p {
+         max-width: 700px;
+         text-align: left;
+        }
 		caption { border:1px solid #5C443A;
 		color:#5C443A;
 		font-weight:bold;

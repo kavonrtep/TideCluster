@@ -118,8 +118,8 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
             for i in omitted_clusters:
                 f.write(F"{i[0]}\t{i[1]}\t{i[2]}\n")
 
-        # tandem repeat array profiles
-    cmd = (F"{script_path}/tarean/tandem_array_profiler.R -d {prefix}_tarean/fasta"
+        # RUN kite
+    cmd = (F"{script_path}/tarean/kite.R -d {prefix}_tarean/fasta"
            F" -p {prefix} -c {cpu}")
     print("Making tandem repeat array profiles.")
     tc.run_cmd(cmd)
@@ -150,7 +150,6 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
         F" {sum([len(i) for i in fasta_dict.values()])}\n"
         F"Input sequence length           : {input_fasta_length} nt\n"
     )
-    print (fasta_dict)
 
     # replace all PREFIX_PLACEHOLDER with prefix value and save to new file
     # replace all SETTINGS_PLACEHOLDER with settings value and save to new file
