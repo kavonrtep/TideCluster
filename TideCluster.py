@@ -143,7 +143,7 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
     # total length all clusters, total length of reference
     summary = (
         F"Number of TRCs                  : {l_debug}\n"
-        F"Number of TRCs above threshold  : {len(omitted_clusters)}\n"
+        F"Number of TRCs above threshold  : {l_debug - len(omitted_clusters)}\n"
         F"Number of SSRs in TRCs          : {len(ssr)}\n"
         F"Total length of TRCs            : {int(trc_total_length)} nt\n"
         F"Number of TRAs                  :"
