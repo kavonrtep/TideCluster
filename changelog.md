@@ -1,3 +1,9 @@
+## 1.5 (2024-03-07)
+- 
+- K-mer interval tandem repeat estimation (KITE) added, this enables identification of higher order tandem repeats
+- Analysis include estimation of monomer size for individual tandem repeat arrays 
+- Output of KITE analysis added to the HTML report  
+
 ## 1.4 (2023-11-23)
 - Better memory efficiency
 - Limiting MMseq2 memory usage
