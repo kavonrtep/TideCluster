@@ -260,10 +260,9 @@ ID_split <- strsplit(peaks_best$ID, "_|:")
 peaks_best$seqid <- sapply(ID_split, function(x){N=length(x); paste0(x[3:(N-2)], collapse = "_")})
 peaks_best$start <- as.numeric(sapply(ID_split, function(x){N=length(x); x[N-1]}))
 peaks_best$end <- as.numeric(sapply(ID_split, function(x){N=length(x); x[N]}))
-peaks_best$TRC_index <- as.numeric(sapply(strsplit(peaks_best$ID, "_"), "[", 2))
-# sort by TRC_index
-top3_peaks <- top3_peaks[order(peaks_best$TRC_index),]
-peaks_best <- peaks_best[order(peaks_best$TRC_index),]
+peaks_best$TRC_index <- as.numeric(sapply(strsplit(peaks_best$TRC_ID, "_"), "[", 2))
+# index for export, order by TRC_ID
+ord_index <- order(peaks_best$TRC_index)
 
 # make concise table with best peaks
 best_peaks_concise <- cbind(
@@ -275,10 +274,9 @@ colnames(best_peaks_concise) <- c("TRC_ID", "seqid", "start", "end", "monomer_si
                                   "monomer_size_3", "score_3")
 
 
-
 save.image(file = paste0(output_dir, "/tcr.RData"))
-write.table(peaks_best, file = paste0(output_dir, "/best_peak_stat.csv"), sep = "\t", quote = FALSE, row.names = FALSE)
-write.table(best_peaks_concise, file = paste0(output_dir, "/top3_peaks.csv"), sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(peaks_best[ord_index,], file = paste0(output_dir, "/monomer_size_best_estimate_stat.csv"), sep = "\t", quote = FALSE, row.names = FALSE)
+write.table(best_peaks_concise[ord_index,], file = paste0(output_dir, "/monomer_size_top3_estimats.csv"), sep = "\t", quote = FALSE, row.names = FALSE)
 saveRDS(profile_list, file = paste0(output_dir, "/peaks_list.RDS"))
 
 
