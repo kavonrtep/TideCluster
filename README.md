@@ -5,7 +5,7 @@
 
 
 TideCluster is a software tool designed to identify tandem repeats in genome 
-assemblies by utilizing Tidehunter to detect tandem repeats clustering these repeats
+assemblies by utilizing [TideHunter](https://github.com/Xinglab/TideHunter) to detect tandem repeats clustering these repeats
 based on similarity using mmseqs2 and NCBI BLAST. The software runs in four steps as  
 outlined below:
 
