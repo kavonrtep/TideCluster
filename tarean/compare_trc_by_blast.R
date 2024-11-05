@@ -242,10 +242,7 @@ create_dotplot <- function(sequences) {
 
   # what is the density of lines in the plot - length of all segments/(max(cum_lengths)^2)
   density <- sum(blast_results$length)/max(cum_lengths)
-  print("Density of lines in the plot")
-    print(density)
-  print(sequences)
-  print("------------------")
+
   # for density <5 -> LWD=3
   # for density <10 -> LWD=2
   # for density <50 -> LWD=1.5
@@ -423,7 +420,6 @@ for (i in seq_along(cls)) {
   size <- log(N) * 200
   min_size <- 500
   size <- max(size, min_size)
-  print(size)
 
   # Generate the image
   img_filename <- paste0(group_name, ".png")
