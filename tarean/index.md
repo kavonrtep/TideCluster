@@ -94,7 +94,7 @@ The K-Mer Interval Tandem Repeat Estimation (KITE) method is applied to analyze 
   - **Alternative estimates** : Estimates with lower scores, these estimates help in identifying **higher-order repeats**.
 
 ## TRC Consensus Clustering and Superfamily Analysis
-[**Report**](PREFIX_PLACEHOLDER_trc_similarity.html)
+[**Report**](PREFIX_PLACEHOLDER_trc_superfamilies.html)
 
 Consensus sequences from TAREAN are clustered to identify similary or nearly identical TRCs tha were not clustered together initially in clustering step. This clustering groups the TRCs into higher-level clusters referred to as **Superfamilies**, based on sequence similarity.
 

@@ -299,7 +299,7 @@ run_blast <- function(query, db, threads, evalue) {
 
 make_empty_outputs <- function(prefix){
   # create empty html file
-  html_out <- paste(prefix, "_trc_similarity.html", sep = "")
+  html_out <- paste(prefix, "_trc_superfamilies.html", sep = "")
   page <- openPage(html_out, title = "TRC Superfamilies", css = style)
   hwrite("No TRC superfamilies found", page = page)
   # create empty file

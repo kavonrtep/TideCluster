@@ -35,6 +35,28 @@ reference. Consensus sequences of simple sequence repeats are evaluated separate
 as TAREAN performs poorly on tandem repeats with short monomers. The results of the  
 analysis are saved in an HTML summary.
 
+**TRC Consensus Clustering and Superfamily Analysis**
+Consensus sequences from TAREAN are clustered to identify similary or nearly identical
+TRCs tha were not clustered together initially in clustering step. This clustering groups
+the TRCs into higher-level clusters referred to as Superfamilies, based on sequence
+similarity.
+
+**K-Mer Interval Tandem Repeat Estimation (KITE)**
+The K-Mer Interval Tandem Repeat Estimation (KITE) method is applied to analyze individual
+Tandem Repeat Arrays (TRAs) within each TRC. In contrast to TAREAN, which provides monomer
+size estimates for the entire TRC, KITE also estimates monomer sizes for each array by
+evaluating the distances between all repetitive k-mers across the tandem repeat array,
+with each tandem array analyzed individually. This method facilitates the detection of
+higher-order repeats and captures the variability in monomer size across different tandem
+repeat arrays. The KITE analysis includes:
+
+- Monomer size estimate for the entire TRC : This estimate may differ from the TAREAN
+estimate due to the different methodologies employed.
+- Monomer size estimates for individual TRAs : These estimates are provided as:
+   - Primary estimate : The estimate with the highest score.
+   - Alternative estimates : Estimates with lower scores, these estimates help in identifying
+higher-order repeats.
+
 | ![./workflow_scheme.svg](./workflow_scheme.svg) |
 |:-----------------------------------------------:|
 |           TideCluster workflow scheme           |
@@ -259,14 +281,16 @@ TideCluster.py run_all -c 40 -pr cen6_sat -f CEN6_ver_220406.fasta -l library.fa
 - `prefix_annotation.tsv` - Summarized annotation for each TRC cluster in a tab-delimited format. 
 
 ### TAREAN Step
-
+- `prefix_index.html` - Main HTML report, other reports are linked from this file.
 - `prefix_tarean_report.html` - HTML report with tandem repeat annotations. 
 - `prefix_tarean_report.tsv` - File with tandem repeat annotations in a tab-delimited format.
 - `prefix_tarean` - Directory containing subdirectories with detailed TAREAN output for each TRC cluster.
 - `prefix_consensus_dimer_library.fasta` - FASTA file with consensus sequences for 
   each TRC cluster. This sequences can be used as a library for similarity based 
-  annotation using RepeatMasker. 
-  
+  annotation using RepeatMasker. This file is created only for TRC clusters that 
+  pass the minimum combined length threshold.
+
+
 
 
 ## Updating gff3 file based on manual annotation

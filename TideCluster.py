@@ -167,7 +167,7 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
             f.write("No TRC passed the minimum total length threshold for TAREAN "
                     "analysis. ")
             # create empty TRC clustering report
-            html_file = F"{prefix}_trc_similarity.html"
+            html_file = F"{prefix}_trc_superfamilies.html"
             # print to html file
             print("TRC similarity clustering not performed due to lack of TAREAN "
                   "consensus sequences.", file=open(html_file, "w"))
@@ -201,8 +201,8 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
     cmd = (
         F"{script_path}/tarean/compare_trc_by_blast.R -i {prefix}_consensus_dimer_library.fasta"
         F" -p {prefix} -t {cpu}")
-    x = tc.run_cmd(cmd)
-    print(x)
+    tc.run_cmd(cmd)
+
 
 
 def annotation(prefix, library, gff=None, consensus_dir=None, cpu=1):
