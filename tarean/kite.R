@@ -43,6 +43,7 @@ suppressPackageStartupMessages({
 
 # creat output directory if it does not exist
 output_dir <- paste0(opt$prefix, "_kite")
+output_dir_base <- basename(output_dir)
 prefix <- opt$prefix
 dir.create(output_dir, showWarnings = FALSE)
 
@@ -378,10 +379,10 @@ trc_df$number_of_regions <- sapply(trc_df$TRC_ID, function(x) {
 
 # link image <img> to monomer size profile of top3 peaks for each TRC_ID
 trc_df$monomer_size_profile <- sapply(trc_df$TRC_ID, function(x) {
-  x <- paste0("<img src=\"",output_dir, "/profile_plots/profile_top3_", x, ".png\" width=\"600\">")
+  x <- paste0("<img src=\"",output_dir_base, "/profile_plots/profile_top3_", x, ".png\" width=\"600\">")
   return(x)
 })
-trc_df$TRC_ID <- paste0("<a href=\"",output_dir, "/trc_", trc_df$TRC_ID, ".html\">", trc_df$TRC_ID, "</a>")
+trc_df$TRC_ID <- paste0("<a href=\"",output_dir_base, "/trc_", trc_df$TRC_ID, ".html\">", trc_df$TRC_ID, "</a>")
 # trc_df$TRC_ID <- paste0("<a href=\"#", trc_df$TRC_ID, "\">", trc_df$TRC_ID, "</a>")
 
 source(paste0(script.dir, "/htmlheader.R")) # set htmlheader variable
