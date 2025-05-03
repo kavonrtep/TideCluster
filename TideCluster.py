@@ -7,6 +7,7 @@ coordinates in the table must be recalculated to the original sequence
 
 """
 import glob
+import json
 import os
 import subprocess
 import sys
@@ -129,6 +130,11 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
     html_src = script_path + "/tarean/index.html"
     html_dst = F"{prefix}_index.html"
     # Format string to report analysis settings (from args and version)
+    saved = load_args_from_file(prefix)
+    for key, val in saved.items():
+        if not hasattr(args, key):
+            setattr(args, key, val)
+
     settings = (F"Input file                 : {args.fasta}\n"
                 F"Prefix                     : {args.prefix}\n"
                 F"Minimum TRC total length   : {args.min_total_length}\n"
@@ -510,6 +516,29 @@ def tidehunter(fasta, tidehunter_arguments, prefix, cpu=4):
             out.write(F'{m[0]}\t{m[2]}\t{m[3]}\t{m[4]}\n')
 
 
+def save_args_to_file(args):
+    args_file = f"{args.prefix}_cmd_args.json"
+    # load any previously saved args
+    saved = {}
+    if os.path.exists(args_file):
+        with open(args_file, "r") as f:
+            saved = json.load(f)
+    # update with current args (only those not None)
+    for k, v in vars(args).items():
+        if v is not None:
+            saved[k] = v
+    # write back merged args
+    with open(args_file, "w") as f:
+        json.dump(saved, f)
+
+def load_args_from_file(prefix):
+    args_file = f"{prefix}_cmd_args.json"
+    if os.path.exists(args_file):
+        with open(args_file, "r") as f:
+            return json.load(f)
+    return {}
+
+
 if __name__ == "__main__":
     # Command line arguments
     parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -728,6 +757,7 @@ if __name__ == "__main__":
     ''')
 
     cmd_args = parser.parse_args()
+    save_args_to_file(cmd_args)
     if cmd_args.command == "tidehunter":
         tidehunter(
                 cmd_args.fasta, cmd_args.tidehunter_arguments, cmd_args.prefix,
