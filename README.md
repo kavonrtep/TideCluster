@@ -268,29 +268,35 @@ TideCluster.py run_all -c 40 -pr cen6_sat -f CEN6_ver_220406.fasta -l library.fa
 
 ### Clustering Step
 
+- `prefix__tidehunter_short.gff3` GFF3 file with tandem repeats shorter than the minimum length threshold used in the clustering step. 
 - `prefix_clustering.gff3` - GFF3 file with tandem repeats identified by `mmseqs2` and `BLASTN`. 
   Tandem repeat regions in the GFF3 file are labeled by **T**andem **R**epeat **C**luster ID (TRC1, TRC2, etc.). Each TRC is described by the `repeat_type` attribute. `repeat_type` can be either TR (Tandem Repeat) or SSR (Simple Sequence Repeat).
 - `prefix_clustering.gff3_1.gff3` - Intermediate file with tandem repeats clustered by `mmseqs2`.
 - `prefix_consensus` - Directory with consensus sequences for each cluster as identified by TideHunter. There is one FASTA file per cluster. Each FASTA file contains all consensus sequences identified by TideHunter for a given cluster. 
 - `prefix_consensus_1` - Intermediate directory with consensus sequences for each cluster as identified by `mmseqs2`. 
+- `prefix_clustering_split_files` - Directory with GFF3 files, one for each TRC cluster. Each GFF3 file contains tandem repeat regions for a single TRC cluster.
 
 ### Annotation Step
 
 - `prefix_annotation.gff3` - GFF3 file with tandem repeats annotated by RepeatMasker. 
   Annotations are shown as additional attributes in the GFF3 file.
-- `prefix_annotation.tsv` - Summarized annotation for each TRC cluster in a tab-delimited format. 
+- `prefix_annotation.tsv` - Summarized annotation for each TRC cluster in a tab-delimited format.
+- `prefix_annotation_split_files` - Directory with GFF3 files, one for each TRC cluster. 
+  Each GFF3 file contains tandem repeat annotations for a single TRC cluster.
 
 ### TAREAN Step
+
 - `prefix_index.html` - Main HTML report, other reports are linked from this file.
 - `prefix_tarean_report.html` - HTML report with tandem repeat annotations. 
 - `prefix_tarean_report.tsv` - File with tandem repeat annotations in a tab-delimited format.
+- `prefix_kite_report.html` - HTML report with KITE analysis.
+- `prefix_trc_superfamilies.html`  HTML report with TRC superfamilies.
+- `prefix_trc_superfamilies.tsv`  File with TRC superfamilies in a tab-delimited format.
 - `prefix_tarean` - Directory containing subdirectories with detailed TAREAN output for each TRC cluster.
 - `prefix_consensus_dimer_library.fasta` - FASTA file with consensus sequences for 
   each TRC cluster. This sequences can be used as a library for similarity based 
   annotation using RepeatMasker. This file is created only for TRC clusters that 
   pass the minimum combined length threshold.
-
-
 
 
 ## Updating gff3 file based on manual annotation
