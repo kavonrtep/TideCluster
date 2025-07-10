@@ -9,7 +9,6 @@ coordinates in the table must be recalculated to the original sequence
 import glob
 import json
 import os
-import subprocess
 import sys
 import tempfile
 from multiprocessing import Pool
@@ -249,13 +248,13 @@ def annotation(prefix, library, gff=None, consensus_dir=None, cpu=1):
                         for line in f_in:
                             f.write(line)
         seq_lengths = tc.read_fasta_sequence_size(consensus_files_concat)
-        # run RepeatMasker on concatenated consensus sequences
-        cmd = (F"RepeatMasker -pa {cpu} -lib {library} -e ncbi -s -no_is -norna "
-               F"-nolow "
-               F"-dir {consensus_dir} {consensus_files_concat}")
-        subprocess.check_call(cmd, shell=True)
-
-        rm_file = F"{consensus_files_concat}.out"
+        
+        # run RepeatMasker with automatic sequence name renaming
+        rm_file = tc.run_repeatmasker_with_renaming(
+            consensus_files_concat, library, cpu, 
+            additional_params=F"-dir {consensus_dir}"
+        )
+        
         # parse RepeatMasker output
         rm_annotation = tc.get_repeatmasker_annotation(rm_file, seq_lengths, prefix)
         # add annotation to gff3 file, only if gff3 file exists

@@ -360,12 +360,8 @@ def annotate_gff(gff, gff_out, library, cpu=1):
     # save consensus sequences to fasta file
     tmp_consensus_file = tempfile.NamedTemporaryFile(delete=False).name
     save_fasta_dict_to_file(consensus_sequences, tmp_consensus_file)
-    # run repeatmasker
-    cmd = (F"RepeatMasker -pa {cpu} -lib {library} -e ncbi -s -no_is -norna "
-           F"-nolow {tmp_consensus_file}")
-    print(cmd)
-    subprocess.run(cmd, shell=True)
-    rm_file = tmp_consensus_file + ".out"
+    # run repeatmasker with automatic sequence name renaming
+    rm_file = run_repeatmasker_with_renaming(tmp_consensus_file, library, cpu)
     # all rm generated files:
     all_rm_files = glob.glob(tmp_consensus_file + ".*")
 
@@ -1844,3 +1840,98 @@ def filter_fasta_file(input_fasta, output_fasta, ids):
         for id, seq in read_single_fasta_as_generator(f1):
             if id in ids:
                 f2.write(F">{id}\n{seq}\n")
+
+
+def rename_fasta_sequences_to_indices(input_fasta, output_fasta):
+    """
+    Rename FASTA sequences to numerical indices to handle RepeatMasker 50-character limit.
+    :param input_fasta: path to input FASTA file
+    :param output_fasta: path to output FASTA file with renamed sequences
+    :return: dictionary mapping new names (indices) to original names
+    """
+    name_mapping = {}
+    with open(input_fasta, 'r') as f1, open(output_fasta, 'w') as f2:
+        for i, (original_id, seq) in enumerate(read_single_fasta_as_generator(f1)):
+            new_id = str(i + 1)  # Start from 1
+            name_mapping[new_id] = original_id
+            f2.write(F">{new_id}\n{seq}\n")
+    return name_mapping
+
+
+def restore_sequence_names_in_repeatmasker_output(rm_file, output_file, name_mapping):
+    """
+    Restore original sequence names in RepeatMasker output file.
+    :param rm_file: path to RepeatMasker .out file with renamed sequences
+    :param output_file: path to output file with restored names
+    :param name_mapping: dictionary mapping indices to original names
+    :return: None
+    """
+    with open(rm_file, 'r') as f_in, open(output_file, 'w') as f_out:
+        for line_num, line in enumerate(f_in):
+            if line_num < 3:  # Skip RepeatMasker header (first 3 lines)
+                f_out.write(line)
+                continue
+            
+            # Skip empty lines
+            if not line.strip():
+                f_out.write(line)
+                continue
+            
+            # Split the line and replace the query sequence name (5th column, index 4)
+            parts = line.split()
+            if len(parts) >= 5:
+                query_name = parts[4]
+                if query_name in name_mapping:
+                    parts[4] = name_mapping[query_name]
+                    f_out.write(' '.join(parts) + '\n')
+                else:
+                    f_out.write(line)  # Keep original line if mapping not found
+            else:
+                f_out.write(line)  # Keep malformed lines as-is
+
+
+def run_repeatmasker_with_renaming(input_fasta, library, cpu=1, additional_params=""):
+    """
+    Run RepeatMasker with automatic sequence name renaming to handle 50-character limit.
+    
+    Args:
+        input_fasta: Path to input FASTA file
+        library: Path to RepeatMasker library
+        cpu: Number of CPU cores to use
+        additional_params: Additional RepeatMasker parameters
+    
+    Returns:
+        Path to RepeatMasker output file (.out) with restored sequence names
+    """
+    # Create renamed version to handle RepeatMasker 50-character sequence name limit
+    input_dir = os.path.dirname(input_fasta)
+    input_basename = os.path.basename(input_fasta)  # do not assume input_fasta has .fasta extension!
+    input_renamed = F"{input_dir}/{input_basename}_renamed.fasta"
+
+
+    print("input fasta file:", input_fasta)
+    print("renamed fasta file:", input_renamed)
+    # Rename sequences to numerical indices
+    name_mapping = rename_fasta_sequences_to_indices(input_fasta, input_renamed)
+    
+    # Build RepeatMasker command
+    cmd = (F"RepeatMasker -pa {cpu} -lib {library} -e ncbi -s -no_is -norna "
+           F"-nolow {additional_params} -dir {input_dir} {input_renamed}")
+    
+    print(cmd)
+    print("---------")
+    subprocess.run(cmd, shell=True)
+    
+    # Get RepeatMasker output files
+    rm_file_renamed = F"{input_renamed}.out"
+    rm_file_original = F"{input_fasta}.out"
+    
+    # Restore original sequence names in RepeatMasker output
+    restore_sequence_names_in_repeatmasker_output(rm_file_renamed, rm_file_original, name_mapping)
+    
+    # Clean up renamed files
+    os.remove(input_renamed)
+    if os.path.exists(rm_file_renamed):
+        os.remove(rm_file_renamed)
+    
+    return rm_file_original
