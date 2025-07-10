@@ -222,7 +222,6 @@ plot_multiline_logo <- function(cons.logo, read=NULL, W=50, setpar=TRUE, gaps = 
         axis(2,at=y,label=y,las=2,cex.axis=.7)
     }
 }
-
 plot.logo <- function(pwm, maxh=NULL){
     acgt <- c("A", "C", "G", "T")
     pwm <- pwm[, acgt]
