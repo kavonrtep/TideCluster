@@ -51,26 +51,60 @@ mmseqs2_search <- function(sequences,
       stop("MMseqs2 search command failed with exit code: ", result_code)
     }
 
-    # Apply additional AWK filtering if specified
-    if (!is.null(awk_filter)) {
-      cat("Applying additional AWK filtering...\n")
-      temp_filtered_file <- file.path(temp_dir, "pairs_filtered.m8")
-      
-      # Build AWK command for additional filtering
-      awk_cmd <- paste("awk", paste0("'", awk_filter, "'"), 
-                      output_file, ">", temp_filtered_file)
-      
-      cat("Running AWK filter command:\n", awk_cmd, "\n")
-      
-      awk_result_code <- system(awk_cmd)
-      
-      if (awk_result_code != 0) {
-        stop("AWK filtering command failed with exit code: ", awk_result_code)
-      }
-      
-      # Replace original output file with filtered version
-      output_file <- temp_filtered_file
+    # Apply prefiltering to remove self-hits and reciprocal duplicates
+    cat("Applying prefiltering to remove self-hits and reciprocal duplicates...\n")
+    temp_reordered_file <- file.path(temp_dir, "pairs_reordered.m8")
+    temp_sorted_file <- file.path(temp_dir, "pairs_sorted.m8")
+    temp_prefiltered_file <- file.path(temp_dir, "pairs_prefiltered.m8")
+    
+    # Step 1: AWK script to reorder pairs and apply filters
+    # - Remove self-hits ($1 == $2)  
+    # - Reorder each pair so smaller ID comes first
+    # - Apply additional coverage/identity filters if specified
+    reorder_awk <- paste0(
+      "'($1 != $2)",
+      if (!is.null(awk_filter)) paste0(" && ", awk_filter) else "",
+      " { if ($1 < $2) print $0; else print $2\"\\t\"$1\"\\t\"$3\"\\t\"$4\"\\t\"$5 }'"
+    )
+    
+    reorder_cmd <- paste("awk", reorder_awk, output_file, ">", temp_reordered_file)
+    
+    cat("Step 1: Reordering pairs...\n")
+    cat("Running command:\n", reorder_cmd, "\n")
+    
+    reorder_result_code <- system(reorder_cmd)
+    
+    if (reorder_result_code != 0) {
+      stop("Reordering command failed with exit code: ", reorder_result_code)
     }
+    
+    # Step 2: Sort by query-target pair (first two columns)
+    sort_cmd <- paste("sort -k1,1 -k2,2", temp_reordered_file, ">", temp_sorted_file)
+    
+    cat("Step 2: Sorting pairs by query-target...\n")
+    
+    sort_result_code <- system(sort_cmd)
+    
+    if (sort_result_code != 0) {
+      stop("Sort command failed with exit code: ", sort_result_code)
+    }
+    
+    # Step 3: Remove duplicates based on query-target pair, keeping the best hit
+    # AWK script to keep only the first (best) hit per query-target pair after sorting
+    # Since we sorted by query-target, identical pairs are grouped together
+    dedup_awk <- "'!seen[$1,$2]++'"
+    dedup_cmd <- paste("awk", dedup_awk, temp_sorted_file, ">", temp_prefiltered_file)
+    
+    cat("Step 3: Removing duplicates (keeping first hit per query-target pair)...\n")
+    
+    dedup_result_code <- system(dedup_cmd)
+    
+    if (dedup_result_code != 0) {
+      stop("Deduplication command failed with exit code: ", dedup_result_code)
+    }
+    
+    # Replace original output file with prefiltered version
+    output_file <- temp_prefiltered_file
 
     # Read results
     if (!file.exists(output_file)) {
@@ -106,7 +140,7 @@ mmseqs2_search <- function(sequences,
       colnames(search_results) <- column_names
     }
 
-    cat("Read", nrow(search_results), "similarity pairs\n")
+    cat("Read", nrow(search_results), "filtered similarity pairs (after removing self-hits and reciprocal duplicates)\n")
 
     # Convert numeric columns to appropriate types
     numeric_cols <- c("pident", "alnlen", "qcov", "tcov", "evalue", "bits")
@@ -159,16 +193,20 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   tc_trc_id <- gsub("#.+", "", names(tc_seq))
   th_trc_id <- gsub("_rep.+", "", names(th_seq))
 
-  # Combine all unique TRC IDs
-  trc_all <- unique(c(tc_trc_id, th_trc_id))
-
   # Combine sequences, avoiding duplicates based on transcript IDs
   th_tc_seq <- c(tc_seq, th_seq[!th_trc_id %in% tc_trc_id])
+  
+  # Clean up intermediate objects
+  rm(tc_trc_id, th_trc_id)
+  gc(verbose = FALSE)
 
   message("Combined ", length(th_tc_seq), " sequences for clustering")
 
   # add also reverse complement sequences
-  th_tc_seq <- c(th_tc_seq, reverseComplement(th_tc_seq))
+  th_tc_seq_rc <- reverseComplement(th_tc_seq)
+  th_tc_seq <- c(th_tc_seq, th_tc_seq_rc)
+  rm(th_tc_seq_rc)
+  gc(verbose = FALSE)
 
   # Build AWK filter for coverage filtering (since MMseqs2 doesn't have --min-cov)
   # format_output = "query,target,pident,qcov,tcov"
@@ -190,15 +228,13 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   }, error = function(e) {
     stop("MMseqs2 execution failed. Please check that MMseqs2 is properly installed and accessible: ", e$message)
   })
-
+  saveRDS(df, file = file.path(output_directory, "mmseqs2_results.rds"))
   # Calculate maximum coverage
   df$max_cov <- pmax(df$qcov, df$tcov)
 
   # Extract  IDs from query and target
   df$trc_q <- gsub("_rep.+", "", gsub("#.+", "", df$query))
   df$trc_t <- gsub("_rep.+", "", gsub("#.+", "", df$target))
-
-
 
   # Filter based on coverage and identity thresholds, or same transcript ID
   message("MMseqs2 output before filtering: ", nrow(df), " rows")
@@ -214,8 +250,10 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
     igraph::graph_from_data_frame(df_pass[, c("query", "target", "weight")],
                                   directed = FALSE)
   )
-
-
+  
+  # Clean up large objects - no longer needed
+  rm(th_tc_seq, df_pass)
+  gc(verbose = FALSE)
 
   fg <- cluster_fast_greedy(g)
   fg_groups <- igraph::groups(fg)
@@ -243,6 +281,10 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   fg_groups_trc_id <- lapply(fg_groups, function(x) {
     unique(gsub("_rep.+", "", gsub("#.+", "", x)))
   })
+  
+  # Clean up graph objects after extracting groups
+  rm(fg, fg_groups)
+  gc(verbose = FALSE)
 
   # Convert to data frame format
   trc_groups <- do.call(rbind, lapply(seq_along(fg_groups_trc_id), function(i) {
@@ -250,6 +292,10 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
                group_id = i,
                stringsAsFactors = FALSE)
   }))
+  
+  # Clean up intermediate group data
+  rm(fg_groups_trc_id)
+  gc(verbose = FALSE)
 
   message("Initial clustering produced ", max(trc_groups$group_id), " groups")
 
@@ -286,8 +332,14 @@ pivot_trc_data <- function(df, prefix) {
     group_id = df$group_id,
     stringsAsFactors = FALSE
   )
+  
   # make wide format - prefix as columns, group_id as rows, values are concatenated trc_id
   result_df <- reshape2::dcast(df2, group_id ~ prefix, value.var = "trc_id", fun.aggregate = function(x) paste(unique(x), collapse = ", "))
+  
+  # Clean up intermediate dataframe
+  rm(df2)
+  gc(verbose = FALSE)
+  
   # make also lists
   result_list <- lapply(seq_along(colnames(result_df)[-1]), function(i) {
     res <- result_df[[i + 1]]
@@ -296,15 +348,20 @@ pivot_trc_data <- function(df, prefix) {
     names(trc) <- result_df$group_id
     return(trc)
   })
+  
   # set same order as prefixes
   correct_order <- match(prefix, colnames(result_df)[-1])
   result_list <- result_list[correct_order]
   result_df <- result_df[, c("group_id", colnames(result_df)[-1][correct_order])]
+  
+  # Clean up intermediate variables
+  rm(correct_order)
+  gc(verbose = FALSE)
+  
   return(list(
     df = result_df,
     list = result_list
   ))
-
 }
 read_keyvalue_file <- function(file_path, sep = "\t", comment = "#",
                               skip_empty = TRUE, auto_convert = TRUE) {
@@ -453,6 +510,11 @@ get_seq_files <- function(input_dirs, prefix){
   fasta_th <- paste0(input_dirs, "/", consensus_groups_path)
   s_tc <- sapply(fasta_tc, readDNAStringSet)
   s_th <- sapply(fasta_th, readDNAStringSet)
+  
+  # Clean up file path vectors
+  rm(fasta_tc, fasta_th)
+  gc(verbose = FALSE)
+  
   s_tc <- lapply(s_tc, function(x) {
     if (length(x) == 0) {
       return(DNAStringSet())
@@ -460,14 +522,13 @@ get_seq_files <- function(input_dirs, prefix){
       return(make_multimer(x, k = 1))  # make dimers
     }
   })
-    s_th <- lapply(s_th, function(x) {
+  s_th <- lapply(s_th, function(x) {
         if (length(x) == 0) {
         return(DNAStringSet())
         } else {
         return(make_multimer(x, k = 2))  # make tetramers
         }
     })
-
 
   # add prefixes to sequence names:
   s_tc <- lapply(seq_along(prefix), function(i) {
@@ -478,9 +539,15 @@ get_seq_files <- function(input_dirs, prefix){
     names(s_th[[i]]) <- paste(prefix[i], names(s_th[[i]]), sep = ":")
     s_th[[i]]
   })
+  
   # concatenate all sequences into one DNAStringSet
   all_tc <- Reduce(c, s_tc)
   all_th <- Reduce(c, s_th)
+  
+  # Clean up intermediate lists
+  rm(s_tc, s_th)
+  gc(verbose = FALSE)
+  
   return(list(tc = all_tc, th = all_th))
 }
 
@@ -802,7 +869,16 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
   message("Clustering sequences...")
   grps <- cluster_trc_sequences(all_seq$tc, all_seq$th, mmseqs2_path = mmseqs2_path,
                                 output_directory = output_directory, ncpu = ncpu)
+  
+  # Clean up large sequence objects after clustering
+  rm(all_seq)
+  gc(verbose = FALSE)
+  
   grps_pivoted <- pivot_trc_data(grps, prefix)
+  
+  # Clean up clustering results after pivoting
+  rm(grps)
+  gc(verbose = FALSE)
 
 
   # Load and process SSRS data
@@ -830,13 +906,12 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
   SIMPLIFY = FALSE
   )
 
-
-
-
-
   names(ssrs_tables) <- prefix
-
   ssrs_groups <- cluster_ssrs_sequences(ssrs_tables, min_percentage = 10)
+  
+  # Clean up SSRS tables after clustering
+  rm(ssrs_tables)
+  gc(verbose = FALSE)
 
   # Calculate lengths
   message("Calculating TRC lengths...")
@@ -850,10 +925,16 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
 
   # Create annotation data frames
   annotation_dfs <- create_annotation_dataframes(grps_pivoted, annotation_results, prefix)
+  
+
 
   # Finalize the main data frame
   message("Finalizing results...")
   grps_pivoted_final <- finalize_groups_dataframe(grps_pivoted, total_grps_length, annotation_dfs)
+  
+  # Clean up intermediate objects
+  rm(grps_pivoted, annotation_dfs)
+  gc(verbose = FALSE)
 
   return(list(
     groups = grps_pivoted_final,
