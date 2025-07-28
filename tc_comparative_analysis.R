@@ -42,10 +42,14 @@ mmseqs2_search <- function(sequences,
                         "--min-seq-id", min_identity / 100,  # Convert percentage to fraction
                         additional_params)
 
-    cat("Running MMseqs2 search command:\n", mmseqs_cmd, "\n")
-
+    cat("Running MMseqs2 easy-search...\n")
+    start_time <- Sys.time()
+    
     # Execute MMseqs2
     result_code <- system(mmseqs_cmd)
+    
+    end_time <- Sys.time()
+    cat(sprintf("MMseqs2 search completed in %.2f seconds\n", as.numeric(difftime(end_time, start_time, units="secs"))))
 
     if (result_code != 0) {
       stop("MMseqs2 search command failed with exit code: ", result_code)
@@ -53,14 +57,13 @@ mmseqs2_search <- function(sequences,
 
     # Apply prefiltering to remove self-hits and reciprocal duplicates
     cat("Applying prefiltering to remove self-hits and reciprocal duplicates...\n")
+    filter_start_time <- Sys.time()
+    
     temp_reordered_file <- file.path(temp_dir, "pairs_reordered.m8")
     temp_sorted_file <- file.path(temp_dir, "pairs_sorted.m8")
     temp_prefiltered_file <- file.path(temp_dir, "pairs_prefiltered.m8")
     
     # Step 1: AWK script to reorder pairs and apply filters
-    # - Remove self-hits ($1 == $2)  
-    # - Reorder each pair so smaller ID comes first
-    # - Apply additional coverage/identity filters if specified
     reorder_awk <- paste0(
       "'($1 != $2)",
       if (!is.null(awk_filter)) paste0(" && ", awk_filter) else "",
@@ -68,10 +71,6 @@ mmseqs2_search <- function(sequences,
     )
     
     reorder_cmd <- paste("awk", reorder_awk, output_file, ">", temp_reordered_file)
-    
-    cat("Step 1: Reordering pairs...\n")
-    cat("Running command:\n", reorder_cmd, "\n")
-    
     reorder_result_code <- system(reorder_cmd)
     
     if (reorder_result_code != 0) {
@@ -80,9 +79,6 @@ mmseqs2_search <- function(sequences,
     
     # Step 2: Sort by query-target pair (first two columns)
     sort_cmd <- paste("sort -k1,1 -k2,2", temp_reordered_file, ">", temp_sorted_file)
-    
-    cat("Step 2: Sorting pairs by query-target...\n")
-    
     sort_result_code <- system(sort_cmd)
     
     if (sort_result_code != 0) {
@@ -90,18 +86,16 @@ mmseqs2_search <- function(sequences,
     }
     
     # Step 3: Remove duplicates based on query-target pair, keeping the best hit
-    # AWK script to keep only the first (best) hit per query-target pair after sorting
-    # Since we sorted by query-target, identical pairs are grouped together
     dedup_awk <- "'!seen[$1,$2]++'"
     dedup_cmd <- paste("awk", dedup_awk, temp_sorted_file, ">", temp_prefiltered_file)
-    
-    cat("Step 3: Removing duplicates (keeping first hit per query-target pair)...\n")
-    
     dedup_result_code <- system(dedup_cmd)
     
     if (dedup_result_code != 0) {
       stop("Deduplication command failed with exit code: ", dedup_result_code)
     }
+    
+    filter_end_time <- Sys.time()
+    cat(sprintf("Filtering completed in %.2f seconds\n", as.numeric(difftime(filter_end_time, filter_start_time, units="secs"))))
     
     # Replace original output file with prefiltered version
     output_file <- temp_prefiltered_file
@@ -140,7 +134,7 @@ mmseqs2_search <- function(sequences,
       colnames(search_results) <- column_names
     }
 
-    cat("Read", nrow(search_results), "filtered similarity pairs (after removing self-hits and reciprocal duplicates)\n")
+    cat(sprintf("Loaded %d filtered similarity pairs (self-hits and reciprocal duplicates removed)\n", nrow(search_results)))
 
     # Convert numeric columns to appropriate types
     numeric_cols <- c("pident", "alnlen", "qcov", "tcov", "evalue", "bits")
@@ -246,17 +240,29 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   df_pass$weight <- df_pass$max_cov * df_pass$pident
 
   # Build graph and perform community detection
+  cat("Building similarity graph...\n")
+  graph_start_time <- Sys.time()
+  
   g <- igraph::simplify(
     igraph::graph_from_data_frame(df_pass[, c("query", "target", "weight")],
                                   directed = FALSE)
   )
   
+  graph_end_time <- Sys.time()
+  cat(sprintf("Graph creation completed in %.2f seconds\n", as.numeric(difftime(graph_end_time, graph_start_time, units="secs"))))
+  
   # Clean up large objects - no longer needed
   rm(th_tc_seq, df_pass)
   gc(verbose = FALSE)
 
+  cat("Running fast-greedy clustering...\n")
+  clustering_start_time <- Sys.time()
+  
   fg <- cluster_fast_greedy(g)
   fg_groups <- igraph::groups(fg)
+  
+  clustering_end_time <- Sys.time()
+  cat(sprintf("Fast-greedy clustering completed in %.2f seconds\n", as.numeric(difftime(clustering_end_time, clustering_start_time, units="secs"))))
 
   # add fastgreedy groups to graph as vertex attribute
   V(g)$group <- as.integer(factor(igraph::membership(fg)))
@@ -278,6 +284,9 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
 
 
   # Extract transcript IDs for each group
+  cat("Extracting cluster information...\n")
+  extraction_start_time <- Sys.time()
+  
   fg_groups_trc_id <- lapply(fg_groups, function(x) {
     unique(gsub("_rep.+", "", gsub("#.+", "", x)))
   })
@@ -296,6 +305,9 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   # Clean up intermediate group data
   rm(fg_groups_trc_id)
   gc(verbose = FALSE)
+  
+  extraction_end_time <- Sys.time()
+  cat(sprintf("Cluster information extraction completed in %.2f seconds\n", as.numeric(difftime(extraction_end_time, extraction_start_time, units="secs"))))
 
   message("Initial clustering produced ", max(trc_groups$group_id), " groups")
 
