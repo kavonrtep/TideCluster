@@ -43,6 +43,7 @@ mmseqs2_search <- function(sequences,
                         additional_params)
 
     cat("Running MMseqs2 easy-search...\n")
+    cat(sprintf("Memory usage before MMseqs2 search: %.2f MB\n", memory_usage() / 1024^2))
     start_time <- Sys.time()
     
     # Execute MMseqs2
@@ -50,6 +51,7 @@ mmseqs2_search <- function(sequences,
     
     end_time <- Sys.time()
     cat(sprintf("MMseqs2 search completed in %.2f seconds\n", as.numeric(difftime(end_time, start_time, units="secs"))))
+    cat(sprintf("Memory usage after MMseqs2 search: %.2f MB\n", memory_usage() / 1024^2))
 
     if (result_code != 0) {
       stop("MMseqs2 search command failed with exit code: ", result_code)
@@ -57,6 +59,7 @@ mmseqs2_search <- function(sequences,
 
     # Apply prefiltering to remove self-hits and reciprocal duplicates
     cat("Applying prefiltering to remove self-hits and reciprocal duplicates...\n")
+    cat(sprintf("Memory usage before filtering: %.2f MB\n", memory_usage() / 1024^2))
     filter_start_time <- Sys.time()
     
     temp_reordered_file <- file.path(temp_dir, "pairs_reordered.m8")
@@ -96,6 +99,7 @@ mmseqs2_search <- function(sequences,
     
     filter_end_time <- Sys.time()
     cat(sprintf("Filtering completed in %.2f seconds\n", as.numeric(difftime(filter_end_time, filter_start_time, units="secs"))))
+    cat(sprintf("Memory usage after filtering: %.2f MB\n", memory_usage() / 1024^2))
     
     # Replace original output file with prefiltered version
     output_file <- temp_prefiltered_file
@@ -222,6 +226,8 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   }, error = function(e) {
     stop("MMseqs2 execution failed. Please check that MMseqs2 is properly installed and accessible: ", e$message)
   })
+  # make sure the output directory exists
+  dir.create(output_directory, recursive = TRUE, showWarnings = FALSE)
   saveRDS(df, file = file.path(output_directory, "mmseqs2_results.rds"))
   # Calculate maximum coverage
   df$max_cov <- pmax(df$qcov, df$tcov)
@@ -241,6 +247,7 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
 
   # Build graph and perform community detection
   cat("Building similarity graph...\n")
+  cat(sprintf("Memory usage before graph creation: %.2f MB\n", memory_usage() / 1024^2))
   graph_start_time <- Sys.time()
   
   g <- igraph::simplify(
@@ -250,12 +257,14 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   
   graph_end_time <- Sys.time()
   cat(sprintf("Graph creation completed in %.2f seconds\n", as.numeric(difftime(graph_end_time, graph_start_time, units="secs"))))
+  cat(sprintf("Memory usage after graph creation: %.2f MB\n", memory_usage() / 1024^2))
   
   # Clean up large objects - no longer needed
   rm(th_tc_seq, df_pass)
   gc(verbose = FALSE)
 
   cat("Running fast-greedy clustering...\n")
+  cat(sprintf("Memory usage before clustering: %.2f MB\n", memory_usage() / 1024^2))
   clustering_start_time <- Sys.time()
   
   fg <- cluster_fast_greedy(g)
@@ -263,6 +272,7 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   
   clustering_end_time <- Sys.time()
   cat(sprintf("Fast-greedy clustering completed in %.2f seconds\n", as.numeric(difftime(clustering_end_time, clustering_start_time, units="secs"))))
+  cat(sprintf("Memory usage after clustering: %.2f MB\n", memory_usage() / 1024^2))
 
   # add fastgreedy groups to graph as vertex attribute
   V(g)$group <- as.integer(factor(igraph::membership(fg)))
@@ -285,6 +295,7 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
 
   # Extract transcript IDs for each group
   cat("Extracting cluster information...\n")
+  cat(sprintf("Memory usage before cluster extraction: %.2f MB\n", memory_usage() / 1024^2))
   extraction_start_time <- Sys.time()
   
   fg_groups_trc_id <- lapply(fg_groups, function(x) {
@@ -308,6 +319,7 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   
   extraction_end_time <- Sys.time()
   cat(sprintf("Cluster information extraction completed in %.2f seconds\n", as.numeric(difftime(extraction_end_time, extraction_start_time, units="secs"))))
+  cat(sprintf("Memory usage after cluster extraction: %.2f MB\n", memory_usage() / 1024^2))
 
   message("Initial clustering produced ", max(trc_groups$group_id), " groups")
 
@@ -1149,6 +1161,13 @@ export_results <- function(grps_pivoted, ssrs_groups, annotation_report, output_
   writeLines(report_lines, report_file)
   message(sprintf("Exported annotation report to %s", report_file))
 }
+
+memory_usage <- function(){
+  node_size <- if (8L * .Machine$sizeof.pointer == 32L) 28L else 56L
+  sum(gc()[, 1] * c(node_size, 8))
+}
+
+
 
 # Main execution function
 main <- function(opt) {
