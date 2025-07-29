@@ -356,6 +356,130 @@ options:
 ```
 
 
+## TRC Comparative Analysis
+
+The `tc_comparative_analysis.R` script performs comparative analysis of Tandem Repeat Clusters (TRCs) across multiple samples, grouping similar TRCs into satellite families based on sequence similarity. This analysis enables identification of conserved tandem repeat families across different samples and provides annotation and length statistics for each family.
+
+### Purpose
+
+The script performs several key functions:
+1. **Sequence clustering**: Groups TRCs from multiple samples based on sequence similarity using MMseqs2
+2. **Graph-based community detection**: Uses fast-greedy clustering to identify satellite families
+3. **Annotation integration**: Incorporates annotation data from RepeatMasker analysis
+4. **Length calculation**: Computes total lengths of TRCs within each family across samples
+5. **SSRS analysis**: Processes Simple Sequence Repeat (SSR) data alongside TRC data
+6. **Comprehensive reporting**: Generates detailed output tables and re-annotated GFF files
+
+### Input Requirements
+
+The script requires a tab-delimited input configuration file with the following columns:
+
+- `input_dir`: Path to the TideCluster output directory containing TRC data
+- `sample_code`: Unique identifier for each sample (used as column prefixes in output)
+- `tidecluster_prefix`: Prefix used for TideCluster output files (typically "tc")
+
+**Example input file:**
+```tsv
+input_dir	                         sample_code	tidecluster_prefix
+/path/to/sample1/tidecluster_output	 Sample1	    tc
+/path/to/sample2/tidecluster_output	 Sample2	    tc
+/path/to/sample3/tidecluster_output	 Sample3	    tc
+```
+
+Each input directory should contain the standard TideCluster output files:
+- `{prefix}_consensus_dimer_library.fasta`: Consensus sequences for clustering
+- `{prefix}_consensus/consensus_sequences_all.fasta`: All consensus sequences
+- `{prefix}_clustering.gff3`: TRC clustering results
+- `{prefix}_annotation.tsv`: Annotation data (optional)
+- `{prefix}_tarean/SSRS_summary.csv`: SSR data (optional)
+
+### Usage
+
+```bash
+Rscript tc_comparative_analysis.R -i input_config.tsv -o output_directory -c 10
+```
+
+**Command-line options:**
+- `-i, --input`: Input configuration file (required)
+- `-o, --output_directory`: Output directory for results (default: "tc_comparative_analysis")
+- `-c, --cpu`: Number of CPU threads for MMseqs2 (default: 5)
+
+
+
+### Output Files
+
+The script generates several output files in the specified output directory:
+
+#### Primary Output Tables
+
+**`trc_satellite_families.tsv`** - Main results table containing satellite family information:
+
+| Column Type               | Column Name                | Description                                                                               |
+|---------------------------|----------------------------|-------------------------------------------------------------------------------------------|
+| **Family ID**             | `Satellite_family`         | Unique identifier for each satellite family (ranked by total length)                      |
+| **TRC Composition**       | `{sample}_code`            | Comma-separated list of TRC IDs belonging to this family in each sample                   |
+| **Length Statistics**     | `{sample}_length`          | Total genomic length (bp) of all TRCs in this family for each sample                      |
+| **Detailed Annotations**  | `{sample}_annot`           | Detailed annotation with percentages for each sample (e.g., "Satellite/FabTR-10 (95.3%)") |
+| **Prevalent Annotations** | `{sample}_prevalent_annot` | Annotations comprising >50% of the family in each sample                                  |
+| **Consensus Annotation**  | `prevalent_annot`          | Combined prevalent annotations across all samples                                         |
+
+**Example row:**
+```
+Satellite_family: 1
+JI1006: TRC_1
+IPIP202077: TRC_1, TRC_365  
+IPIP200579: TRC_1
+JI281: TRC_1
+JI1006_length: 18737956
+IPIP202077_length: 18130289
+IPIP200579_length: 17011299
+JI281_length: 15405217
+JI1006_annot: Satellite/FabTR_PisTR-B (98.8%)
+IPIP202077_annot: Satellite/FabTR_PisTR-B (98.4%)
+IPIP200579_annot: Satellite/FabTR_PisTR-B (98.7%)
+JI281_annot: Satellite/FabTR_PisTR-B (98.5%)
+prevalent_annot: Satellite/FabTR_PisTR-B
+```
+
+**`ssrs_groups.tsv`** - Simple Sequence Repeat clustering results:
+- Groups SSRs with similar repeat motifs across samples
+- Contains TRC IDs and SSR types for each cluster
+- Filters SSRs by minimum percentage threshold (default: 10%)
+
+#### Supporting Files
+
+**`annotation_report.txt`** - Summary statistics of annotation coverage:
+- Total number of satellite families
+- Families with/without annotations
+- Annotation mapping statistics
+
+**`gff3/`** directory - Annotated GFF3 files for each sample:
+- `{sample}_tc_annotated.gff3`: Original GFF3 files with added satellite family and SSR annotations
+- Includes `Satellite_family` and `ssrs_type` attributes
+
+**Technical Output Files:**
+- `mmseqs2_results.tsv`: Raw MMseqs2 similarity search results
+- `trc_graph.graphml`: Graph representation of TRC similarities (for visualization)
+- `trc_graph.rds`: R binary format of the similarity graph
+
+
+### Interpretation Guidelines
+
+**Satellite Families**: Numbered by total genomic length across all samples (Family 1 = largest)
+
+**TRC Composition**: Multiple TRCs from the same sample in one family indicates:
+- High sequence similarity between originally separate clusters
+- Possible fragmentation during initial clustering
+- Evolutionary related repeat variants
+
+**Length Variations**: Differences in family lengths across samples may indicate:
+- Species-specific amplification/deletion events
+- Assembly quality differences
+- True biological variation in repeat content
+
+
+
+
 ## Credits
 
 TideCluster utilizes Tidehunter [https://github.com/Xinglab/TideHunter] for tandem repeat detection and TAREAN for reconstruction of consensus sequences of tandem repeats.
