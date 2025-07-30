@@ -323,7 +323,7 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
 
   message("Initial clustering produced ", max(trc_groups$group_id), " groups")
 
-  # Handle transcript IDs appearing in multiple groups
+  # Handle IDs appearing in multiple groups
   trc_duplicated <- trc_groups$trc_id[duplicated(trc_groups$trc_id)]
 
   if (length(trc_duplicated) > 0) {
@@ -342,10 +342,31 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   }
   # Remove duplicated rows and renumber groups starting from 1
   trc_groups <- trc_groups[!duplicated(trc_groups), ]
+  
+  # Store original group mapping before renumbering for graph vertex update
+  original_groups <- trc_groups$group_id
   trc_groups$group_id <- as.integer(factor(trc_groups$group_id))
+  
+  # Create mapping from original to new group IDs
+  group_mapping <- setNames(trc_groups$group_id, original_groups)
+  
+  # Update graph vertex groups to match renumbered dataframe groups
+  if (exists("g", inherits = FALSE)) {
+    current_vertex_groups <- V(g)$group
+    V(g)$group <- group_mapping[as.character(current_vertex_groups)]
+    
+    # Update the saved graph file
+    if (!is.null(output_directory)) {
+      saveRDS(g, file = file.path(output_directory, "trc_graph.rds"))
+    }
+    
+    message("Updated graph vertex groups to match renumbered dataframe groups")
+  }
 
   message("Final clustering produced ", max(trc_groups$group_id), " groups covering ",
           nrow(trc_groups), " TRC IDs")
+
+
 
   return(trc_groups)
 }
@@ -866,10 +887,12 @@ finalize_groups_dataframe <- function(grps_pivoted, total_grps_length, annotatio
 
   # Renumber groups by size (largest = 1)
   groups_id_renumbered <- rank(-total_grps_length_in_all_prefixes, ties.method = "first")
-  grps_pivoted$df$group_id_new <- groups_id_renumbered
+  
+  # Add new satellite family ID (keep original group_id for graph mapping)
+  grps_pivoted$df$Satellite_family <- groups_id_renumbered
 
-  # Sort by new group ID
-  new_order <- order(grps_pivoted$df$group_id_new)
+  # Sort by new satellite family ID
+  new_order <- order(grps_pivoted$df$Satellite_family)
   grps_pivoted$df <- grps_pivoted$df[new_order, ]
 
   return(grps_pivoted)
@@ -956,6 +979,10 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
   message("Finalizing results...")
   grps_pivoted_final <- finalize_groups_dataframe(grps_pivoted, total_grps_length, annotation_dfs)
   
+  # Update graph with renumbered satellite family IDs (before formatting removes group_id)
+  message("Updating graph with final satellite family IDs...")
+  update_graph_satellite_families(grps_pivoted_final$df, output_directory)
+  
   # Clean up intermediate objects
   rm(grps_pivoted, annotation_dfs)
   gc(verbose = FALSE)
@@ -995,15 +1022,13 @@ validate_and_read_input <- function(input_file) {
 
 # Function to format and clean results dataframe
 format_results_dataframe <- function(grps_pivoted) {
-  # Rename group_id_new to Satellite_family
-  colnames(grps_pivoted)[colnames(grps_pivoted) == "group_id_new"] <- "Satellite_family"
-
-  # Remove group_id column
-  grps_pivoted$group_id <- NULL
-
-  # Make Satellite_family the first column
-  grps_pivoted <- grps_pivoted[, c("Satellite_family",
-                                   setdiff(colnames(grps_pivoted), "Satellite_family"))]
+  # Keep group_id column for debugging (user needs to compare with graph attributes)
+  # The group_id represents original clustering groups before renumbering
+  
+  # Make Satellite_family the first column, followed by group_id
+  column_order <- c("Satellite_family", "group_id", 
+                    setdiff(colnames(grps_pivoted), c("Satellite_family", "group_id")))
+  grps_pivoted <- grps_pivoted[, column_order]
 
   return(grps_pivoted)
 }
@@ -1162,6 +1187,45 @@ export_results <- function(grps_pivoted, ssrs_groups, annotation_report, output_
   message(sprintf("Exported annotation report to %s", report_file))
 }
 
+# Function to update graph with renumbered satellite family IDs
+update_graph_satellite_families <- function(grps_pivoted_df, output_directory) {
+  graph_rds_path <- file.path(output_directory, "trc_graph.rds")
+  graph_graphml_path <- file.path(output_directory, "trc_graph.graphml")
+  
+  # Check if graph file exists
+  if (!file.exists(graph_rds_path)) {
+    warning("Graph RDS file not found: ", graph_rds_path, ". Skipping graph update.")
+    return(invisible(NULL))
+  }
+  
+  # Load the graph
+  tryCatch({
+    g <- readRDS(graph_rds_path)
+    
+    # Create mapping from original group ID to new satellite family ID
+    # Use group_id and Satellite_family columns from grps_pivoted_df
+    group_to_sf_mapping <- setNames(grps_pivoted_df$Satellite_family, grps_pivoted_df$group_id)
+    
+    # Map each vertex's current group to new satellite family ID
+    current_groups <- V(g)$group
+    new_satellite_families <- group_to_sf_mapping[as.character(current_groups)]
+    
+    # Add new Satellite_family attribute (keep original group for debugging)
+    V(g)$Satellite_family <- sprintf("SF_%04d", new_satellite_families)
+    
+    # Save updated graph
+    saveRDS(g, file = graph_rds_path)
+    graph_graphml_path2 <- file.path(output_directory, "trc_graph_updated.graphml")
+
+    write_graph(g, file = graph_graphml_path2, format = "graphml")
+    
+    message(sprintf("Updated graph with satellite family IDs: %s", graph_graphml_path))
+    
+  }, error = function(e) {
+    warning("Failed to update graph with satellite family IDs: ", e$message)
+  })
+}
+
 memory_usage <- function(){
   node_size <- if (8L * .Machine$sizeof.pointer == 32L) 28L else 56L
   sum(gc()[, 1] * c(node_size, 8))
@@ -1244,7 +1308,7 @@ if (is.null(opt$input)) {
   print_help(opt_parser)
   stop("Input file is mandatory. Use -i or --input to specify it.")
 }
-
+save.image("debug_tc_comparative_analysis.RData")
 # Run main analysis
 main(opt)
 
