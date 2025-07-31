@@ -206,29 +206,46 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   rm(th_tc_seq_rc)
   gc(verbose = FALSE)
 
-  # Build AWK filter for coverage filtering (since MMseqs2 doesn't have --min-cov)
-  # format_output = "query,target,pident,qcov,tcov"
-  # Column indices: qcov=4, tcov=5, pident=3
-  awk_coverage_filter <- sprintf("(($4 >= %f) || ($5 >= %f))", min_coverage, min_coverage)
-  
-  # Run MMseqs2 search with filtering parameters
-  tryCatch({
-    if (is.null(mmseqs2_path)) {
-      df <- mmseqs2_search(th_tc_seq, threads = ncpu, 
-                          min_identity = min_identity,
-                          awk_filter = awk_coverage_filter)
-    } else {
-      df <- mmseqs2_search(th_tc_seq, threads = ncpu, 
-                          mmseqs2_path = mmseqs2_path,
-                          min_identity = min_identity,
-                          awk_filter = awk_coverage_filter)
-    }
-  }, error = function(e) {
-    stop("MMseqs2 execution failed. Please check that MMseqs2 is properly installed and accessible: ", e$message)
-  })
   # make sure the output directory exists
   dir.create(output_directory, recursive = TRUE, showWarnings = FALSE)
-  saveRDS(df, file = file.path(output_directory, "mmseqs2_results.rds"))
+  
+  # Check if MMseqs2 results already exist
+  mmseqs2_rds_file <- file.path(output_directory, "mmseqs2_results.rds")
+  mmseqs2_tsv_file <- file.path(output_directory, "mmseqs2_results.tsv")
+  
+  if (file.exists(mmseqs2_rds_file)) {
+    cat("Found existing MMseqs2 results, loading from:", mmseqs2_rds_file, "\n")
+    df <- readRDS(mmseqs2_rds_file)
+    cat("Loaded", nrow(df), "similarity pairs from existing results\n")
+  } else {
+    cat("No existing MMseqs2 results found, running new search...\n")
+    
+    # Build AWK filter for coverage filtering (since MMseqs2 doesn't have --min-cov)
+    # format_output = "query,target,pident,qcov,tcov"
+    # Column indices: qcov=4, tcov=5, pident=3
+    awk_coverage_filter <- sprintf("(($4 >= %f) || ($5 >= %f))", min_coverage, min_coverage)
+    
+    # Run MMseqs2 search with filtering parameters
+    tryCatch({
+      if (is.null(mmseqs2_path)) {
+        df <- mmseqs2_search(th_tc_seq, threads = ncpu, 
+                            min_identity = min_identity,
+                            awk_filter = awk_coverage_filter)
+      } else {
+        df <- mmseqs2_search(th_tc_seq, threads = ncpu, 
+                            mmseqs2_path = mmseqs2_path,
+                            min_identity = min_identity,
+                            awk_filter = awk_coverage_filter)
+      }
+    }, error = function(e) {
+      stop("MMseqs2 execution failed. Please check that MMseqs2 is properly installed and accessible: ", e$message)
+    })
+    
+    # Save results for future use
+    saveRDS(df, mmseqs2_rds_file)
+    write.table(df, mmseqs2_tsv_file, sep = "\t", row.names = FALSE, quote = FALSE)
+    cat("MMseqs2 results saved to:", mmseqs2_rds_file, "and", mmseqs2_tsv_file, "\n")
+  }
   # Calculate maximum coverage
   df$max_cov <- pmax(df$qcov, df$tcov)
 
@@ -297,7 +314,6 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   cat("Extracting cluster information...\n")
   cat(sprintf("Memory usage before cluster extraction: %.2f MB\n", memory_usage() / 1024^2))
   extraction_start_time <- Sys.time()
-  
   fg_groups_trc_id <- lapply(fg_groups, function(x) {
     unique(gsub("_rep.+", "", gsub("#.+", "", x)))
   })
@@ -312,6 +328,15 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
                group_id = i,
                stringsAsFactors = FALSE)
   }))
+  message("trc_groups")
+  print(trc_groups)
+  print("===========")
+
+  # DEBUG: Initial group count
+  initial_unique_groups <- length(unique(trc_groups$group_id))
+  cat(sprintf("DEBUG: Initial trc_groups created with %d unique groups (max group_id: %d)\n", 
+              initial_unique_groups, max(trc_groups$group_id)))
+  cat(sprintf("DEBUG: Total TRC entries in trc_groups: %d\n", nrow(trc_groups)))
   
   # Clean up intermediate group data
   rm(fg_groups_trc_id)
@@ -328,6 +353,10 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
 
   if (length(trc_duplicated) > 0) {
     message("Merging groups for ", length(trc_duplicated), " duplicated TRC IDs")
+    # preserve original numbering for updating graph vertex groups
+    trc_groups$group_id_original <- trc_groups$group_id
+    groups_before_merge <- length(unique(trc_groups$group_id))
+    cat(sprintf("DEBUG: Groups before merging duplicates: %d\n", groups_before_merge))
 
     for (trc in trc_duplicated) {
       # Find all groups for this transcript ID
@@ -339,13 +368,34 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
         trc_groups$group_id[trc_groups$group_id %in% grps] <- new_group_id
       }
     }
+    # update groups in g graph
+    # first make conversion dictionary
+    group_table <- unique(trc_groups[, c("group_id_original", "group_id")])
+    group_conversion <- setNames(group_table$group_id, group_table$group_id_original)
+    # update vertex groups in graph
+    ori_fg_vertex_groups <- V(g)$group
+    V(g)$group <- group_conversion[as.character(ori_fg_vertex_groups)]
+    V(g)$fg_group <- ori_fg_vertex_groups
+    # export graphml again
+    write_graph(g, file = file.path(output_directory, "trc_graph.graphml"),
+              format = "graphml")
+
+
+
+    groups_after_merge <- length(unique(trc_groups$group_id))
+    cat(sprintf("DEBUG: Groups after merging duplicates: %d (lost %d groups)\n", 
+                groups_after_merge, groups_before_merge - groups_after_merge))
   }
   # Remove duplicated rows and renumber groups starting from 1
   trc_groups <- trc_groups[!duplicated(trc_groups), ]
+  groups_after_dedup <- length(unique(trc_groups$group_id))
+  cat(sprintf("DEBUG: Groups after removing duplicated rows: %d\n", groups_after_dedup))
   
   # Store original group mapping before renumbering for graph vertex update
   original_groups <- trc_groups$group_id
   trc_groups$group_id <- as.integer(factor(trc_groups$group_id))
+  groups_after_renumber <- length(unique(trc_groups$group_id))
+  cat(sprintf("DEBUG: Groups after renumbering: %d\n", groups_after_renumber))
   
   # Create mapping from original to new group IDs
   group_mapping <- setNames(trc_groups$group_id, original_groups)
@@ -371,6 +421,9 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   return(trc_groups)
 }
 pivot_trc_data <- function(df, prefix) {
+  cat(sprintf("DEBUG: pivot_trc_data input - %d TRC entries with %d unique groups\n", 
+              nrow(df), length(unique(df$group_id))))
+  
   df2 <- data.frame(
     prefix = gsub(":.+", "", df$trc_id),
     trc_id = gsub(".+:", "", df$trc_id),
@@ -378,8 +431,26 @@ pivot_trc_data <- function(df, prefix) {
     stringsAsFactors = FALSE
   )
   
+  # Debug: Check extracted prefixes
+  extracted_prefixes <- unique(df2$prefix)
+  expected_prefixes <- prefix
+  cat(sprintf("DEBUG: Extracted prefixes from data: %s\n", paste(extracted_prefixes, collapse = ", ")))
+  cat(sprintf("DEBUG: Expected prefixes: %s\n", paste(expected_prefixes, collapse = ", ")))
+  missing_in_data <- setdiff(expected_prefixes, extracted_prefixes)
+  missing_in_expected <- setdiff(extracted_prefixes, expected_prefixes)
+  if (length(missing_in_data) > 0) {
+    cat(sprintf("DEBUG: WARNING - Expected prefixes not found in data: %s\n", paste(missing_in_data, collapse = ", ")))
+  }
+  if (length(missing_in_expected) > 0) {
+    cat(sprintf("DEBUG: WARNING - Data prefixes not in expected list: %s\n", paste(missing_in_expected, collapse = ", ")))
+  }
+  
   # make wide format - prefix as columns, group_id as rows, values are concatenated trc_id
   result_df <- reshape2::dcast(df2, group_id ~ prefix, value.var = "trc_id", fun.aggregate = function(x) paste(unique(x), collapse = ", "))
+  
+  cat(sprintf("DEBUG: After dcast - result_df has %d rows (groups) and %d columns\n", 
+              nrow(result_df), ncol(result_df)))
+  cat(sprintf("DEBUG: dcast column names: %s\n", paste(colnames(result_df), collapse = ", ")))
   
   # Clean up intermediate dataframe
   rm(df2)
@@ -396,8 +467,13 @@ pivot_trc_data <- function(df, prefix) {
   
   # set same order as prefixes
   correct_order <- match(prefix, colnames(result_df)[-1])
+  cat(sprintf("DEBUG: Reordering columns - correct_order: %s\n", paste(correct_order, collapse = ", ")))
+  
   result_list <- result_list[correct_order]
   result_df <- result_df[, c("group_id", colnames(result_df)[-1][correct_order])]
+  
+  cat(sprintf("DEBUG: Final pivot result - %d groups in dataframe\n", nrow(result_df)))
+  cat(sprintf("DEBUG: Final column order: %s\n", paste(colnames(result_df), collapse = ", ")))
   
   # Clean up intermediate variables
   rm(correct_order)
@@ -915,7 +991,9 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
 
   message("Clustering sequences...")
   grps <- cluster_trc_sequences(all_seq$tc, all_seq$th, mmseqs2_path = mmseqs2_path,
-                                output_directory = output_directory, ncpu = ncpu)
+                                output_directory = output_directory, ncpu = ncpu,
+                                min_identity = 70, min_coverage = 0.5
+  )
   
   # Clean up large sequence objects after clustering
   rm(all_seq)
@@ -1208,7 +1286,58 @@ update_graph_satellite_families <- function(grps_pivoted_df, output_directory) {
     
     # Map each vertex's current group to new satellite family ID
     current_groups <- V(g)$group
+    
+    # Debug: Comprehensive group analysis
+    unique_graph_groups <- unique(current_groups)
+    unique_df_groups <- unique(grps_pivoted_df$group_id)
+    missing_groups <- setdiff(unique_graph_groups, unique_df_groups)
+    extra_df_groups <- setdiff(unique_df_groups, unique_graph_groups)
+    
+    message(sprintf("DEBUG: Graph has %d unique groups: %s", 
+                   length(unique_graph_groups), 
+                   paste(head(sort(unique_graph_groups), 10), collapse = ", ")))
+    message(sprintf("DEBUG: Dataframe has %d unique groups: %s", 
+                   length(unique_df_groups), 
+                   paste(head(sort(unique_df_groups), 10), collapse = ", ")))
+    
+    if (length(missing_groups) > 0) {
+      warning(sprintf("Found %d graph vertex groups not present in dataframe: %s", 
+                     length(missing_groups), paste(missing_groups, collapse = ", ")))
+      
+      # Analyze the missing groups - what vertices do they contain?
+      missing_vertices <- which(current_groups %in% missing_groups)
+      sample_missing_vertices <- head(missing_vertices, 5)
+      message("DEBUG: Sample vertices from missing groups:")
+      for (v in sample_missing_vertices) {
+        message(sprintf("  Vertex %d: group=%d, name=%s, trc_id=%s, code=%s", 
+                       v, V(g)$group[v], names(V(g))[v], V(g)$trc_id[v], V(g)$code[v]))
+      }
+      
+      message("This indicates some groups exist in the graph but were filtered out during dataframe processing.")
+      
+      # Remove vertices with missing group IDs from the graph
+      vertices_to_remove <- which(current_groups %in% missing_groups)
+      if (length(vertices_to_remove) > 0) {
+        message(sprintf("Removing %d vertices with missing group IDs from graph", length(vertices_to_remove)))
+        g <- delete_vertices(g, vertices_to_remove)
+        current_groups <- V(g)$group  # Update after vertex removal
+      }
+    }
+    
+    if (length(extra_df_groups) > 0) {
+      message(sprintf("DEBUG: Found %d dataframe groups not present in graph: %s", 
+                     length(extra_df_groups), paste(extra_df_groups, collapse = ", ")))
+      message("This suggests the dataframe has groups that were not in the original graph (unexpected).")
+    }
+    
+    # Map remaining vertices to satellite families
     new_satellite_families <- group_to_sf_mapping[as.character(current_groups)]
+    
+    # Check for any remaining NA values
+    na_count <- sum(is.na(new_satellite_families))
+    if (na_count > 0) {
+      warning(sprintf("Still found %d vertices with NA satellite family assignments after cleanup", na_count))
+    }
     
     # Add new Satellite_family attribute (keep original group for debugging)
     V(g)$Satellite_family <- sprintf("SF_%04d", new_satellite_families)
