@@ -162,7 +162,8 @@ mmseqs2_search <- function(sequences,
 
 cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
                                   min_coverage = 0.2, min_identity = 70,
-                                  output_directory = NULL, ncpu = 5
+                                  output_directory = NULL, ncpu = 5,
+                                  input_tc_dirs = NULL, prefix = NULL, tc_code = NULL
 ) {
 
   # Input validation
@@ -300,12 +301,61 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
                       gsub("_rep.+", "",
                            gsub("#.+", "", names(V(g)))))
 
+  # Add annotation attribute for each vertex based on TRC ID and species code
+  message("Adding annotation attributes to graph vertices...")
+  
+  # Initialize annotation attribute
+  V(g)$annotation <- NA_character_
+  
+  # Get unique species codes from vertices
+  vertex_codes <- unique(V(g)$code)
+  
+  # Read annotations for each species and apply to vertices
+  for (code in vertex_codes) {
+    # Find corresponding input directory and annotation file
+    code_idx <- match(code, prefix)
+    if (!is.na(code_idx)) {
+      tc_annot_file <- file.path(input_tc_dirs[code_idx], paste0(tc_code[code_idx], "_annotation.tsv"))
+      
+      if (file.exists(tc_annot_file)) {
+        message(sprintf("Reading annotations for species %s from %s", code, tc_annot_file))
+        annot_data <- read_keyvalue_file(tc_annot_file)
+        
+        # Apply annotations to vertices with this species code
+        code_vertices <- which(V(g)$code == code)
+        for (v_idx in code_vertices) {
+          trc_id <- V(g)$trc_id[v_idx]
+          if (trc_id %in% names(annot_data)) {
+            # Extract annotation information and format as string
+            annot_info <- annot_data[[trc_id]]
+            if (length(annot_info) > 0) {
+              annot_str <- paste(names(annot_info), annot_info, sep=":", collapse=";")
+              V(g)$annotation[v_idx] <- annot_str
+            }
+          }
+        }
+      } else {
+        message(sprintf("Annotation file not found for species %s: %s", code, tc_annot_file))
+      }
+    }
+  }
+  
+  # Count vertices with annotations
+  annotated_count <- sum(!is.na(V(g)$annotation))
+  message(sprintf("Added annotations to %d out of %d vertices", annotated_count, vcount(g)))
+
   if (!is.null(output_directory)) {
     dir.create(output_directory, recursive = TRUE, showWarnings = FALSE)
     write.table(df, file = file.path(output_directory, "mmseqs2_results.tsv"),
                 sep = "\t", row.names = FALSE, quote = FALSE)
     saveRDS(g, file = file.path(output_directory, "trc_graph.rds"))
     write_graph(g, file = file.path(output_directory, "trc_graph.graphml"),
+              format = "graphml")
+    
+    # Save graph with annotations as a new file
+    message("Saving graph with annotations as new file...")
+    saveRDS(g, file = file.path(output_directory, "trc_graph_with_annotations.rds"))
+    write_graph(g, file = file.path(output_directory, "trc_graph_with_annotations.graphml"),
               format = "graphml")
   }
 
@@ -992,7 +1042,8 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
   message("Clustering sequences...")
   grps <- cluster_trc_sequences(all_seq$tc, all_seq$th, mmseqs2_path = mmseqs2_path,
                                 output_directory = output_directory, ncpu = ncpu,
-                                min_identity = 70, min_coverage = 0.5
+                                min_identity = 80, min_coverage = 0.8,
+                                input_tc_dirs = input_tc_dirs, prefix = prefix, tc_code = tc_code
   )
   
   # Clean up large sequence objects after clustering
