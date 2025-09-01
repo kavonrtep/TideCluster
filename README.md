@@ -478,7 +478,17 @@ prevalent_annot: Satellite/FabTR_PisTR-B
 - True biological variation in repeat content
 
 
+### Comparative analysis visualization - TODO
 
+- `tc_summarize_comparative_analysis.R` script will generate HTML report with comparative analysis of tandem repeats across multiple samples, details:
+- input will be tsv file from `tc_comparative_analysis.R` script
+- (pre)parsing will be done in R
+- final visualization will generated as in HTML/JavaScript - keep Javacrit modular for easy development and maintenance, javascript templates can be in js directory
+- Elements in visulalization:
+  1. Overview table with columns : sample name, number of TRCs, Number of families, Number of unique familis, total length of TRCs(as kbp or Mbp)
+  2. Family presence patterns - high level overview: matrix (table) with samples on both x and y axes, cells showing the number of shared families between samples, additionally color coding for number of shared families
+  3. Family presence patterns - detailed overview: matrix (table) with samples on y (columns) rows are individual families, cell showing the number of TRCs/Totlal length of TRCs in each family for each sample, additionally color coding for the total length of TRCs in each family, columns should be sorted by hierarchical clustering of families based on total length of TRCs in each family so that similar families are grouped together, Last column should be the "Prevalent annotation" column showing the most prevalent annotation in each family across all samples.
+  
 
 ## Credits
 

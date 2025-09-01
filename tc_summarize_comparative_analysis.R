@@ -6,9 +6,23 @@
 library(optparse)
 library(jsonlite)
 
-# Function to parse satellite families data
-parse_satellite_families <- function(input_file) {
-  cat("Reading satellite families data from:", input_file, "\n")
+# Get the directory where this script is located
+script_path <- getwd()
+
+# Function to parse satellite families data from directory
+parse_satellite_families <- function(input_dir) {
+  cat("Reading satellite families data from directory:", input_dir, "\n")
+  
+  # Find TSV file in directory
+  tsv_files <- list.files(input_dir, pattern = "\\.tsv$", full.names = TRUE)
+  tsv_files <- tsv_files[grepl("satellite_families", basename(tsv_files))]
+  
+  if (length(tsv_files) == 0) {
+    stop("No satellite families TSV file found in directory: ", input_dir)
+  }
+  
+  input_file <- tsv_files[1]
+  cat("Using TSV file:", input_file, "\n")
   
   # Read the TSV file
   data <- read.table(input_file, header = TRUE, sep = "\t", stringsAsFactors = FALSE, 
@@ -22,10 +36,19 @@ parse_satellite_families <- function(input_file) {
   cat("Detected samples:", paste(samples, collapse = ", "), "\n")
   cat("Total families:", nrow(data), "\n")
   
+  # Check for GFF3 directory
+  gff3_dir <- file.path(input_dir, "gff3")
+  if (!dir.exists(gff3_dir)) {
+    cat("Warning: No gff3 directory found. Karyotype visualization will be disabled.\n")
+    gff3_dir <- NULL
+  }
+  
   return(list(
     data = data,
     samples = samples,
-    n_families = nrow(data)
+    n_families = nrow(data),
+    gff3_dir = gff3_dir,
+    input_dir = input_dir
   ))
 }
 
@@ -219,9 +242,109 @@ cluster_families <- function(parsed_data) {
   ))
 }
 
+# Function to read GFF3 files and extract karyotype data
+read_gff3_karyotype_data <- function(parsed_data) {
+  if (is.null(parsed_data$gff3_dir)) {
+    cat("No GFF3 directory found. Skipping karyotype data extraction.\n")
+    return(NULL)
+  }
+  
+  cat("Reading GFF3 files for karyotype data...\n")
+  
+  samples <- parsed_data$samples
+  gff3_files <- list.files(parsed_data$gff3_dir, pattern = "\\.gff3$", full.names = TRUE)
+  
+  if (length(gff3_files) == 0) {
+    cat("No GFF3 files found in directory:", parsed_data$gff3_dir, "\n")
+    return(NULL)
+  }
+  
+  karyotype_data <- list()
+  
+  for (gff_file in gff3_files) {
+    # Extract sample name from filename (assuming format: SAMPLE_tc_annotated.gff3)
+    sample_name <- gsub("_tc_annotated\\.gff3$", "", basename(gff_file))
+    
+    # Check if this sample is in our samples list
+    if (!sample_name %in% samples) {
+      next
+    }
+    
+    cat("Processing GFF3 file for sample:", sample_name, "\n")
+    
+    # Read GFF3 file
+    gff_data <- read.table(gff_file, sep = "\t", stringsAsFactors = FALSE, 
+                          comment.char = "#", header = FALSE,
+                          col.names = c("seqname", "source", "feature", "start", "end", 
+                                      "score", "strand", "frame", "attribute"))
+    
+    # Extract chromosome/contig information and satellite family data
+    contigs <- list()
+    
+    for (i in 1:nrow(gff_data)) {
+      contig <- gff_data$seqname[i]
+      start_pos <- gff_data$start[i]
+      end_pos <- gff_data$end[i]
+      attributes <- gff_data$attribute[i]
+      
+      # Extract Satellite_family from attributes
+      sf_match <- regmatches(attributes, regexpr("Satellite_family=SF_[0-9]+", attributes))
+      if (length(sf_match) > 0) {
+        sf_id <- gsub("Satellite_family=", "", sf_match)
+        
+        # Initialize contig data if not exists
+        if (!contig %in% names(contigs)) {
+          contigs[[contig]] <- list(
+            satellites = data.frame(
+              start = integer(0),
+              end = integer(0),
+              family = character(0),
+              stringsAsFactors = FALSE
+            )
+          )
+        }
+        
+        # Add satellite family position
+        contigs[[contig]]$satellites <- rbind(contigs[[contig]]$satellites,
+                                            data.frame(start = start_pos, 
+                                                     end = end_pos,
+                                                     family = sf_id,
+                                                     stringsAsFactors = FALSE))
+      }
+    }
+    
+    # Calculate contig lengths and sort contigs by order in GFF3 file
+    contig_info <- data.frame(
+      contig = character(0),
+      length = integer(0),
+      order = integer(0),
+      stringsAsFactors = FALSE
+    )
+    
+    contig_order <- 1
+    for (contig_name in unique(gff_data$seqname)) {
+      max_pos <- max(gff_data$end[gff_data$seqname == contig_name])
+      contig_info <- rbind(contig_info, 
+                          data.frame(contig = contig_name, 
+                                   length = max_pos,
+                                   order = contig_order,
+                                   stringsAsFactors = FALSE))
+      contig_order <- contig_order + 1
+    }
+    
+    karyotype_data[[sample_name]] <- list(
+      contigs = contigs,
+      contig_info = contig_info
+    )
+  }
+  
+  cat("Karyotype data extracted for", length(karyotype_data), "samples\n")
+  return(karyotype_data)
+}
+
 # Function to generate HTML report
 generate_html_report <- function(parsed_data, overview_stats, shared_matrix, 
-                                detailed_data, clustering_result, output_file) {
+                                detailed_data, clustering_result, karyotype_data, output_file) {
   
   # Create output directory and js subdirectory if they don't exist
   output_dir <- dirname(output_file)
@@ -246,75 +369,30 @@ generate_html_report <- function(parsed_data, overview_stats, shared_matrix,
     shared_matrix = shared_matrix_ordered,
     detailed_families = detailed_data_ordered,
     n_families = parsed_data$n_families,
-    sample_order = clustering_result$sample_order
+    sample_order = clustering_result$sample_order,
+    karyotype_data = karyotype_data
   )
   
   # Convert to JSON
   json_data <- toJSON(js_data, auto_unbox = FALSE, pretty = TRUE)
   
-  # Create HTML content
-  html_content <- sprintf('<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TRC Comparative Analysis Report</title>
-    <link rel="stylesheet" href="js/styles.css">
-</head>
-<body>
-    <div class="container">
-        <header>
-            <h1>TRC Comparative Analysis Report</h1>
-            <p class="subtitle">Interactive visualization of tandem repeat cluster families across samples</p>
-            <p class="timestamp">Generated on: %s</p>
-        </header>
-        
-        <nav class="tab-nav">
-            <button class="tab-button active" onclick="showTab(\'overview\')">Overview</button>
-            <button class="tab-button" onclick="showTab(\'shared-families\')">Shared Families</button>
-            <button class="tab-button" onclick="showTab(\'detailed-families\')">Detailed Families</button>
-        </nav>
-        
-        <main>
-            <div id="overview" class="tab-content active">
-                <h2>Sample Overview</h2>
-                <div id="overview-table-container"></div>
-            </div>
-            
-            <div id="shared-families" class="tab-content">
-                <h2>Family Presence Patterns - Shared Families Matrix</h2>
-                <div id="shared-matrix-container"></div>
-            </div>
-            
-            <div id="detailed-families" class="tab-content">
-                <h2>Family Presence Patterns - Detailed View</h2>
-                <div class="controls">
-                    <label>
-                        <input type="radio" name="view-mode" value="trc-count" checked> TRC Count
-                    </label>
-                    <label>
-                        <input type="radio" name="view-mode" value="length"> Total Length
-                    </label>
-                </div>
-                <div id="detailed-matrix-container"></div>
-            </div>
-        </main>
-    </div>
+  # Read HTML template
+  template_path <- file.path(dirname(getwd()), "TideCluster", "html", "report_template.html")
+  if (!file.exists(template_path)) {
+    # Try relative path
+    template_path <- file.path("html", "report_template.html")
+  }
+  
+  if (file.exists(template_path)) {
+    html_content <- readLines(template_path, warn = FALSE)
+    html_content <- paste(html_content, collapse = "\n")
     
-    <script>
-        // Embed data
-        const data = %s;
-    </script>
-    <script src="js/utils.js"></script>
-    <script src="js/overview-table.js"></script>
-    <script src="js/shared-matrix.js"></script>
-    <script src="js/detailed-matrix.js"></script>
-    <script src="js/main.js"></script>
-</body>
-</html>', 
-    Sys.time(),
-    json_data
-  )
+    # Replace placeholders
+    html_content <- gsub("\\{\\{TIMESTAMP\\}\\}", Sys.time(), html_content)
+    html_content <- gsub("\\{\\{DATA_JSON\\}\\}", json_data, html_content)
+  } else {
+    stop("HTML template file not found: ", template_path)
+  }
   
   # Write HTML file
   writeLines(html_content, output_file)
@@ -329,650 +407,38 @@ create_javascript_files <- function(output_dir) {
   js_dir <- file.path(output_dir, "js")
   dir.create(js_dir, recursive = TRUE, showWarnings = FALSE)
   
-  # Create main.js
-  main_js <- '// Main JavaScript file for TRC Comparative Analysis Report
-
-// Tab switching functionality
-function showTab(tabName) {
-    // Hide all tab contents
-    const tabContents = document.querySelectorAll(".tab-content");
-    tabContents.forEach(content => {
-        content.classList.remove("active");
-    });
-    
-    // Remove active class from all tab buttons
-    const tabButtons = document.querySelectorAll(".tab-button");
-    tabButtons.forEach(button => {
-        button.classList.remove("active");
-    });
-    
-    // Show selected tab content
-    document.getElementById(tabName).classList.add("active");
-    
-    // Add active class to clicked button
-    event.target.classList.add("active");
-    
-    // Initialize the appropriate visualization
-    switch(tabName) {
-        case "overview":
-            initOverviewTable();
-            break;
-        case "shared-families":
-            initSharedMatrix();
-            break;
-        case "detailed-families":
-            initDetailedMatrix();
-            break;
-    }
-}
-
-// Initialize the report
-document.addEventListener("DOMContentLoaded", function() {
-    initOverviewTable();
-    
-    // Add event listeners for view mode radio buttons
-    const viewModeInputs = document.querySelectorAll(\'input[name="view-mode"]\');
-    viewModeInputs.forEach(input => {
-        input.addEventListener("change", function() {
-            if (document.getElementById("detailed-families").classList.contains("active")) {
-                initDetailedMatrix();
-            }
-        });
-    });
-});'
+  # Copy JavaScript and CSS files from templates
+  template_dir <- file.path(script_path, "html")
   
-  writeLines(main_js, file.path(js_dir, "main.js"))
+  if (!dir.exists(template_dir)) {
+    stop("Template directory not found: ", template_dir)
+  }
   
-  # Create utils.js
-  utils_js <- '// Utility functions for TRC Comparative Analysis Report
-
-// Format numbers with appropriate units
-function formatLength(length) {
-    if (length >= 1000000) {
-        return (length / 1000000).toFixed(2) + " Mbp";
-    } else if (length >= 1000) {
-        return (length / 1000).toFixed(2) + " kbp";
+  # List of files to copy
+  template_files <- c(
+    "main.js",
+    "utils.js", 
+    "overview-table.js",
+    "shared-matrix.js",
+    "detailed-matrix.js",
+    "karyotype.js",
+    "styles.css"
+  )
+  
+  for (file in template_files) {
+    src_file <- file.path(template_dir, file)
+    if (file.exists(src_file)) {
+      if (file == "styles.css") {
+        dest_file <- file.path(js_dir, file)
+      } else {
+        dest_file <- file.path(js_dir, file)
+      }
+      file.copy(src_file, dest_file, overwrite = TRUE)
+      cat("Copied template file:", file, "\n")
     } else {
-        return length + " bp";
+      cat("Warning: Template file not found:", src_file, "\n")
     }
-}
-
-// Create color scale for heatmaps
-function getColorScale(values, colorScheme = "Blues") {
-    const minVal = Math.min(...values);
-    const maxVal = Math.max(...values);
-    
-    if (minVal === maxVal) {
-        return (val) => "#f0f0f0";
-    }
-    
-    return function(val) {
-        const intensity = (val - minVal) / (maxVal - minVal);
-        
-        if (colorScheme === "Blues") {
-            const blue = Math.floor(255 - intensity * 200);
-            return `rgb(${blue}, ${blue}, 255)`;
-        } else if (colorScheme === "Reds") {
-            const red = Math.floor(255 - intensity * 200);
-            return `rgb(255, ${red}, ${red})`;
-        } else {
-            // Default grayscale
-            const gray = Math.floor(255 - intensity * 200);
-            return `rgb(${gray}, ${gray}, ${gray})`;
-        }
-    };
-}
-
-// Create tooltip
-function createTooltip() {
-    const tooltip = document.createElement("div");
-    tooltip.id = "tooltip";
-    tooltip.style.cssText = `
-        position: absolute;
-        background: rgba(0, 0, 0, 0.8);
-        color: white;
-        padding: 8px;
-        border-radius: 4px;
-        font-size: 12px;
-        pointer-events: none;
-        z-index: 1000;
-        display: none;
-    `;
-    document.body.appendChild(tooltip);
-    return tooltip;
-}
-
-// Show tooltip
-function showTooltip(event, text) {
-    const tooltip = document.getElementById("tooltip") || createTooltip();
-    tooltip.innerHTML = text;
-    tooltip.style.display = "block";
-    tooltip.style.left = (event.pageX + 10) + "px";
-    tooltip.style.top = (event.pageY - 10) + "px";
-}
-
-// Hide tooltip
-function hideTooltip() {
-    const tooltip = document.getElementById("tooltip");
-    if (tooltip) {
-        tooltip.style.display = "none";
-    }
-}'
-  
-  writeLines(utils_js, file.path(js_dir, "utils.js"))
-  
-  # Create overview-table.js
-  overview_js <- '// Overview table functionality
-
-function initOverviewTable() {
-    const container = document.getElementById("overview-table-container");
-    const stats = data.overview_stats;
-    
-    let html = `
-        <table class="overview-table">
-            <thead>
-                <tr>
-                    <th>Sample Name</th>
-                    <th>Number of TRCs</th>
-                    <th>Number of Families</th>
-                    <th>Number of Unique Families</th>
-                    <th>Total Length</th>
-                </tr>
-            </thead>
-            <tbody>
-    `;
-    
-    stats.forEach(row => {
-        html += `
-            <tr>
-                <td class="sample-name">${row.Sample}</td>
-                <td class="numeric">${row.Number_of_TRCs.toLocaleString()}</td>
-                <td class="numeric">${row.Number_of_Families.toLocaleString()}</td>
-                <td class="numeric">${row.Number_of_Unique_Families.toLocaleString()}</td>
-                <td class="numeric">${row.Total_Length}</td>
-            </tr>
-        `;
-    });
-    
-    html += `
-            </tbody>
-        </table>
-    `;
-    
-    container.innerHTML = html;
-}'
-  
-  writeLines(overview_js, file.path(js_dir, "overview-table.js"))
-  
-  # Create shared-matrix.js
-  shared_js <- '// Shared families matrix functionality
-
-function initSharedMatrix() {
-    const container = document.getElementById("shared-matrix-container");
-    const matrix = data.shared_matrix;
-    const samples = data.samples;
-    
-    // Get all values for color scaling
-    const allValues = [];
-    for (let i = 0; i < samples.length; i++) {
-        for (let j = 0; j < samples.length; j++) {
-            allValues.push(matrix[i][j]);
-        }
-    }
-    
-    const colorScale = getColorScale(allValues, "Blues");
-    
-    let html = `
-        <div class="matrix-container">
-            <table class="shared-matrix">
-                <thead>
-                    <tr>
-                        <th class="corner-cell"></th>
-    `;
-    
-    // Column headers
-    samples.forEach(sample => {
-        html += `<th class="sample-header">${sample}</th>`;
-    });
-    
-    html += `
-                    </tr>
-                </thead>
-                <tbody>
-    `;
-    
-    // Matrix rows
-    for (let i = 0; i < samples.length; i++) {
-        html += `<tr>`;
-        html += `<th class="sample-header">${samples[i]}</th>`;
-        
-        for (let j = 0; j < samples.length; j++) {
-            const value = matrix[i][j];
-            const bgColor = colorScale(value);
-            const isDiagonal = i === j;
-            
-            html += `
-                <td class="matrix-cell ${isDiagonal ? \'diagonal\' : \'\'}" 
-                    style="background-color: ${bgColor}"
-                    onmouseover="showTooltip(event, \'${samples[i]} vs ${samples[j]}: ${value} shared families\')"
-                    onmouseout="hideTooltip()">
-                    ${value}
-                </td>
-            `;
-        }
-        
-        html += `</tr>`;
-    }
-    
-    html += `
-                </tbody>
-            </table>
-        </div>
-        <div class="matrix-legend">
-            <p><strong>Interpretation:</strong></p>
-            <ul>
-                <li>Rows and columns are samples ordered by hierarchical clustering</li>
-                <li>Diagonal cells show total families present in each sample</li>
-                <li>Off-diagonal cells show shared families between sample pairs</li>
-                <li>Darker colors indicate higher numbers of shared families</li>
-            </ul>
-        </div>
-    `;
-    
-    container.innerHTML = html;
-}'
-  
-  writeLines(shared_js, file.path(js_dir, "shared-matrix.js"))
-  
-  # Create detailed-matrix.js
-  detailed_js <- '// Detailed families matrix functionality
-
-function initDetailedMatrix() {
-    const container = document.getElementById("detailed-matrix-container");
-    const families = data.detailed_families;
-    const samples = data.samples;
-    
-    // Get selected view mode
-    const viewMode = document.querySelector(\'input[name="view-mode"]:checked\').value;
-    const isLengthView = viewMode === "length";
-    
-    // Get all values for color scaling
-    const allValues = [];
-    families.forEach(family => {
-        samples.forEach(sample => {
-            const key = isLengthView ? `${sample}_length` : `${sample}_trc_count`;
-            allValues.push(family[key] || 0);
-        });
-    });
-    
-    const colorScale = getColorScale(allValues.filter(v => v > 0), "Reds");
-    
-    let html = `
-        <div class="matrix-container">
-            <table class="detailed-matrix">
-                <thead>
-                    <tr>
-                        <th class="corner-cell">Family ID</th>
-    `;
-    
-    // Sample headers
-    samples.forEach(sample => {
-        html += `<th class="sample-header">${sample}</th>`;
-    });
-    
-    html += `<th class="annotation-header">Prevalent Annotation</th>`;
-    html += `</tr></thead><tbody>`;
-    
-    // Family rows
-    families.forEach(family => {
-        html += `<tr>`;
-        html += `<td class="family-id">SF_${String(family.family_id).padStart(4, "0")}</td>`;
-        
-        samples.forEach(sample => {
-            const trcKey = `${sample}_trc_count`;
-            const lengthKey = `${sample}_length`;
-            const trcCount = family[trcKey] || 0;
-            const length = family[lengthKey] || 0;
-            
-            const displayValue = isLengthView ? formatLength(length) : trcCount;
-            const colorValue = isLengthView ? length : trcCount;
-            const bgColor = colorValue > 0 ? colorScale(colorValue) : "#f9f9f9";
-            
-            const tooltipText = `Family ${family.family_id} in ${sample}<br>` +
-                              `TRCs: ${trcCount}<br>` +
-                              `Length: ${formatLength(length)}`;
-            
-            html += `
-                <td class="matrix-cell ${colorValue > 0 ? \'has-value\' : \'empty\'}" 
-                    style="background-color: ${bgColor}"
-                    onmouseover="showTooltip(event, \'${tooltipText}\')"
-                    onmouseout="hideTooltip()">
-                    ${colorValue > 0 ? displayValue : ""}
-                </td>
-            `;
-        });
-        
-        // Prevalent annotation column
-        const annotation = family.prevalent_annot || "";
-        html += `<td class="annotation-cell">${annotation}</td>`;
-        html += `</tr>`;
-    });
-    
-    html += `
-                </tbody>
-            </table>
-        </div>
-        <div class="matrix-legend">
-            <p><strong>Interpretation:</strong></p>
-            <ul>
-                <li>Rows are satellite families sorted by family index</li>
-                <li>Columns are samples ordered by hierarchical clustering</li>
-                <li>Cells show ${isLengthView ? "total genomic length" : "number of TRCs"} for each family-sample combination</li>
-                <li>Empty cells indicate the family is absent in that sample</li>
-                <li>Darker colors indicate ${isLengthView ? "longer total length" : "more TRCs"}</li>
-            </ul>
-        </div>
-    `;
-    
-    container.innerHTML = html;
-}'
-  
-  writeLines(detailed_js, file.path(js_dir, "detailed-matrix.js"))
-  
-  # Create styles.css
-  styles_css <- '/* Styles for TRC Comparative Analysis Report */
-
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
-body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    line-height: 1.6;
-    color: #333;
-    background-color: #f5f5f5;
-}
-
-.container {
-    max-width: 1400px;
-    margin: 0 auto;
-    padding: 20px;
-    background-color: white;
-    box-shadow: 0 0 10px rgba(0,0,0,0.1);
-    min-height: 100vh;
-}
-
-header {
-    text-align: center;
-    margin-bottom: 30px;
-    padding-bottom: 20px;
-    border-bottom: 2px solid #e0e0e0;
-}
-
-header h1 {
-    color: #2c3e50;
-    font-size: 2.5em;
-    margin-bottom: 10px;
-}
-
-header .subtitle {
-    color: #7f8c8d;
-    font-size: 1.2em;
-    margin-bottom: 5px;
-}
-
-header .timestamp {
-    color: #95a5a6;
-    font-size: 0.9em;
-}
-
-.tab-nav {
-    display: flex;
-    justify-content: center;
-    margin-bottom: 30px;
-    border-bottom: 1px solid #ddd;
-}
-
-.tab-button {
-    background: none;
-    border: none;
-    padding: 12px 24px;
-    cursor: pointer;
-    font-size: 16px;
-    color: #666;
-    border-bottom: 3px solid transparent;
-    transition: all 0.3s ease;
-}
-
-.tab-button:hover {
-    color: #2c3e50;
-    background-color: #f8f9fa;
-}
-
-.tab-button.active {
-    color: #2c3e50;
-    border-bottom-color: #3498db;
-    background-color: #f8f9fa;
-}
-
-.tab-content {
-    display: none;
-}
-
-.tab-content.active {
-    display: block;
-}
-
-.tab-content h2 {
-    color: #2c3e50;
-    margin-bottom: 20px;
-    font-size: 1.8em;
-}
-
-/* Overview Table Styles */
-.overview-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-bottom: 20px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-}
-
-.overview-table th,
-.overview-table td {
-    padding: 12px 15px;
-    text-align: center;
-    border-bottom: 1px solid #ddd;
-}
-
-.overview-table th {
-    background-color: #3498db;
-    color: white;
-    font-weight: 600;
-    text-transform: uppercase;
-    font-size: 0.9em;
-}
-
-.overview-table tbody tr:hover {
-    background-color: #f5f5f5;
-}
-
-.overview-table .sample-name {
-    font-weight: 600;
-    color: #2c3e50;
-}
-
-/* Matrix Styles */
-.matrix-container {
-    overflow-x: auto;
-    margin-bottom: 20px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-}
-
-.shared-matrix,
-.detailed-matrix {
-    border-collapse: collapse;
-    font-size: 12px;
-    background-color: white;
-}
-
-.shared-matrix th,
-.shared-matrix td,
-.detailed-matrix th,
-.detailed-matrix td {
-    border: 1px solid #ddd;
-    text-align: center;
-    min-width: 80px;
-    position: relative;
-}
-
-.corner-cell {
-    background-color: #ecf0f1 !important;
-}
-
-.sample-header {
-    background-color: #3498db !important;
-    color: white !important;
-    font-weight: 600;
-    padding: 8px 4px;
-    writing-mode: vertical-rl;
-    text-orientation: mixed;
-    min-height: 100px;
-}
-
-.annotation-header {
-    background-color: #e74c3c !important;
-    color: white !important;
-    font-weight: 600;
-    padding: 8px;
-    min-width: 200px;
-}
-
-.matrix-cell {
-    padding: 6px 4px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    font-weight: 500;
-}
-
-.matrix-cell:hover {
-    border: 2px solid #2c3e50;
-    z-index: 10;
-}
-
-.matrix-cell.diagonal {
-    font-weight: bold;
-    border: 2px solid #2c3e50;
-}
-
-.matrix-cell.empty {
-    color: #ccc;
-}
-
-.matrix-cell.has-value {
-    color: #2c3e50;
-}
-
-.family-id {
-    background-color: #f8f9fa !important;
-    font-weight: 600;
-    color: #2c3e50;
-    padding: 6px 8px;
-    text-align: center;
-    min-width: 80px;
-}
-
-.annotation-cell {
-    padding: 6px 8px;
-    text-align: left;
-    font-size: 11px;
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-/* Controls */
-.controls {
-    margin-bottom: 20px;
-    padding: 15px;
-    background-color: #f8f9fa;
-    border-radius: 6px;
-    border: 1px solid #e9ecef;
-}
-
-.controls label {
-    margin-right: 20px;
-    cursor: pointer;
-    font-weight: 500;
-}
-
-.controls input[type="radio"] {
-    margin-right: 5px;
-}
-
-/* Legend */
-.matrix-legend {
-    background-color: #f8f9fa;
-    padding: 15px;
-    border-radius: 6px;
-    border-left: 4px solid #3498db;
-}
-
-.matrix-legend p {
-    font-weight: 600;
-    margin-bottom: 10px;
-    color: #2c3e50;
-}
-
-.matrix-legend ul {
-    list-style-type: none;
-    padding-left: 0;
-}
-
-.matrix-legend li {
-    margin-bottom: 5px;
-    padding-left: 20px;
-    position: relative;
-}
-
-.matrix-legend li:before {
-    content: "•";
-    color: #3498db;
-    font-weight: bold;
-    position: absolute;
-    left: 0;
-}
-
-/* Responsive design */
-@media (max-width: 768px) {
-    .container {
-        padding: 10px;
-    }
-    
-    header h1 {
-        font-size: 2em;
-    }
-    
-    .tab-button {
-        padding: 10px 16px;
-        font-size: 14px;
-    }
-    
-    .sample-header {
-        writing-mode: horizontal-tb;
-        text-orientation: initial;
-        min-height: auto;
-        padding: 8px;
-    }
-    
-    .matrix-container {
-        font-size: 10px;
-    }
-}'
-  
-  writeLines(styles_css, file.path(js_dir, "styles.css"))
+  }
   
   cat("JavaScript and CSS files created in:", js_dir, "\n")
 }
@@ -1000,6 +466,9 @@ main <- function(opt) {
   cat("Performing hierarchical clustering of samples and sorting families by index...\n")
   clustering_result <- cluster_families(parsed_data)
   
+  # Read karyotype data from GFF3 files
+  karyotype_data <- read_gff3_karyotype_data(parsed_data)
+  
   # Create output directory
   output_dir <- dirname(opt$output)
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
@@ -1011,7 +480,7 @@ main <- function(opt) {
   # Generate HTML report
   cat("Generating HTML report...\n")
   generate_html_report(parsed_data, overview_stats, shared_matrix, 
-                      detailed_data, clustering_result, opt$output)
+                      detailed_data, clustering_result, karyotype_data, opt$output)
   
   cat("Report generation completed successfully!\n")
   cat("Open", opt$output, "in your web browser to view the interactive report.\n")
@@ -1021,7 +490,7 @@ main <- function(opt) {
 option_list <- list(
   make_option(
     c("-i", "--input"), type="character", default=NULL,
-    help="Input TSV file from tc_comparative_analysis.R script (required)"),
+    help="Input directory containing TSV file and GFF3 subdirectory from tc_comparative_analysis.R script (required)"),
   make_option(
     c("-o", "--output"), type="character", default="trc_comparative_report.html",
     help="Output HTML file path [default: %default]")
@@ -1032,11 +501,11 @@ opt <- parse_args(opt_parser)
 
 if (is.null(opt$input)) {
   print_help(opt_parser)
-  stop("Input file is mandatory. Use -i or --input to specify it.")
+  stop("Input directory is mandatory. Use -i or --input to specify it.")
 }
 
-if (!file.exists(opt$input)) {
-  stop("Input file does not exist: ", opt$input)
+if (!dir.exists(opt$input)) {
+  stop("Input directory does not exist: ", opt$input)
 }
 
 # Run main analysis
