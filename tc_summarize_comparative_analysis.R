@@ -157,7 +157,7 @@ calculate_shared_families <- function(parsed_data) {
 }
 
 # Function to prepare detailed family data
-prepare_detailed_family_data <- function(parsed_data) {
+prepare_detailed_family_data <- function(parsed_data, karyotype_data = NULL) {
   data <- parsed_data$data
   samples <- parsed_data$samples
   
@@ -192,8 +192,24 @@ prepare_detailed_family_data <- function(parsed_data) {
         if (is.na(total_length)) total_length <- 0
       }
       
+      # Count arrays from GFF3 data (number of annotated features for this family in this sample)
+      array_count <- 0
+      if (!is.null(karyotype_data) && sample %in% names(karyotype_data)) {
+        sample_karyotype <- karyotype_data[[sample]]
+        if (!is.null(sample_karyotype$contigs)) {
+          family_id_str <- paste0("SF_", sprintf("%04d", family_id))
+          for (contig_name in names(sample_karyotype$contigs)) {
+            contig_data <- sample_karyotype$contigs[[contig_name]]
+            if (!is.null(contig_data$satellites)) {
+              array_count <- array_count + sum(contig_data$satellites$family == family_id_str)
+            }
+          }
+        }
+      }
+      
       family_row[[paste0(sample, "_trc_count")]] <- trc_count
       family_row[[paste0(sample, "_length")]] <- total_length
+      family_row[[paste0(sample, "_array_count")]] <- array_count
     }
     
     detailed_data[[i]] <- family_row
@@ -458,16 +474,16 @@ main <- function(opt) {
   cat("Calculating shared families matrix...\n")
   shared_matrix <- calculate_shared_families(parsed_data)
   
-  # Prepare detailed family data
+  # Read karyotype data from GFF3 files first
+  karyotype_data <- read_gff3_karyotype_data(parsed_data)
+  
+  # Prepare detailed family data (now with karyotype data for array counting)
   cat("Preparing detailed family data...\n")
-  detailed_data <- prepare_detailed_family_data(parsed_data)
+  detailed_data <- prepare_detailed_family_data(parsed_data, karyotype_data)
   
   # Perform hierarchical clustering of samples and sort families by index
   cat("Performing hierarchical clustering of samples and sorting families by index...\n")
   clustering_result <- cluster_families(parsed_data)
-  
-  # Read karyotype data from GFF3 files
-  karyotype_data <- read_gff3_karyotype_data(parsed_data)
   
   # Create output directory
   output_dir <- dirname(opt$output)
