@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TRC Comparative Analysis Report</title>
+    <link rel="stylesheet" href="js/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>TRC Comparative Analysis Report</h1>
+            <p class="subtitle">Interactive visualization of tandem repeat cluster families across samples</p>
+            <p class="timestamp">Generated on: {{TIMESTAMP}}</p>
+        </header>
+        
+        <nav class="tab-nav">
+            <button class="tab-button active" onclick="showTab('overview')">Overview</button>
+            <button class="tab-button" onclick="showTab('shared-families')">Shared Families</button>
+            <button class="tab-button" onclick="showTab('detailed-families')">Detailed Families</button>
+        </nav>
+        
+        <main>
+            <div id="overview" class="tab-content active">
+                <h2>Sample Overview</h2>
+                <div id="overview-table-container"></div>
+            </div>
+            
+            <div id="shared-families" class="tab-content">
+                <h2>Family Presence Patterns - Shared Families Matrix</h2>
+                <div id="shared-matrix-container"></div>
+            </div>
+            
+            <div id="detailed-families" class="tab-content">
+                <h2>Family Presence Patterns - Detailed View</h2>
+                <div class="controls">
+                    <label>
+                        <input type="radio" name="view-mode" value="trc-count" checked> TRC Count
+                    </label>
+                    <label>
+                        <input type="radio" name="view-mode" value="length"> Total Length
+                    </label>
+                    <label>
+                        <input type="radio" name="view-mode" value="array-count"> Number of Arrays
+                    </label>
+                </div>
+                <div id="detailed-matrix-container"></div>
+            </div>
+            
+            <div id="karyotype-modal" class="modal">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3 id="karyotype-title">Karyotype View</h3>
+                        <span class="close" onclick="closeKaryotype()">&times;</span>
+                    </div>
+                    <div id="karyotype-container"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <script>
+        // Embed data
+        const data = {{DATA_JSON}};
+    </script>
+    <script src="js/utils.js"></script>
+    <script src="js/overview-table.js"></script>
+    <script src="js/shared-matrix.js"></script>
+    <script src="js/detailed-matrix.js"></script>
+    <script src="js/karyotype.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
