@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TideCluster Results Visualizer</title>
+    <link rel="stylesheet" href="output_files/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1 id="title">TideCluster Results</h1>
+            <div class="controls">
+                <div class="search-section">
+                    <label for="annotation-search">Search Annotations:</label>
+                    <input type="text" id="annotation-search" placeholder="Type to filter annotations...">
+                </div>
+                <div class="action-buttons">
+                    <button id="reset-btn">Reset Selection</button>
+                    <button id="select-top-btn">Select Top 5</button>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <div class="visualization-area">
+                <div class="overview-section">
+                    <h4>Genome Overview - Click and drag to select region for detailed view</h4>
+                    <div class="genome-view overview-view">
+                        <svg id="overview-svg" width="2400" height="180">
+                            <defs>
+                                <style>
+                                    .genome-line { stroke: #333; stroke-width: 2; }
+                                    .contig-separator { stroke: #666; stroke-width: 1; stroke-dasharray: 2,2; }
+                                    .contig-label { font-size: 10px; fill: #666; shape-rendering: crispEdges; text-rendering: optimizeLegibility; }
+                                    .feature-rect { stroke-width: 1; }
+                                    .selection-box { fill: rgba(74, 144, 226, 0.2); stroke: #4a90e2; stroke-width: 2; }
+                                    .zoom-region { fill: rgba(255, 193, 7, 0.3); stroke: #ffc107; stroke-width: 2; }
+                                </style>
+                            </defs>
+                            <g id="overview-genome-track"></g>
+                            <g id="overview-features-layer"></g>
+                            <g id="overview-labels-layer"></g>
+                            <g id="zoom-region-highlight"></g>
+                        </svg>
+                    </div>
+                </div>
+                
+                <div class="detail-section">
+                    <h4>Detailed View <span id="detail-region-info"></span></h4>
+                    <div class="genome-view detail-view">
+                        <svg id="detail-svg" width="2400" height="300">
+                            <g id="detail-genome-track"></g>
+                            <g id="detail-features-layer"></g>
+                            <g id="detail-labels-layer"></g>
+                        </svg>
+                    </div>
+                    <div class="zoom-controls">
+                        <button id="zoom-reset">Reset Selection</button>
+                        <span class="zoom-info">Select a region in the overview above to see details</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="selection-area">
+                <div class="annotation-lists">
+                    <div class="list-container">
+                        <h3>All Annotations <span id="all-count">(0)</span></h3>
+                        <div class="list-wrapper">
+                            <ul id="all-annotations" class="annotation-list"></ul>
+                        </div>
+                    </div>
+                    <div class="list-controls">
+                        <button id="add-btn" disabled>&rarr;</button>
+                        <button id="remove-btn" disabled>&larr;</button>
+                    </div>
+                    <div class="list-container">
+                        <h3>Selected Annotations <span id="selected-count">(0/10)</span></h3>
+                        <div class="list-wrapper">
+                            <ul id="selected-annotations" class="annotation-list"></ul>
+                        </div>
+                    </div>
+                </div>
+                <div class="legend">
+                    <h4>Legend</h4>
+                    <div id="legend-items"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="tooltip" class="tooltip"></div>
+
+    <script>
+        // Embed data directly to avoid CORS issues
+        window.TIDECLUSTER_DATA = {{DATA_JSON}};
+    </script>
+    <script src="output_files/app.js"></script>
+</body>
+</html>

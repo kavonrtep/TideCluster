@@ -18,6 +18,7 @@
             <button class="tab-button active" onclick="showTab('overview')">Overview</button>
             <button class="tab-button" onclick="showTab('shared-families')">Shared Families</button>
             <button class="tab-button" onclick="showTab('detailed-families')">Detailed Families</button>
+            <button class="tab-button" onclick="showTab('plot')">Plot</button>
         </nav>
         
         <main>
@@ -47,6 +48,39 @@
                 <div id="detailed-matrix-container"></div>
             </div>
             
+            <div id="plot" class="tab-content">
+                <h2>Karyotype Plot</h2>
+                <div class="plot-controls">
+                    <div class="control-group">
+                        <label for="chromosome-select">Select Chromosome:</label>
+                        <select id="chromosome-select">
+                            <option value="">Choose a chromosome...</option>
+                        </select>
+                    </div>
+                    
+                    <div class="control-group">
+                        <label for="family-search">Search Families:</label>
+                        <input type="text" id="family-search" placeholder="Type to search families..." 
+                               oninput="filterFamilies()">
+                    </div>
+                    
+                    <div class="control-group">
+                        <label>Select Families (max 10):</label>
+                        <div class="family-selection">
+                            <div id="selected-families" class="selected-families"></div>
+                            <div id="family-list" class="family-list"></div>
+                        </div>
+                    </div>
+                    
+                    <div class="control-group">
+                        <button id="plot-button" onclick="generatePlot()" disabled>Generate Plot</button>
+                        <button id="clear-button" onclick="clearSelection()">Clear Selection</button>
+                    </div>
+                </div>
+                
+                <div id="plot-container"></div>
+            </div>
+            
             <div id="karyotype-modal" class="modal">
                 <div class="modal-content">
                     <div class="modal-header">
@@ -68,6 +102,7 @@
     <script src="js/shared-matrix.js"></script>
     <script src="js/detailed-matrix.js"></script>
     <script src="js/karyotype.js"></script>
+    <script src="js/plot.js"></script>
     <script src="js/main.js"></script>
 </body>
 </html>

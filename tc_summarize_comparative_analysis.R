@@ -7,7 +7,12 @@ library(optparse)
 library(jsonlite)
 
 # Get the directory where this script is located
-script_path <- getwd()
+args <- commandArgs(trailingOnly = FALSE)
+script_path <- dirname(sub("--file=", "", args[grep("--file=", args)]))
+if (length(script_path) == 0) {
+  # Fallback to current directory if script path detection fails
+  script_path <- getwd()
+}
 
 # Function to parse satellite families data from directory
 parse_satellite_families <- function(input_dir) {
@@ -393,9 +398,9 @@ generate_html_report <- function(parsed_data, overview_stats, shared_matrix,
   json_data <- toJSON(js_data, auto_unbox = FALSE, pretty = TRUE)
   
   # Read HTML template
-  template_path <- file.path(dirname(getwd()), "TideCluster", "html", "report_template.html")
+  template_path <- file.path(script_path, "html", "report_template.html")
   if (!file.exists(template_path)) {
-    # Try relative path
+    # Try relative path from current directory
     template_path <- file.path("html", "report_template.html")
   }
   
@@ -438,6 +443,7 @@ create_javascript_files <- function(output_dir) {
     "shared-matrix.js",
     "detailed-matrix.js",
     "karyotype.js",
+    "plot.js",
     "styles.css"
   )
   

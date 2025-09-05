@@ -31,6 +31,9 @@ function showTab(tabName) {
         case "detailed-families":
             initDetailedMatrix();
             break;
+        case "plot":
+            initPlotTab();
+            break;
     }
 }
 
