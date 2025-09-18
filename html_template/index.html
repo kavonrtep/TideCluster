@@ -47,17 +47,33 @@
                 </div>
                 
                 <div class="detail-section">
-                    <h4>Detailed View <span id="detail-region-info"></span></h4>
+                    <h4>Detailed View <span id="detail-region-info"></span> - Click and drag to select region for zoomed view</h4>
                     <div class="genome-view detail-view">
-                        <svg id="detail-svg" width="2400" height="300">
+                        <svg id="detail-svg" width="2400" height="180">
                             <g id="detail-genome-track"></g>
                             <g id="detail-features-layer"></g>
                             <g id="detail-labels-layer"></g>
+                            <g id="detail-zoom-region-highlight"></g>
                         </svg>
                     </div>
                     <div class="zoom-controls">
-                        <button id="zoom-reset">Reset Selection</button>
-                        <span class="zoom-info">Select a region in the overview above to see details</span>
+                        <button id="detail-zoom-reset">Reset Detail Selection</button>
+                        <span class="zoom-info">Select a region in the detail view above for maximum zoom</span>
+                    </div>
+                </div>
+                
+                <div class="zoom-section">
+                    <h4>Zoomed View <span id="zoom-region-info"></span></h4>
+                    <div class="genome-view zoom-view">
+                        <svg id="zoom-svg" width="2400" height="180">
+                            <g id="zoom-genome-track"></g>
+                            <g id="zoom-features-layer"></g>
+                            <g id="zoom-labels-layer"></g>
+                        </svg>
+                    </div>
+                    <div class="zoom-controls">
+                        <button id="zoom-reset">Reset All Selections</button>
+                        <span class="zoom-info">Most detailed view of selected region</span>
                     </div>
                 </div>
             </div>
@@ -90,6 +106,17 @@
     </div>
 
     <div id="tooltip" class="tooltip"></div>
+    
+    <!-- Color picker popup -->
+    <div id="color-picker" class="color-picker-popup">
+        <div class="color-picker-header">
+            <span>Choose Color</span>
+            <button id="color-picker-close">&times;</button>
+        </div>
+        <div class="color-picker-grid" id="color-picker-grid">
+            <!-- Color options will be populated by JavaScript -->
+        </div>
+    </div>
 
     <script>
         // Embed data directly to avoid CORS issues
