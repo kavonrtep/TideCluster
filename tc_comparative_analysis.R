@@ -163,7 +163,8 @@ mmseqs2_search <- function(sequences,
 cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
                                   min_coverage = 0.2, min_identity = 70,
                                   output_directory = NULL, ncpu = 5,
-                                  input_tc_dirs = NULL, prefix = NULL, tc_code = NULL
+                                  input_tc_dirs = NULL, prefix = NULL, tc_code = NULL,
+                                  clustering_algorithm = "fast_greedy"
 ) {
 
   # Input validation
@@ -178,6 +179,11 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   }
   if (!is.numeric(min_identity) || min_identity < 0 || min_identity > 100) {
     stop("min_identity must be numeric between 0 and 100")
+  }
+  # Validate clustering algorithm
+  valid_algorithms <- c("fast_greedy", "louvain", "leiden")
+  if (!clustering_algorithm %in% valid_algorithms) {
+    stop("clustering_algorithm must be one of: ", paste(valid_algorithms, collapse = ", "))
   }
   # Load required libraries
   required_packages <- c("Biostrings", "igraph")
@@ -204,7 +210,6 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   # add also reverse complement sequences
   # th_tc_seq_rc <- reverseComplement(th_tc_seq)
   # th_tc_seq <- c(th_tc_seq, th_tc_seq_rc)
-  rm(th_tc_seq_rc)
   gc(verbose = FALSE)
 
   # make sure the output directory exists
@@ -281,19 +286,29 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   rm(th_tc_seq, df_pass)
   gc(verbose = FALSE)
 
-  cat("Running fast-greedy clustering...\n")
+  cat(sprintf("Running %s clustering...\n", clustering_algorithm))
   cat(sprintf("Memory usage before clustering: %.2f MB\n", memory_usage() / 1024^2))
   clustering_start_time <- Sys.time()
-  
-  fg <- cluster_fast_greedy(g)
-  fg_groups <- igraph::groups(fg)
-  
+
+  # Select clustering algorithm
+  if (clustering_algorithm == "fast_greedy") {
+    cluster_result <- cluster_fast_greedy(g)
+  } else if (clustering_algorithm == "louvain") {
+    cluster_result <- cluster_louvain(g)
+  } else if (clustering_algorithm == "leiden") {
+    cluster_result <- cluster_leiden(g)
+  }
+
+  cluster_groups <- igraph::groups(cluster_result)
+
   clustering_end_time <- Sys.time()
-  cat(sprintf("Fast-greedy clustering completed in %.2f seconds\n", as.numeric(difftime(clustering_end_time, clustering_start_time, units="secs"))))
+  cat(sprintf("%s clustering completed in %.2f seconds\n",
+              stringr::str_to_title(clustering_algorithm),
+              as.numeric(difftime(clustering_end_time, clustering_start_time, units="secs"))))
   cat(sprintf("Memory usage after clustering: %.2f MB\n", memory_usage() / 1024^2))
 
-  # add fastgreedy groups to graph as vertex attribute
-  V(g)$group <- as.integer(factor(igraph::membership(fg)))
+  # add clustering groups to graph as vertex attribute
+  V(g)$group <- as.integer(factor(igraph::membership(cluster_result)))
   # Add species code attribute - this is the prefix of the sequence name before the first colon
   V(g)$code <- gsub(":.+", "", names(V(g)))
   # add TRC ID attribute - this is the transcript ID without prefix and the #rep or _rep suffix
@@ -391,17 +406,17 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   cat("Extracting cluster information...\n")
   cat(sprintf("Memory usage before cluster extraction: %.2f MB\n", memory_usage() / 1024^2))
   extraction_start_time <- Sys.time()
-  fg_groups_trc_id <- lapply(fg_groups, function(x) {
+  cluster_groups_trc_id <- lapply(cluster_groups, function(x) {
     unique(gsub("_rep.+", "", gsub("#.+", "", x)))
   })
-  
+
   # Clean up graph objects after extracting groups
-  rm(fg, fg_groups)
+  rm(cluster_result, cluster_groups)
   gc(verbose = FALSE)
 
   # Convert to data frame format
-  trc_groups <- do.call(rbind, lapply(seq_along(fg_groups_trc_id), function(i) {
-    data.frame(trc_id = fg_groups_trc_id[[i]],
+  trc_groups <- do.call(rbind, lapply(seq_along(cluster_groups_trc_id), function(i) {
+    data.frame(trc_id = cluster_groups_trc_id[[i]],
                group_id = i,
                stringsAsFactors = FALSE)
   }))
@@ -411,12 +426,12 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
 
   # DEBUG: Initial group count
   initial_unique_groups <- length(unique(trc_groups$group_id))
-  cat(sprintf("DEBUG: Initial trc_groups created with %d unique groups (max group_id: %d)\n", 
+  cat(sprintf("DEBUG: Initial trc_groups created with %d unique groups (max group_id: %d)\n",
               initial_unique_groups, max(trc_groups$group_id)))
   cat(sprintf("DEBUG: Total TRC entries in trc_groups: %d\n", nrow(trc_groups)))
-  
+
   # Clean up intermediate group data
-  rm(fg_groups_trc_id)
+  rm(cluster_groups_trc_id)
   gc(verbose = FALSE)
   
   extraction_end_time <- Sys.time()
@@ -1055,7 +1070,8 @@ finalize_groups_dataframe <- function(grps_pivoted, total_grps_length, annotatio
 process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
                                  mmseqs2_path = NULL,
                                  output_directory = "tc_comparative_analysis",
-                                 ncpu = opt$cpu
+                                 ncpu = opt$cpu,
+                                 clustering_algorithm = "fast_greedy"
 ) {
 
   tc_clust_path <- paste0(tc_code, "_clustering.gff3")
@@ -1070,7 +1086,8 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
   grps <- cluster_trc_sequences(all_seq$tc, all_seq$th, mmseqs2_path = mmseqs2_path,
                                 output_directory = output_directory, ncpu = ncpu,
                                 min_identity = 80, min_coverage = 0.8,
-                                input_tc_dirs = input_tc_dirs, prefix = prefix, tc_code = tc_code
+                                input_tc_dirs = input_tc_dirs, prefix = prefix, tc_code = tc_code,
+                                clustering_algorithm = clustering_algorithm
   )
   
   # Clean up large sequence objects after clustering
@@ -1467,7 +1484,8 @@ main <- function(opt) {
     tc_code = tc_code,
     mmseqs2_path = opt$mmseqs2_path,
     output_directory = opt$output_directory,
-    ncpu = opt$cpu
+    ncpu = opt$cpu,
+    clustering_algorithm = opt$clustering_algorithm
   )
 
   # Format results
@@ -1505,7 +1523,10 @@ option_list <- list(
     help="Path to MMseqs2 executable [default: %default]"),
   make_option(
     c("-o", "--output_directory"), type="character", default="tc_comparative_analysis",
-    help="Output directory for results [default: %default]")
+    help="Output directory for results [default: %default]"),
+  make_option(
+    c("-a", "--clustering_algorithm"), type="character", default="fast_greedy",
+    help="Clustering algorithm to use: fast_greedy, louvain, or leiden [default: %default]")
 )
 
 opt_parser <- OptionParser(option_list=option_list)
