@@ -35,7 +35,7 @@ mmseqs2_search <- function(sequences,
                         output_file,
                         tmp_dir,
                         "--search-type", search_type,
-                        "-a",  # Include amino acid sequences in output
+                        "-a",
                         paste0("--format-output \"", format_output, "\""),
                         "-s", sensitivity, "-v 0", # No verbose output
                         "--threads", threads,
@@ -202,8 +202,8 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   message("Combined ", length(th_tc_seq), " sequences for clustering")
 
   # add also reverse complement sequences
-  th_tc_seq_rc <- reverseComplement(th_tc_seq)
-  th_tc_seq <- c(th_tc_seq, th_tc_seq_rc)
+  # th_tc_seq_rc <- reverseComplement(th_tc_seq)
+  # th_tc_seq <- c(th_tc_seq, th_tc_seq_rc)
   rm(th_tc_seq_rc)
   gc(verbose = FALSE)
 
@@ -303,26 +303,37 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
 
   # Add annotation attribute for each vertex based on TRC ID and species code
   message("Adding annotation attributes to graph vertices...")
-  
-  # Initialize annotation attribute
-  V(g)$annotation <- NA_character_
-  
+  start_time_total <- Sys.time()
+
+  # Initialize annotation vector (separate from graph for efficiency)
+  annotation_vector <- rep(NA_character_, vcount(g))
+
   # Get unique species codes from vertices
   vertex_codes <- unique(V(g)$code)
-  
+  message(sprintf("Processing %d unique species codes", length(vertex_codes)))
+
   # Read annotations for each species and apply to vertices
   for (code in vertex_codes) {
+    start_time_code <- Sys.time()
+
     # Find corresponding input directory and annotation file
     code_idx <- match(code, prefix)
     if (!is.na(code_idx)) {
       tc_annot_file <- file.path(input_tc_dirs[code_idx], paste0(tc_code[code_idx], "_annotation.tsv"))
-      
+
       if (file.exists(tc_annot_file)) {
         message(sprintf("Reading annotations for species %s from %s", code, tc_annot_file))
+        start_time_read <- Sys.time()
         annot_data <- read_keyvalue_file(tc_annot_file)
-        
+        read_time <- difftime(Sys.time(), start_time_read, units="secs")
+        message(sprintf("  Read %d annotations in %.2f seconds", length(annot_data), read_time))
+
         # Apply annotations to vertices with this species code
+        start_time_apply <- Sys.time()
         code_vertices <- which(V(g)$code == code)
+        message(sprintf("  Processing %d vertices for species %s", length(code_vertices), code))
+
+        annotations_applied <- 0
         for (v_idx in code_vertices) {
           trc_id <- V(g)$trc_id[v_idx]
           if (trc_id %in% names(annot_data)) {
@@ -330,15 +341,31 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
             annot_info <- annot_data[[trc_id]]
             if (length(annot_info) > 0) {
               annot_str <- paste(names(annot_info), annot_info, sep=":", collapse=";")
-              V(g)$annotation[v_idx] <- annot_str
+              annotation_vector[v_idx] <- annot_str
+              annotations_applied <- annotations_applied + 1
             }
           }
         }
+        apply_time <- difftime(Sys.time(), start_time_apply, units="secs")
+        message(sprintf("  Applied %d annotations in %.2f seconds", annotations_applied, apply_time))
       } else {
         message(sprintf("Annotation file not found for species %s: %s", code, tc_annot_file))
       }
     }
+
+    code_time <- difftime(Sys.time(), start_time_code, units="secs")
+    message(sprintf("Completed processing species %s in %.2f seconds", code, code_time))
   }
+
+  # Assign all annotations to graph at once (much more efficient)
+  message("Assigning annotation vector to graph vertices...")
+  start_time_assign <- Sys.time()
+  V(g)$annotation <- annotation_vector
+  assign_time <- difftime(Sys.time(), start_time_assign, units="secs")
+  message(sprintf("Annotation assignment completed in %.2f seconds", assign_time))
+
+  total_time <- difftime(Sys.time(), start_time_total, units="secs")
+  message(sprintf("Total annotation process completed in %.2f seconds", total_time))
   
   # Count vertices with annotations
   annotated_count <- sum(!is.na(V(g)$annotation))
