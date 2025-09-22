@@ -1,18 +1,44 @@
 // Detailed families matrix functionality
 
+let detailedMatrixData = {
+    families: [],
+    samples: [],
+    colorScale: null,
+    viewMode: 'trc-count',
+    currentPage: 0,
+    rowsPerPage: 100,
+    filteredFamilies: []
+};
+
 function initDetailedMatrix() {
     const container = document.getElementById("detailed-matrix-container");
-    const families = data.detailed_families;
-    const samples = data.samples;
-    
+    detailedMatrixData.families = data.detailed_families;
+    detailedMatrixData.samples = data.samples;
+    detailedMatrixData.filteredFamilies = [...detailedMatrixData.families];
+
+    updateDetailedMatrix();
+}
+
+function updateDetailedMatrix() {
+    const container = document.getElementById("detailed-matrix-container");
+    const families = detailedMatrixData.filteredFamilies;
+    const samples = detailedMatrixData.samples;
+
     // Get selected view mode
-    const viewMode = document.querySelector('input[name="view-mode"]:checked').value;
+    const viewModeElement = document.querySelector('input[name="view-mode"]:checked');
+    const viewMode = viewModeElement ? viewModeElement.value : 'trc-count';
+    detailedMatrixData.viewMode = viewMode;
+
     const isLengthView = viewMode === "length";
     const isArrayView = viewMode === "array-count";
-    
-    // Get all values for color scaling
+
+    // Calculate color scale for current page only to improve performance
+    const startIdx = detailedMatrixData.currentPage * detailedMatrixData.rowsPerPage;
+    const endIdx = Math.min(startIdx + detailedMatrixData.rowsPerPage, families.length);
+    const currentPageFamilies = families.slice(startIdx, endIdx);
+
     const allValues = [];
-    families.forEach(family => {
+    currentPageFamilies.forEach(family => {
         samples.forEach(sample => {
             let key;
             if (isLengthView) {
@@ -25,37 +51,70 @@ function initDetailedMatrix() {
             allValues.push(family[key] || 0);
         });
     });
-    
+
     const colorScale = getColorScale(allValues.filter(v => v > 0), "Reds");
-    
+    detailedMatrixData.colorScale = colorScale;
+
+    // Calculate pagination info
+    const totalPages = Math.ceil(families.length / detailedMatrixData.rowsPerPage);
+    const startRow = startIdx + 1;
+    const endRow = Math.min(endIdx, families.length);
+
+    // Dynamic column width based on number of samples
+    let columnWidth = 35;
+    if (samples.length > 20) {
+        columnWidth = Math.max(20, Math.min(35, 1000 / samples.length));
+    }
+
     let html = `
+        <div class="detailed-matrix-controls">
+            <div class="pagination-info">
+                Showing families ${startRow}-${endRow} of ${families.length}
+                (Page ${detailedMatrixData.currentPage + 1} of ${totalPages})
+            </div>
+            <div class="pagination-controls">
+                <input type="number" id="rows-per-page" value="${detailedMatrixData.rowsPerPage}" min="10" max="500" step="10">
+                <label for="rows-per-page">rows per page</label>
+                <button onclick="changeDetailedPage(-1)" ${detailedMatrixData.currentPage === 0 ? 'disabled' : ''}>Previous</button>
+                <button onclick="changeDetailedPage(1)" ${detailedMatrixData.currentPage >= totalPages - 1 ? 'disabled' : ''}>Next</button>
+                <select id="page-select" onchange="goToDetailedPage(this.value)">
+    `;
+
+    for (let i = 0; i < totalPages; i++) {
+        html += `<option value="${i}" ${i === detailedMatrixData.currentPage ? 'selected' : ''}>Page ${i + 1}</option>`;
+    }
+
+    html += `
+                </select>
+            </div>
+        </div>
         <div class="matrix-container">
-            <table class="detailed-matrix">
+            <table class="detailed-matrix" style="table-layout: fixed;">
                 <thead>
                     <tr>
-                        <th class="corner-cell">Family ID</th>
+                        <th class="corner-cell" style="width: 60px;">Family ID</th>
     `;
-    
-    // Sample headers
+
+    // Sample headers with dynamic width
     samples.forEach(sample => {
-        html += `<th class="sample-header">${sample}</th>`;
+        html += `<th class="sample-header" style="width: ${columnWidth}px; max-width: ${columnWidth}px;">${sample}</th>`;
     });
-    
-    html += `<th class="annotation-header">Prevalent Annotation</th>`;
+
+    html += `<th class="annotation-header" style="width: 200px;">Prevalent Annotation</th>`;
     html += `</tr></thead><tbody>`;
-    
-    // Family rows
-    families.forEach(family => {
+
+    // Family rows - only current page
+    currentPageFamilies.forEach(family => {
         html += `<tr>`;
         const familyIdStr = `SF_${String(family.family_id).padStart(4, "0")}`;
         const hasKaryotypeData = data.karyotype_data && Object.keys(data.karyotype_data).length > 0;
-        
+
         if (hasKaryotypeData) {
             html += `<td class="family-id clickable" onclick="showKaryotype('${familyIdStr}')">${familyIdStr}</td>`;
         } else {
             html += `<td class="family-id">${familyIdStr}</td>`;
         }
-        
+
         samples.forEach(sample => {
             const trcKey = `${sample}_trc_count`;
             const lengthKey = `${sample}_length`;
@@ -63,7 +122,7 @@ function initDetailedMatrix() {
             const trcCount = family[trcKey] || 0;
             const length = family[lengthKey] || 0;
             const arrayCount = family[arrayKey] || 0;
-            
+
             let displayValue, colorValue;
             if (isLengthView) {
                 displayValue = formatLength(length);
@@ -76,45 +135,26 @@ function initDetailedMatrix() {
                 colorValue = trcCount;
             }
             const bgColor = colorValue > 0 ? colorScale(colorValue) : "#f9f9f9";
-            
-            // Get contigs/chromosomes for this family in this sample
-            const familyIdStr = `SF_${String(family.family_id).padStart(4, "0")}`;
-            let contigs = [];
-            if (data.karyotype_data && data.karyotype_data[sample]) {
-                const sampleData = data.karyotype_data[sample];
-                if (sampleData.contigs) {
-                    Object.keys(sampleData.contigs).forEach(contigName => {
-                        const contigData = sampleData.contigs[contigName];
-                        if (contigData.satellites && contigData.satellites.some(sat => sat.family === familyIdStr)) {
-                            contigs.push(contigName);
-                        }
-                    });
-                }
-            }
-            
-            const contigsList = contigs.length > 0 ? contigs.join(', ') : 'None';
-            const tooltipText = `Family ${family.family_id} in ${sample}<br>` +
-                              `TRCs: ${trcCount}<br>` +
-                              `Arrays: ${arrayCount}<br>` +
-                              `Length: ${formatLength(length)}<br>` +
-                              `Contigs: ${contigsList}`;
-            
+
+            // Simplified tooltip to improve performance
+            const tooltipText = `Family ${family.family_id} in ${sample}: ${displayValue}`;
+
             html += `
-                <td class="matrix-cell ${colorValue > 0 ? 'has-value' : 'empty'}" 
-                    style="background-color: ${bgColor}"
+                <td class="matrix-cell ${colorValue > 0 ? 'has-value' : 'empty'}"
+                    style="background-color: ${bgColor}; width: ${columnWidth}px; max-width: ${columnWidth}px;"
                     onmouseover="showTooltip(event, '${tooltipText}')"
                     onmouseout="hideTooltip()">
                     ${colorValue > 0 ? displayValue : ""}
                 </td>
             `;
         });
-        
+
         // Prevalent annotation column
         const annotation = family.prevalent_annot || "";
-        html += `<td class="annotation-cell">${annotation}</td>`;
+        html += `<td class="annotation-cell" style="width: 200px;">${annotation}</td>`;
         html += `</tr>`;
     });
-    
+
     html += `
                 </tbody>
             </table>
@@ -122,7 +162,7 @@ function initDetailedMatrix() {
         <div class="matrix-legend">
             <p><strong>Interpretation:</strong></p>
             <ul>
-                <li>Rows are satellite families sorted by family index</li>
+                <li>Rows are satellite families sorted by family index (showing ${startRow}-${endRow} of ${families.length})</li>
                 <li>Columns are samples ordered by hierarchical clustering</li>
                 <li>Cells show ${isLengthView ? "total genomic length" : isArrayView ? "number of annotated arrays" : "number of TRCs"} for each family-sample combination</li>
                 <li>Empty cells indicate the family is absent in that sample</li>
@@ -130,6 +170,39 @@ function initDetailedMatrix() {
             </ul>
         </div>
     `;
-    
+
     container.innerHTML = html;
+
+    // Update rows per page listener
+    const rowsPerPageInput = document.getElementById('rows-per-page');
+    if (rowsPerPageInput) {
+        rowsPerPageInput.addEventListener('change', function() {
+            const newRowsPerPage = parseInt(this.value);
+            if (newRowsPerPage >= 10 && newRowsPerPage <= 500) {
+                detailedMatrixData.rowsPerPage = newRowsPerPage;
+                detailedMatrixData.currentPage = 0;
+                updateDetailedMatrix();
+            }
+        });
+    }
+}
+
+function changeDetailedPage(direction) {
+    const totalPages = Math.ceil(detailedMatrixData.filteredFamilies.length / detailedMatrixData.rowsPerPage);
+    const newPage = detailedMatrixData.currentPage + direction;
+
+    if (newPage >= 0 && newPage < totalPages) {
+        detailedMatrixData.currentPage = newPage;
+        updateDetailedMatrix();
+    }
+}
+
+function goToDetailedPage(pageIndex) {
+    const pageNum = parseInt(pageIndex);
+    const totalPages = Math.ceil(detailedMatrixData.filteredFamilies.length / detailedMatrixData.rowsPerPage);
+
+    if (pageNum >= 0 && pageNum < totalPages) {
+        detailedMatrixData.currentPage = pageNum;
+        updateDetailedMatrix();
+    }
 }

@@ -23,30 +23,74 @@ function showTab(tabName) {
     // Initialize the appropriate visualization
     switch(tabName) {
         case "overview":
-            initOverviewTable();
+            if (typeof initOverviewTable === 'function') {
+                initOverviewTable();
+            } else {
+                console.error('initOverviewTable function not found');
+            }
             break;
         case "shared-families":
-            initSharedMatrix();
+            if (typeof initSharedMatrix === 'function') {
+                initSharedMatrix();
+            } else {
+                console.error('initSharedMatrix function not found');
+            }
             break;
         case "detailed-families":
-            initDetailedMatrix();
+            if (typeof initDetailedMatrix === 'function') {
+                initDetailedMatrix();
+            } else {
+                console.error('initDetailedMatrix function not found');
+            }
             break;
         case "plot":
-            initPlotTab();
+            if (typeof initPlotTab === 'function') {
+                initPlotTab();
+            } else {
+                console.error('initPlotTab function not found - plot.js may not be loaded');
+                console.log('plotJsLoaded flag:', window.plotJsLoaded);
+                console.log('Available functions:', Object.keys(window).filter(k => k.includes('init')));
+
+                const plotContainer = document.getElementById('plot-container');
+                if (plotContainer) {
+                    plotContainer.innerHTML =
+                        '<div style="color: red; padding: 20px; border: 1px solid red; margin: 20px;">' +
+                        '<h3>Plot functionality not available</h3>' +
+                        '<p>The plot.js file may not be loaded correctly.</p>' +
+                        '<p>Please check the browser console for more details.</p>' +
+                        '</div>';
+                }
+            }
             break;
     }
 }
 
 // Initialize the report
 document.addEventListener("DOMContentLoaded", function() {
-    initOverviewTable();
-    
+    console.log("DOM loaded, checking available functions:");
+    console.log("initOverviewTable:", typeof initOverviewTable);
+    console.log("initSharedMatrix:", typeof initSharedMatrix);
+    console.log("initDetailedMatrix:", typeof initDetailedMatrix);
+    console.log("initPlotTab:", typeof initPlotTab);
+    console.log("plotJsLoaded flag:", window.plotJsLoaded);
+    console.log("data object:", typeof data);
+
+    if (typeof initOverviewTable === 'function') {
+        initOverviewTable();
+    } else {
+        console.error('initOverviewTable not available');
+    }
+
     // Add event listeners for view mode radio buttons
     const viewModeInputs = document.querySelectorAll('input[name="view-mode"]');
     viewModeInputs.forEach(input => {
         input.addEventListener("change", function() {
             if (document.getElementById("detailed-families").classList.contains("active")) {
-                initDetailedMatrix();
+                if (typeof updateDetailedMatrix === 'function') {
+                    updateDetailedMatrix();
+                } else {
+                    console.error('updateDetailedMatrix not available');
+                }
             }
         });
     });

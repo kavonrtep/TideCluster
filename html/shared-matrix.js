@@ -37,7 +37,7 @@ function initSharedMatrix() {
     // Matrix rows
     for (let i = 0; i < samples.length; i++) {
         html += `<tr>`;
-        html += `<th class="sample-header">${samples[i]}</th>`;
+        html += `<th class="sample-header row-header">${samples[i]}</th>`;
         
         for (let j = 0; j < samples.length; j++) {
             const value = matrix[i][j];

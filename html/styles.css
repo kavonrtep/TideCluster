@@ -299,37 +299,65 @@ header .timestamp {
     overflow-x: auto;
     margin-bottom: 20px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    max-height: 80vh;
+    overflow-y: auto;
 }
 
 .shared-matrix,
 .detailed-matrix {
     border-collapse: collapse;
-    font-size: 12px;
+    font-size: 8px;
     background-color: white;
+    table-layout: fixed;
 }
 
 .shared-matrix th,
 .shared-matrix td,
 .detailed-matrix th,
 .detailed-matrix td {
-    border: 1px solid #ddd;
+    border: 1px solid #ccc;
     text-align: center;
-    min-width: 80px;
     position: relative;
+    padding: 1px;
+    line-height: 1.1;
+}
+
+/* Adaptive column width based on number of samples */
+.shared-matrix th:not(.corner-cell),
+.shared-matrix td:not(.sample-header),
+.detailed-matrix th:not(.corner-cell):not(.annotation-header),
+.detailed-matrix td:not(.family-id):not(.annotation-cell) {
+    width: auto;
+    min-width: 20px;
+    max-width: 50px;
 }
 
 .corner-cell {
     background-color: #ecf0f1 !important;
 }
 
+/* Column headers (vertical) */
 .sample-header {
     background-color: #3498db !important;
     color: white !important;
     font-weight: 600;
-    padding: 8px 4px;
+    padding: 4px 2px;
     writing-mode: vertical-rl;
     text-orientation: mixed;
-    min-height: 100px;
+    min-height: 80px;
+    font-size: 7px;
+}
+
+/* Row headers (horizontal) */
+.sample-header.row-header {
+    writing-mode: horizontal-tb;
+    text-orientation: initial;
+    min-height: auto;
+    min-width: 80px;
+    max-width: 80px;
+    text-align: center;
+    padding: 4px 2px;
+    font-size: 8px;
 }
 
 .annotation-header {
@@ -341,10 +369,11 @@ header .timestamp {
 }
 
 .matrix-cell {
-    padding: 6px 4px;
+    padding: 2px 1px;
     cursor: pointer;
     transition: all 0.2s ease;
     font-weight: 500;
+    font-size: 8px;
 }
 
 .matrix-cell:hover {
@@ -369,9 +398,11 @@ header .timestamp {
     background-color: #f8f9fa !important;
     font-weight: 600;
     color: #2c3e50;
-    padding: 6px 8px;
+    padding: 2px 4px;
     text-align: center;
-    min-width: 80px;
+    min-width: 60px;
+    max-width: 60px;
+    font-size: 7px;
 }
 
 .family-id.clickable {
@@ -412,6 +443,76 @@ header .timestamp {
 
 .controls input[type="radio"] {
     margin-right: 5px;
+}
+
+/* Detailed Matrix Controls */
+.detailed-matrix-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    padding: 10px 15px;
+    background-color: #f8f9fa;
+    border-radius: 6px;
+    border: 1px solid #e9ecef;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.pagination-info {
+    font-weight: 500;
+    color: #2c3e50;
+}
+
+.pagination-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.pagination-controls input[type="number"] {
+    width: 80px;
+    padding: 4px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.pagination-controls label {
+    font-size: 14px;
+    color: #666;
+    margin: 0;
+}
+
+.pagination-controls button {
+    padding: 6px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: white;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+.pagination-controls button:hover:not(:disabled) {
+    background-color: #3498db;
+    color: white;
+    border-color: #3498db;
+}
+
+.pagination-controls button:disabled {
+    background-color: #f8f9fa;
+    color: #ccc;
+    cursor: not-allowed;
+}
+
+.pagination-controls select {
+    padding: 4px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    background-color: white;
 }
 
 /* Legend */
