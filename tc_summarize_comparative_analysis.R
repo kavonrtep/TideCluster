@@ -465,45 +465,165 @@ create_javascript_files <- function(output_dir) {
   cat("JavaScript and CSS files created in:", js_dir, "\n")
 }
 
+# Function to get cache file path based on output file
+get_cache_file_path <- function(output_file) {
+  output_base <- tools::file_path_sans_ext(output_file)
+  rds_file <- paste0(output_base, ".rds")
+  rdata_file <- paste0(output_base, ".RData")
+
+  # Check for RDS first, then RData
+  if (file.exists(rds_file)) {
+    return(list(path = rds_file, format = "rds"))
+  } else if (file.exists(rdata_file)) {
+    return(list(path = rdata_file, format = "rdata"))
+  } else {
+    return(list(path = rds_file, format = "rds"))  # Default to RDS for saving
+  }
+}
+
+# Function to save processed data to cache
+save_processed_data <- function(parsed_data, overview_stats, shared_matrix,
+                               detailed_data, clustering_result, karyotype_data,
+                               cache_file_info) {
+
+  processed_data <- list(
+    parsed_data = parsed_data,
+    overview_stats = overview_stats,
+    shared_matrix = shared_matrix,
+    detailed_data = detailed_data,
+    clustering_result = clustering_result,
+    karyotype_data = karyotype_data,
+    timestamp = Sys.time(),
+    version = "1.0"
+  )
+
+  if (cache_file_info$format == "rds") {
+    saveRDS(processed_data, cache_file_info$path)
+    cat("Processed data saved to:", cache_file_info$path, "\n")
+  } else {
+    save(processed_data, file = cache_file_info$path)
+    cat("Processed data saved to:", cache_file_info$path, "\n")
+  }
+}
+
+# Function to load processed data from cache
+load_processed_data <- function(cache_file_info) {
+  if (cache_file_info$format == "rds") {
+    processed_data <- readRDS(cache_file_info$path)
+  } else {
+    load(cache_file_info$path)  # This loads 'processed_data' variable
+  }
+
+  cat("Loaded processed data from cache:", cache_file_info$path, "\n")
+  cat("Cache timestamp:", as.character(processed_data$timestamp), "\n")
+
+  return(processed_data)
+}
+
+# Function to check if cache is valid
+is_cache_valid <- function(cache_file_info, input_dir, check_dates = TRUE) {
+  if (!file.exists(cache_file_info$path)) {
+    return(FALSE)
+  }
+
+  # If user requested to skip date checking, just check if cache file exists
+  if (!check_dates) {
+    cat("Skipping date checks for cache file.\n")
+    return(TRUE)
+  }
+
+  # Get cache modification time
+  cache_mtime <- file.mtime(cache_file_info$path)
+
+  # Check if input directory or its contents are newer than cache
+  input_files <- list.files(input_dir, recursive = TRUE, full.names = TRUE)
+  input_files <- c(input_files, input_dir)  # Include the directory itself
+
+  for (input_file in input_files) {
+    if (file.exists(input_file) && file.mtime(input_file) > cache_mtime) {
+      cat("Cache is outdated. Input file", basename(input_file), "is newer than cache.\n")
+      return(FALSE)
+    }
+  }
+
+  return(TRUE)
+}
+
 # Main function
 main <- function(opt) {
   cat("Starting TRC comparative analysis summarization...\n")
-  
-  # Parse input data
-  parsed_data <- parse_satellite_families(opt$input)
-  
-  # Calculate overview statistics
-  cat("Calculating overview statistics...\n")
-  overview_stats <- calculate_overview_stats(parsed_data)
-  
-  # Calculate shared families matrix
-  cat("Calculating shared families matrix...\n")
-  shared_matrix <- calculate_shared_families(parsed_data)
-  
-  # Read karyotype data from GFF3 files first
-  karyotype_data <- read_gff3_karyotype_data(parsed_data)
-  
-  # Prepare detailed family data (now with karyotype data for array counting)
-  cat("Preparing detailed family data...\n")
-  detailed_data <- prepare_detailed_family_data(parsed_data, karyotype_data)
-  
-  # Perform hierarchical clustering of samples and sort families by index
-  cat("Performing hierarchical clustering of samples and sorting families by index...\n")
-  clustering_result <- cluster_families(parsed_data)
-  
+
+  # Determine cache file path
+  cache_file_info <- get_cache_file_path(opt$output)
+
+  # Check if we can use cached data (and user hasn't forced regeneration)
+  use_cache <- !opt$force && is_cache_valid(cache_file_info, opt$input, check_dates = !opt$`no-check-dates`)
+
+  if (use_cache) {
+    if (opt$`no-check-dates`) {
+      cat("✓ Using cached processed data (date checking disabled)...\n")
+    } else {
+      cat("✓ Using cached processed data (use --force to regenerate)...\n")
+    }
+    processed_data <- load_processed_data(cache_file_info)
+
+    # Extract data from cache
+    parsed_data <- processed_data$parsed_data
+    overview_stats <- processed_data$overview_stats
+    shared_matrix <- processed_data$shared_matrix
+    detailed_data <- processed_data$detailed_data
+    clustering_result <- processed_data$clustering_result
+    karyotype_data <- processed_data$karyotype_data
+
+  } else {
+    if (opt$force) {
+      cat("🔄 Force regeneration requested. Processing data from scratch...\n")
+    } else {
+      cat("📊 Processing data from scratch (no valid cache found)...\n")
+    }
+
+    # Parse input data
+    parsed_data <- parse_satellite_families(opt$input)
+
+    # Calculate overview statistics
+    cat("Calculating overview statistics...\n")
+    overview_stats <- calculate_overview_stats(parsed_data)
+
+    # Calculate shared families matrix
+    cat("Calculating shared families matrix...\n")
+    shared_matrix <- calculate_shared_families(parsed_data)
+
+    # Read karyotype data from GFF3 files first
+    karyotype_data <- read_gff3_karyotype_data(parsed_data)
+
+    # Prepare detailed family data (now with karyotype data for array counting)
+    cat("Preparing detailed family data...\n")
+    detailed_data <- prepare_detailed_family_data(parsed_data, karyotype_data)
+
+    # Perform hierarchical clustering of samples and sort families by index
+    cat("Performing hierarchical clustering of samples and sorting families by index...\n")
+    clustering_result <- cluster_families(parsed_data)
+
+    # Save processed data to cache
+    cat("Saving processed data to cache...\n")
+    save_processed_data(parsed_data, overview_stats, shared_matrix,
+                       detailed_data, clustering_result, karyotype_data,
+                       cache_file_info)
+  }
+
   # Create output directory
   output_dir <- dirname(opt$output)
   dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
-  
+
   # Create JavaScript and CSS files
   cat("Creating JavaScript and CSS files...\n")
   create_javascript_files(output_dir)
-  
+
   # Generate HTML report
   cat("Generating HTML report...\n")
-  generate_html_report(parsed_data, overview_stats, shared_matrix, 
+  generate_html_report(parsed_data, overview_stats, shared_matrix,
                       detailed_data, clustering_result, karyotype_data, opt$output)
-  
+
   cat("Report generation completed successfully!\n")
   cat("Open", opt$output, "in your web browser to view the interactive report.\n")
 }
@@ -515,7 +635,13 @@ option_list <- list(
     help="Input directory containing TSV file and GFF3 subdirectory from tc_comparative_analysis.R script (required)"),
   make_option(
     c("-o", "--output"), type="character", default="trc_comparative_report.html",
-    help="Output HTML file path [default: %default]")
+    help="Output HTML file path [default: %default]"),
+  make_option(
+    c("-f", "--force"), action="store_true", default=FALSE,
+    help="Force regeneration of cache file even if it exists [default: %default]"),
+  make_option(
+    c("--no-check-dates"), action="store_true", default=FALSE,
+    help="Skip checking input file dates when using cache (use cache regardless of file timestamps) [default: %default]")
 )
 
 opt_parser <- OptionParser(option_list=option_list)
