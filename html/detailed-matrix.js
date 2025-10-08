@@ -7,7 +7,8 @@ let detailedMatrixData = {
     viewMode: 'trc-count',
     currentPage: 0,
     rowsPerPage: 100,
-    filteredFamilies: []
+    filteredFamilies: [],
+    searchTerm: ''
 };
 
 function initDetailedMatrix() {
@@ -70,6 +71,7 @@ function updateDetailedMatrix() {
         <div class="detailed-matrix-controls">
             <div class="pagination-info">
                 Showing families ${startRow}-${endRow} of ${families.length}
+                ${detailedMatrixData.searchTerm ? `(filtered from ${detailedMatrixData.families.length} total)` : ''}
                 (Page ${detailedMatrixData.currentPage + 1} of ${totalPages})
             </div>
             <div class="pagination-controls">
@@ -162,11 +164,12 @@ function updateDetailedMatrix() {
         <div class="matrix-legend">
             <p><strong>Interpretation:</strong></p>
             <ul>
-                <li>Rows are satellite families sorted by family index (showing ${startRow}-${endRow} of ${families.length})</li>
+                <li>Rows are satellite families sorted by family index (showing ${startRow}-${endRow} of ${families.length}${detailedMatrixData.searchTerm ? ` filtered` : ''})</li>
                 <li>Columns are samples ordered by hierarchical clustering</li>
                 <li>Cells show ${isLengthView ? "total genomic length" : isArrayView ? "number of annotated arrays" : "number of TRCs"} for each family-sample combination</li>
                 <li>Empty cells indicate the family is absent in that sample</li>
                 <li>Darker colors indicate ${isLengthView ? "longer total length" : isArrayView ? "more arrays" : "more TRCs"}</li>
+                ${detailedMatrixData.searchTerm ? `<li><strong>Filter active:</strong> Showing families matching "${detailedMatrixData.searchTerm}"</li>` : ''}
             </ul>
         </div>
     `;
@@ -185,6 +188,14 @@ function updateDetailedMatrix() {
             }
         });
     }
+
+    // Restore search input value (this is in the matrix container, not affected by updateDetailedMatrix)
+    setTimeout(() => {
+        const searchInput = document.getElementById('detailed-family-search');
+        if (searchInput && detailedMatrixData.searchTerm) {
+            searchInput.value = detailedMatrixData.searchTerm;
+        }
+    }, 10);
 }
 
 function changeDetailedPage(direction) {
@@ -205,4 +216,79 @@ function goToDetailedPage(pageIndex) {
         detailedMatrixData.currentPage = pageNum;
         updateDetailedMatrix();
     }
+}
+
+// Filter families based on search term
+function filterDetailedFamilies() {
+    const searchInput = document.getElementById('detailed-family-search');
+    if (!searchInput) {
+        console.error('Search input not found');
+        return;
+    }
+
+    const searchTerm = searchInput.value.toLowerCase();
+    detailedMatrixData.searchTerm = searchTerm;
+
+    console.log('Filtering detailed families with term:', searchTerm);
+    console.log('Total families to filter:', detailedMatrixData.families.length);
+
+    if (!detailedMatrixData.families || detailedMatrixData.families.length === 0) {
+        console.error('No families data available for filtering');
+        return;
+    }
+
+    if (searchTerm === '') {
+        // No filter, show all families
+        detailedMatrixData.filteredFamilies = [...detailedMatrixData.families];
+    } else {
+        // Filter families based on family ID and annotation
+        detailedMatrixData.filteredFamilies = detailedMatrixData.families.filter((family, index) => {
+            try {
+                const familyIdStr = `SF_${String(family.family_id).padStart(4, "0")}`;
+                const annotation = String(family.prevalent_annot || '');
+
+                const matches = familyIdStr.toLowerCase().includes(searchTerm) ||
+                               annotation.toLowerCase().includes(searchTerm);
+
+                if (index < 3) { // Debug first few families
+                    console.log(`Family ${index}:`, {
+                        family_id: family.family_id,
+                        familyIdStr,
+                        prevalent_annot: family.prevalent_annot,
+                        annotation,
+                        matches
+                    });
+                }
+
+                return matches;
+            } catch (error) {
+                console.error('Error filtering family at index', index, ':', error, family);
+                return false;
+            }
+        });
+    }
+
+    // Reset to first page when filtering
+    detailedMatrixData.currentPage = 0;
+
+    console.log('Filtered families:', detailedMatrixData.filteredFamilies.length, 'of', detailedMatrixData.families.length);
+
+    // Update the matrix display
+    updateDetailedMatrix();
+}
+
+// Clear the filter
+function clearDetailedFilter() {
+    const searchInput = document.getElementById('detailed-family-search');
+    if (searchInput) {
+        searchInput.value = '';
+    }
+
+    detailedMatrixData.searchTerm = '';
+    detailedMatrixData.filteredFamilies = [...detailedMatrixData.families];
+    detailedMatrixData.currentPage = 0;
+
+    console.log('Cleared detailed families filter');
+
+    updateDetailedMatrix();
 }

@@ -35,15 +35,23 @@
             <div id="detailed-families" class="tab-content">
                 <h2>Family Presence Patterns - Detailed View</h2>
                 <div class="controls">
-                    <label>
-                        <input type="radio" name="view-mode" value="trc-count" checked> TRC Count
-                    </label>
-                    <label>
-                        <input type="radio" name="view-mode" value="length"> Total Length
-                    </label>
-                    <label>
-                        <input type="radio" name="view-mode" value="array-count"> Number of Arrays
-                    </label>
+                    <div class="control-row">
+                        <label>
+                            <input type="radio" name="view-mode" value="trc-count" checked> TRC Count
+                        </label>
+                        <label>
+                            <input type="radio" name="view-mode" value="length"> Total Length
+                        </label>
+                        <label>
+                            <input type="radio" name="view-mode" value="array-count"> Number of Arrays
+                        </label>
+                    </div>
+                    <div class="control-row">
+                        <label for="detailed-family-search">Filter Families:</label>
+                        <input type="text" id="detailed-family-search" placeholder="Type to filter families..."
+                               oninput="filterDetailedFamilies()">
+                        <button id="clear-filter-button" onclick="clearDetailedFilter()">Clear</button>
+                    </div>
                 </div>
                 <div id="detailed-matrix-container"></div>
             </div>

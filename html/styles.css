@@ -435,14 +435,50 @@ header .timestamp {
     border: 1px solid #e9ecef;
 }
 
+.control-row {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 10px;
+}
+
+.control-row:last-child {
+    margin-bottom: 0;
+}
+
 .controls label {
     margin-right: 20px;
     cursor: pointer;
     font-weight: 500;
+    margin-bottom: 0;
 }
 
 .controls input[type="radio"] {
     margin-right: 5px;
+}
+
+.controls input[type="text"] {
+    padding: 6px 10px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 14px;
+    min-width: 200px;
+}
+
+.controls button {
+    padding: 6px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    background-color: white;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.2s ease;
+}
+
+.controls button:hover {
+    background-color: #007bff;
+    color: white;
+    border-color: #007bff;
 }
 
 /* Detailed Matrix Controls */

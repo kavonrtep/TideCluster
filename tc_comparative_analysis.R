@@ -291,12 +291,18 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   clustering_start_time <- Sys.time()
 
   # Select clustering algorithm
+  set.seed(opt$seed)  # For reproducibility
   if (clustering_algorithm == "fast_greedy") {
     cluster_result <- cluster_fast_greedy(g)
   } else if (clustering_algorithm == "louvain") {
     cluster_result <- cluster_louvain(g)
   } else if (clustering_algorithm == "leiden") {
-    cluster_result <- cluster_leiden(g)
+    # Set random seed for reproducibility
+    set.seed(opt$seed)
+    cluster_result <- cluster_leiden(g,
+                                   resolution_parameter = opt$leiden_resolution,
+                                   objective_function = opt$leiden_objective,
+                                   n_iterations = opt$leiden_iterations)
   }
 
   cluster_groups <- igraph::groups(cluster_result)
@@ -1525,12 +1531,66 @@ option_list <- list(
     c("-o", "--output_directory"), type="character", default="tc_comparative_analysis",
     help="Output directory for results [default: %default]"),
   make_option(
-    c("-a", "--clustering_algorithm"), type="character", default="fast_greedy",
-    help="Clustering algorithm to use: fast_greedy, louvain, or leiden [default: %default]")
+    c("-a", "--clustering_algorithm"), type="character", default="leiden",
+    help="Clustering algorithm to use: fast_greedy, louvain, or leiden [default: %default]"),
+  make_option(
+    c("--leiden_resolution"), type="numeric", default=1.0,
+    help="Resolution parameter for Leiden clustering [default: %default]"),
+  make_option(
+    c("--leiden_objective"), type="character", default="modularity",
+    help="Objective function for Leiden clustering: CPM or modularity [default: %default]"),
+  make_option(
+    c("--leiden_iterations"), type="integer", default=2,
+    help="Number of iterations for Leiden clustering [default: %default]"),
+  make_option(
+    c("--seed"), type="integer", default=123,
+    help="Random number generator seed [default: %default]")
 )
 
 opt_parser <- OptionParser(option_list=option_list)
 opt <- parse_args(opt_parser)
+
+# validate mandatory arguments
+if (is.null(opt$input)){
+  print_help(opt_parser)
+  stop("Input file is mandatory. Use -i or --input to specify it.")
+}
+
+# check if correct algorithm is provided
+valid_algorithms <- c("fast_greedy", "louvain", "leiden")
+if (!(opt$clustering_algorithm %in% valid_algorithms)) {
+  print_help(opt_parser)
+  stop(paste("Invalid clustering algorithm. Choose from:", paste(valid_algorithms, collapse = ", ")))
+}
+
+# validate leiden-specific parameters if leiden clustering is used
+if (opt$clustering_algorithm == "leiden") {
+  # validate leiden_resolution
+  if (!is.numeric(opt$leiden_resolution) || opt$leiden_resolution <= 0) {
+    print_help(opt_parser)
+    stop("leiden_resolution must be a positive numeric value")
+  }
+
+  # validate leiden_objective
+  valid_objectives <- c("CPM", "modularity")
+  if (!(opt$leiden_objective %in% valid_objectives)) {
+    print_help(opt_parser)
+    stop(paste("leiden_objective must be one of:", paste(valid_objectives, collapse = ", ")))
+  }
+
+  # validate leiden_iterations
+  if (!is.integer(opt$leiden_iterations) || opt$leiden_iterations < 1) {
+    print_help(opt_parser)
+    stop("leiden_iterations must be a positive integer (>= 1)")
+  }
+
+  # validate seed
+  if (!is.integer(opt$seed)) {
+    print_help(opt_parser)
+    stop("seed must be an integer")
+  }
+}
+
 
 if (is.null(opt$input)) {
   print_help(opt_parser)
