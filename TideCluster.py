@@ -452,9 +452,11 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
     # write consensus sequences by clusters to directory
     #  used gff3_out as base name for directory
     consensus_dir = prefix + "_consensus"
-    tc.save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer, )
-    consensus_dir = prefix + "_consensus_1"
-    tc.save_consensus_files(consensus_dir, cons_cls1, cons_cls_dimer1_)
+    tc.save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer )   # this is used
+    # for comparative analysis later
+
+    # consensus_dir = prefix + "_consensus_1"  # this was just for debugging
+    # tc.save_consensus_files(consensus_dir, cons_cls1, cons_cls_dimer1_)
     # remove all temporary files
     os.remove(consensus_file)
     os.remove(consensus_dimers_file)
@@ -553,7 +555,7 @@ if __name__ == "__main__":
 
     parser_tidehunter.add_argument(
             '-f', '--fasta', type=str, required=True,
-            help='Path to reference sequence in fasta format'
+            help='Path to reference sequence in fasta format (gzipped files supported)'
             )
     parser_tidehunter.add_argument(
             '-pr', '--prefix', type=str, required=True, help='Base name for output files'
@@ -574,7 +576,7 @@ if __name__ == "__main__":
             'clustering', help='Run clustering on TideHunter output'
             )
     parser_clustering.add_argument(
-            "-f", "--fasta", help="Reference fasta", required=True
+            "-f", "--fasta", help="Reference fasta (gzipped files supported)", required=True
             )
 
     parser_clustering.add_argument(
@@ -652,7 +654,7 @@ if __name__ == "__main__":
             required=False, default=None
             )
     parser_tarean.add_argument(
-            "-f", "--fasta", help="Reference fasta", required=True
+            "-f", "--fasta", help="Reference fasta (gzipped files supported)", required=True
             )
     parser_tarean.add_argument(
             "-pr", "--prefix", help=("Prefix is used as a base name for output files."
@@ -676,7 +678,7 @@ if __name__ == "__main__":
             )
 
     parser_run_all.add_argument(
-            "-f", "--fasta", help="Reference fasta", required=True, type=str
+            "-f", "--fasta", help="Reference fasta (gzipped files supported)", required=True, type=str
             )
     parser_run_all.add_argument(
             "-pr", "--prefix", help="Base name used for input and output files",
@@ -756,59 +758,71 @@ if __name__ == "__main__":
     ''')
 
     cmd_args = parser.parse_args()
-    save_args_to_file(cmd_args)
-    if cmd_args.command == "tidehunter":
-        tidehunter(
-                cmd_args.fasta, cmd_args.tidehunter_arguments, cmd_args.prefix,
-                cmd_args.cpu
-                )
-    elif cmd_args.command == "clustering":
-        clustering(
-                cmd_args.fasta, cmd_args.prefix, cmd_args.gff, cmd_args.min_length,
-                not cmd_args.no_dust, cmd_args.cpu
-                )
-    elif cmd_args.command == "annotation":
-        annotation(
-                cmd_args.prefix, cmd_args.library, cmd_args.gff,
-                cmd_args.consensus_directory,
-                cmd_args.cpu
-                )
-    elif cmd_args.command == "tarean":
-        tarean(
-                prefix=cmd_args.prefix,
-                gff=cmd_args.gff,
-                fasta=cmd_args.fasta,
-                cpu=cmd_args.cpu,
-                min_total_length=cmd_args.min_total_length,
-                args=cmd_args,
-                version=__version__
-                )
-    elif cmd_args.command == "run_all":
-        tidehunter(
-                cmd_args.fasta, cmd_args.tidehunter_arguments, cmd_args.prefix,
-                cmd_args.cpu
-                )
-        clustering(
-                cmd_args.fasta, cmd_args.prefix,
-                min_length=cmd_args.min_length,
-                dust=not cmd_args.no_dust,
-                cpu=cmd_args.cpu
-                )
-        if cmd_args.library:
-            annotation(
-                cmd_args.prefix, cmd_args.library,
-                cpu=cmd_args.cpu
-                )
-        tarean(
-                prefix=cmd_args.prefix,
-                fasta=cmd_args.fasta,
-                gff=None,
-                cpu=cmd_args.cpu,
-                min_total_length=cmd_args.min_total_length,
-                args=cmd_args,
-                version=__version__
-                )
 
-    else:
-        parser.print_help()
-        sys.exit(1)
+    # Handle gzipped input FASTA files
+    cleanup_fasta = None
+    if hasattr(cmd_args, 'fasta') and cmd_args.fasta:
+        cmd_args.fasta, cleanup_fasta = tc.prepare_fasta_input(cmd_args.fasta)
+
+    # Wrap execution in try-finally to ensure cleanup
+    try:
+        save_args_to_file(cmd_args)
+        if cmd_args.command == "tidehunter":
+            tidehunter(
+                    cmd_args.fasta, cmd_args.tidehunter_arguments, cmd_args.prefix,
+                    cmd_args.cpu
+                    )
+        elif cmd_args.command == "clustering":
+            clustering(
+                    cmd_args.fasta, cmd_args.prefix, cmd_args.gff, cmd_args.min_length,
+                    not cmd_args.no_dust, cmd_args.cpu
+                    )
+        elif cmd_args.command == "annotation":
+            annotation(
+                    cmd_args.prefix, cmd_args.library, cmd_args.gff,
+                    cmd_args.consensus_directory,
+                    cmd_args.cpu
+                    )
+        elif cmd_args.command == "tarean":
+            tarean(
+                    prefix=cmd_args.prefix,
+                    gff=cmd_args.gff,
+                    fasta=cmd_args.fasta,
+                    cpu=cmd_args.cpu,
+                    min_total_length=cmd_args.min_total_length,
+                    args=cmd_args,
+                    version=__version__
+                    )
+        elif cmd_args.command == "run_all":
+            tidehunter(
+                    cmd_args.fasta, cmd_args.tidehunter_arguments, cmd_args.prefix,
+                    cmd_args.cpu
+                    )
+            clustering(
+                    cmd_args.fasta, cmd_args.prefix,
+                    min_length=cmd_args.min_length,
+                    dust=not cmd_args.no_dust,
+                    cpu=cmd_args.cpu
+                    )
+            if cmd_args.library:
+                annotation(
+                    cmd_args.prefix, cmd_args.library,
+                    cpu=cmd_args.cpu
+                    )
+            tarean(
+                    prefix=cmd_args.prefix,
+                    fasta=cmd_args.fasta,
+                    gff=None,
+                    cpu=cmd_args.cpu,
+                    min_total_length=cmd_args.min_total_length,
+                    args=cmd_args,
+                    version=__version__
+                    )
+
+        else:
+            parser.print_help()
+            sys.exit(1)
+    finally:
+        # Cleanup temporary uncompressed FASTA if it was created
+        if cleanup_fasta:
+            cleanup_fasta()

@@ -1,5 +1,6 @@
 """ Utilities for the project. """
 import glob
+import gzip
 import itertools
 import os
 import shutil
@@ -1893,13 +1894,13 @@ def restore_sequence_names_in_repeatmasker_output(rm_file, output_file, name_map
 def run_repeatmasker_with_renaming(input_fasta, library, cpu=1, additional_params=""):
     """
     Run RepeatMasker with automatic sequence name renaming to handle 50-character limit.
-    
+
     Args:
         input_fasta: Path to input FASTA file
         library: Path to RepeatMasker library
         cpu: Number of CPU cores to use
         additional_params: Additional RepeatMasker parameters
-    
+
     Returns:
         Path to RepeatMasker output file (.out) with restored sequence names
     """
@@ -1913,25 +1914,72 @@ def run_repeatmasker_with_renaming(input_fasta, library, cpu=1, additional_param
     print("renamed fasta file:", input_renamed)
     # Rename sequences to numerical indices
     name_mapping = rename_fasta_sequences_to_indices(input_fasta, input_renamed)
-    
+
     # Build RepeatMasker command
     cmd = (F"RepeatMasker -pa {cpu} -lib {library} -e ncbi -s -no_is -norna "
            F"-nolow {additional_params} -dir {input_dir} {input_renamed}")
-    
+
     print(cmd)
     print("---------")
     subprocess.run(cmd, shell=True)
-    
+
     # Get RepeatMasker output files
     rm_file_renamed = F"{input_renamed}.out"
     rm_file_original = F"{input_fasta}.out"
-    
+
     # Restore original sequence names in RepeatMasker output
     restore_sequence_names_in_repeatmasker_output(rm_file_renamed, rm_file_original, name_mapping)
-    
+
     # Clean up renamed files
     os.remove(input_renamed)
     if os.path.exists(rm_file_renamed):
         os.remove(rm_file_renamed)
-    
+
     return rm_file_original
+
+
+def prepare_fasta_input(fasta_path):
+    """
+    Check if fasta is gzipped and decompress to temp directory if needed.
+    Returns path to uncompressed fasta file and cleanup function.
+
+    :param fasta_path: Path to input fasta (can be .gz or .fasta.gz)
+    :return: (path_to_uncompressed_fasta, cleanup_function)
+    """
+    # Check if file is gzipped (by extension or magic bytes)
+    is_gzipped = fasta_path.endswith('.gz')
+
+    if not is_gzipped:
+        # Check magic bytes as fallback
+        try:
+            with open(fasta_path, 'rb') as f:
+                is_gzipped = f.read(2) == b'\x1f\x8b'
+        except:
+            pass
+
+    if not is_gzipped:
+        # Not gzipped, return original path with no-op cleanup
+        return fasta_path, lambda: None
+
+    # Create temp uncompressed file
+    # Use basename without .gz for the temp file
+    base_name = os.path.basename(fasta_path)
+    if base_name.endswith('.gz'):
+        base_name = base_name[:-3]
+
+    temp_dir = tempfile.gettempdir()
+    temp_fasta = os.path.join(temp_dir, f"tidecluster_{os.getpid()}_{base_name}")
+
+    print(f"Decompressing gzipped FASTA: {fasta_path} -> {temp_fasta}")
+
+    with gzip.open(fasta_path, 'rb') as f_in:
+        with open(temp_fasta, 'wb') as f_out:
+            shutil.copyfileobj(f_in, f_out)
+
+    # Create cleanup function
+    def cleanup():
+        if os.path.exists(temp_fasta):
+            print(f"Cleaning up temporary FASTA: {temp_fasta}")
+            os.remove(temp_fasta)
+
+    return temp_fasta, cleanup
