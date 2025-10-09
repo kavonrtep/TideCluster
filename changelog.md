@@ -1,3 +1,8 @@
+## 1.7.1 (2025-10-09)
+- Gzip FASTA input support added
+- Interactive visualization and comparative analysis HTML reports implemented
+- Comparative analysis of multiple assemblies was added
+
 ## 1.6.2 (2025-07-10)
 - RepeatMasker wrapper function added to handle long sequence names
 - Documentation updated with additional output files
