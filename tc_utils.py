@@ -1938,6 +1938,42 @@ def run_repeatmasker_with_renaming(input_fasta, library, cpu=1, additional_param
     return rm_file_original
 
 
+def mask_fasta_with_gff3(fasta_file, gff3_file):
+    """
+    Mask FASTA sequences using bedtools maskfasta based on GFF3 coordinates.
+    Regions in GFF3 file will be masked with 'N'.
+
+    :param fasta_file: Path to input FASTA file
+    :param gff3_file: Path to GFF3 file with regions to mask
+    :return: Path to masked FASTA file
+    """
+    # Create temporary BED file from GFF3
+    bed_file = tempfile.NamedTemporaryFile(delete=False, suffix=".bed").name
+
+    with open(gff3_file, 'r') as f_in, open(bed_file, 'w') as f_out:
+        for line in f_in:
+            if line.startswith('#'):
+                continue
+            gff_feature = Gff3Feature(line)
+            # BED format: seqid, start (0-based), end, name
+            # GFF3 is 1-based, BED is 0-based
+            bed_line = F"{gff_feature.seqid}\t{gff_feature.start - 1}\t{gff_feature.end}\n"
+            f_out.write(bed_line)
+
+    # Create output masked FASTA file
+    masked_fasta = tempfile.NamedTemporaryFile(delete=False, suffix=".fasta").name
+
+    # Run bedtools maskfasta
+    cmd = F"bedtools maskfasta -fi {fasta_file} -bed {bed_file} -fo {masked_fasta}"
+    print(f"Masking FASTA: {cmd}")
+    subprocess.check_call(cmd, shell=True)
+
+    # Clean up BED file
+    os.remove(bed_file)
+
+    return masked_fasta
+
+
 def prepare_fasta_input(fasta_path):
     """
     Check if fasta is gzipped and decompress to temp directory if needed.

@@ -517,6 +517,209 @@ def tidehunter(fasta, tidehunter_arguments, prefix, cpu=4):
             out.write(F'{m[0]}\t{m[2]}\t{m[3]}\t{m[4]}\n')
 
 
+def tidehunter_long(fasta, prefix, cpu=4, keep_rounds=False):
+    """
+    Run TideHunter in three rounds with increasing monomer size ranges.
+    Results from each round are used to mask the sequence for the next round.
+
+    Round 1: -p 40 -P 3000 -c 5 -e 0.25 (default long monomers)
+    Round 2: -p 3001 -P 10000 -c 5 -e 0.25 (medium-long monomers, masked for round 1 results)
+    Round 3: -p 10001 -P 25000 -c 5 -e 0.25 (very long monomers, masked for rounds 1-2 results)
+
+    All three outputs are merged into a single GFF3 file.
+
+    :param fasta: file with sequences
+    :param prefix: prefix - base name for input and output files
+    :param cpu: number of cpu cores to use
+    :param keep_rounds: if True, keep intermediate GFF3 files from each round for debugging
+    :return: None
+    """
+    print("Starting TideHunter long analysis with 3 rounds")
+    if keep_rounds:
+        print("Intermediate round files will be kept for debugging")
+
+    chunk_size = 500000
+    overlap = 50000
+    output = prefix + "_tidehunter.gff3"
+    output_chunks = prefix + "_chunks.bed"
+
+    # Round 1: Standard long monomers
+    print("\n=== ROUND 1: Long monomers (p=40-3000) ===")
+    tidehunter_args_r1 = "-p 40 -P 3000 -c 5 -e 0.25"
+    if " -t" not in tidehunter_args_r1:
+        tidehunter_args_r1 += F" -t {cpu}"
+
+    fasta_file_chunked, matching_table = tc.split_fasta_to_chunks(
+            fasta, chunk_size, overlap
+            )
+    results_r1 = tc.run_tidehunter(fasta_file_chunked, tidehunter_args_r1)
+
+    # Parse round 1 results into GFF3
+    gff3_r1_list = []
+    with open(results_r1) as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            feature = tc.TideHunterFeature(line)
+            if feature.consensus == "N" * feature.cons_length:
+                continue
+            feature.recalculate_coordinates(matching_table)
+            # Add round suffix to feature ID to make IDs unique
+            feature.repeat_ID = feature.repeat_ID + "_rnd1"
+            gff3_r1_list.append(feature)
+
+    # Write round 1 GFF3 to temporary file
+    gff3_r1_file = tempfile.NamedTemporaryFile(delete=False, suffix=".gff3").name
+    with open(gff3_r1_file, "w") as f:
+        f.write("##gff-version 3\n")
+        for feature in gff3_r1_list:
+            f.write(feature.gff3() + "\n")
+
+    # If keep_rounds is enabled, save permanent copy of round 1
+    if keep_rounds:
+        gff3_r1_permanent = F"{prefix}_tidehunter_round1.gff3"
+        with open(gff3_r1_permanent, "w") as f:
+            f.write("##gff-version 3\n")
+            for feature in gff3_r1_list:
+                f.write(feature.gff3() + "\n")
+        print(f"Saved round 1 results to: {gff3_r1_permanent}")
+
+    print(f"Round 1 complete: {len(gff3_r1_list)} features found")
+
+    # Clean up after round 1
+    os.remove(fasta_file_chunked)
+    os.remove(results_r1)
+
+    # Round 2: Medium-long monomers (masked for round 1)
+    print("\n=== ROUND 2: Medium-long monomers (p=3001-10000, masked for round 1) ===")
+    fasta_masked_r2 = tc.mask_fasta_with_gff3(fasta, gff3_r1_file)
+
+    tidehunter_args_r2 = "-p 3001 -P 10000 -c 5 -e 0.25"
+    if " -t" not in tidehunter_args_r2:
+        tidehunter_args_r2 += F" -t {cpu}"
+
+    fasta_file_chunked_r2, matching_table_r2 = tc.split_fasta_to_chunks(
+            fasta_masked_r2, chunk_size, overlap
+            )
+    results_r2 = tc.run_tidehunter(fasta_file_chunked_r2, tidehunter_args_r2)
+
+    # Parse round 2 results into GFF3
+    gff3_r2_list = []
+    with open(results_r2) as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            feature = tc.TideHunterFeature(line)
+            if feature.consensus == "N" * feature.cons_length:
+                continue
+            feature.recalculate_coordinates(matching_table_r2)
+            # Add round suffix to feature ID to make IDs unique
+            feature.repeat_ID = feature.repeat_ID + "_rnd2"
+            gff3_r2_list.append(feature)
+
+    # Write round 2 GFF3 to temporary file
+    gff3_r2_file = tempfile.NamedTemporaryFile(delete=False, suffix=".gff3").name
+    with open(gff3_r2_file, "w") as f:
+        f.write("##gff-version 3\n")
+        for feature in gff3_r2_list:
+            f.write(feature.gff3() + "\n")
+
+    # If keep_rounds is enabled, save permanent copy of round 2
+    if keep_rounds:
+        gff3_r2_permanent = F"{prefix}_tidehunter_round2.gff3"
+        with open(gff3_r2_permanent, "w") as f:
+            f.write("##gff-version 3\n")
+            for feature in gff3_r2_list:
+                f.write(feature.gff3() + "\n")
+        print(f"Saved round 2 results to: {gff3_r2_permanent}")
+
+    print(f"Round 2 complete: {len(gff3_r2_list)} features found")
+
+    # Clean up after round 2
+    os.remove(fasta_file_chunked_r2)
+    os.remove(results_r2)
+    os.remove(fasta_masked_r2)
+
+    # Round 3: Very long monomers (masked for rounds 1 and 2)
+    print("\n=== ROUND 3: Very long monomers (p=10001-25000, masked for rounds 1-2) ===")
+
+    # Merge round 1 and 2 GFF3 files for masking
+    gff3_r1_r2_merged = tempfile.NamedTemporaryFile(delete=False, suffix=".gff3").name
+    with open(gff3_r1_r2_merged, "w") as f:
+        f.write("##gff-version 3\n")
+        for feature in gff3_r1_list:
+            f.write(feature.gff3() + "\n")
+        for feature in gff3_r2_list:
+            f.write(feature.gff3() + "\n")
+
+    fasta_masked_r3 = tc.mask_fasta_with_gff3(fasta, gff3_r1_r2_merged)
+
+    tidehunter_args_r3 = "-p 10001 -P 25000 -c 5 -e 0.25"
+    if " -t" not in tidehunter_args_r3:
+        tidehunter_args_r3 += F" -t {cpu}"
+
+    fasta_file_chunked_r3, matching_table_r3 = tc.split_fasta_to_chunks(
+            fasta_masked_r3, chunk_size, overlap
+            )
+    results_r3 = tc.run_tidehunter(fasta_file_chunked_r3, tidehunter_args_r3)
+
+    # Parse round 3 results into GFF3
+    gff3_r3_list = []
+    with open(results_r3) as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            feature = tc.TideHunterFeature(line)
+            if feature.consensus == "N" * feature.cons_length:
+                continue
+            feature.recalculate_coordinates(matching_table_r3)
+            # Add round suffix to feature ID to make IDs unique
+            feature.repeat_ID = feature.repeat_ID + "_rnd3"
+            gff3_r3_list.append(feature)
+
+    # If keep_rounds is enabled, save permanent copy of round 3
+    if keep_rounds:
+        gff3_r3_permanent = F"{prefix}_tidehunter_round3.gff3"
+        with open(gff3_r3_permanent, "w") as f:
+            f.write("##gff-version 3\n")
+            for feature in gff3_r3_list:
+                f.write(feature.gff3() + "\n")
+        print(f"Saved round 3 results to: {gff3_r3_permanent}")
+
+    print(f"Round 3 complete: {len(gff3_r3_list)} features found")
+
+    # Clean up after round 3
+    os.remove(fasta_file_chunked_r3)
+    os.remove(results_r3)
+    os.remove(fasta_masked_r3)
+    os.remove(gff3_r1_r2_merged)
+
+    # Merge all three rounds into final output
+    print("\n=== Merging all three rounds ===")
+    with open(output, "w") as out:
+        out.write("##gff-version 3\n")
+        for feature in gff3_r1_list:
+            out.write(feature.gff3() + "\n")
+        for feature in gff3_r2_list:
+            out.write(feature.gff3() + "\n")
+        for feature in gff3_r3_list:
+            out.write(feature.gff3() + "\n")
+
+    # Clean up temporary GFF3 files (unless keep_rounds is enabled)
+    if not keep_rounds:
+        os.remove(gff3_r1_file)
+        os.remove(gff3_r2_file)
+
+    # Write chunks BED file (use matching table from first round, as it covers full genome)
+    with open(output_chunks, "w") as out:
+        for m in matching_table:
+            out.write(F'{m[0]}\t{m[2]}\t{m[3]}\t{m[4]}\n')
+
+    total_features = len(gff3_r1_list) + len(gff3_r2_list) + len(gff3_r3_list)
+    print(f"\nTideHunter long analysis complete: {total_features} total features found")
+    print(f"Round 1: {len(gff3_r1_list)}, Round 2: {len(gff3_r2_list)}, Round 3: {len(gff3_r3_list)}")
+
+
 def save_args_to_file(args):
     args_file = f"{args.prefix}_cmd_args.json"
     # load any previously saved args
@@ -560,16 +763,26 @@ if __name__ == "__main__":
     parser_tidehunter.add_argument(
             '-pr', '--prefix', type=str, required=True, help='Base name for output files'
             )
-    # TideHunter parameters as single arguments in quotes
     parser_tidehunter.add_argument(
+            "-c", "--cpu", type=int, default=4,
+            help="Number of CPUs to use"
+            )
+
+    # Create mutually exclusive group for TideHunter arguments vs long mode
+    tidehunter_mode = parser_tidehunter.add_mutually_exclusive_group()
+    tidehunter_mode.add_argument(
             '-T', '--tidehunter_arguments', type=str, nargs="?", required=False,
             default="-p 40 -P 3000 -c 5 -e 0.25",
             help=('additional arguments for TideHunter in quotes'
                   ', default value: %(default)s)'),
             )
+    tidehunter_mode.add_argument(
+            "--long", action="store_true", required=False, default=False,
+            help="Run TideHunter in three rounds with increasing monomer sizes (40-25000 nt)"
+            )
     parser_tidehunter.add_argument(
-            "-c", "--cpu", type=int, default=4,
-            help="Number of CPUs to use"
+            "--keep_rounds", action="store_true", required=False, default=False,
+            help="Keep intermediate GFF3 files from each round for debugging (only with --long)"
             )
     # Clustering
     parser_clustering = subparsers.add_parser(
@@ -694,17 +907,29 @@ if __name__ == "__main__":
             default=5000, type=int
             )
     parser_run_all.add_argument(
-            '-T', '--tidehunter_arguments', type=str, nargs="?", required=False,
-            default="-p 40 -P 3000 -c 5 -e 0.25",
-            help=('additional arguments for TideHunter in quotes'
-                  ', default value: %(default)s)'),
-            )
-    parser_run_all.add_argument(
             "-nd", "--no_dust", help="Do not use dust filter in blastn when clustering",
             action="store_true", required=False, default=False
             )
     parser_run_all.add_argument(
             "-c", "--cpu", type=int, default=4, help="Number of CPUs to use"
+            )
+
+    # Create mutually exclusive group for TideHunter arguments vs long mode in run_all
+    run_all_tidehunter_mode = parser_run_all.add_mutually_exclusive_group()
+    run_all_tidehunter_mode.add_argument(
+            '-T', '--tidehunter_arguments', type=str, nargs="?", required=False,
+            default="-p 40 -P 3000 -c 5 -e 0.25",
+            help=('additional arguments for TideHunter in quotes'
+                  ', default value: %(default)s)'),
+            )
+    run_all_tidehunter_mode.add_argument(
+            "--long", action="store_true", required=False, default=False,
+            help="Run TideHunter in three rounds with increasing monomer sizes (40-25000 nt)"
+            )
+
+    parser_run_all.add_argument(
+            "--keep_rounds", action="store_true", required=False, default=False,
+            help="Keep intermediate GFF3 files from each round for debugging (only with --long)"
             )
 
     parser_run_all.add_argument(
@@ -746,6 +971,13 @@ if __name__ == "__main__":
     short monomers: -T "-p 10 -P 39 -c 5 -e 0.25"
     long monomers: -T "-p 40 -P 3000 -c 5 -e 0.25" (default)
     
+    The increasing -p and -P values can be used to target longer monomers but it will lead
+    to increased computational time. If you need to target monomers for up to 25000 bp,
+    it is recommended to use --long option which will run TideHunter in three rounds
+    with increasing monomer size ranges (40-3000, 3001-10000, 10001-25000). After each round,
+    identified tandem repeats are masked in the input sequences for the next round. This
+    approach improves detection of long monomers while keeping computational time manageable.
+    
     For parallel processing include -c option before command name. 
     
     For more information about TideHunter parameters see TideHunter manual.
@@ -768,10 +1000,18 @@ if __name__ == "__main__":
     try:
         save_args_to_file(cmd_args)
         if cmd_args.command == "tidehunter":
-            tidehunter(
-                    cmd_args.fasta, cmd_args.tidehunter_arguments, cmd_args.prefix,
-                    cmd_args.cpu
-                    )
+            # Check if --long flag is set
+            if hasattr(cmd_args, 'long') and cmd_args.long:
+                keep_rounds = getattr(cmd_args, 'keep_rounds', False)
+                tidehunter_long(
+                        cmd_args.fasta, cmd_args.prefix,
+                        cmd_args.cpu, keep_rounds=keep_rounds
+                        )
+            else:
+                tidehunter(
+                        cmd_args.fasta, cmd_args.tidehunter_arguments, cmd_args.prefix,
+                        cmd_args.cpu
+                        )
         elif cmd_args.command == "clustering":
             clustering(
                     cmd_args.fasta, cmd_args.prefix, cmd_args.gff, cmd_args.min_length,
@@ -794,10 +1034,18 @@ if __name__ == "__main__":
                     version=__version__
                     )
         elif cmd_args.command == "run_all":
-            tidehunter(
-                    cmd_args.fasta, cmd_args.tidehunter_arguments, cmd_args.prefix,
-                    cmd_args.cpu
-                    )
+            # Check if --long flag is set for run_all
+            if hasattr(cmd_args, 'long') and cmd_args.long:
+                keep_rounds = getattr(cmd_args, 'keep_rounds', False)
+                tidehunter_long(
+                        cmd_args.fasta, cmd_args.prefix,
+                        cmd_args.cpu, keep_rounds=keep_rounds
+                        )
+            else:
+                tidehunter(
+                        cmd_args.fasta, cmd_args.tidehunter_arguments, cmd_args.prefix,
+                        cmd_args.cpu
+                        )
             clustering(
                     cmd_args.fasta, cmd_args.prefix,
                     min_length=cmd_args.min_length,
