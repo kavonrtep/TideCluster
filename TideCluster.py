@@ -517,6 +517,92 @@ def tidehunter(fasta, tidehunter_arguments, prefix, cpu=4):
             out.write(F'{m[0]}\t{m[2]}\t{m[3]}\t{m[4]}\n')
 
 
+def parse_tidehunter_results_to_gff3(results_file, matching_table, round_num):
+    """
+    Parse TideHunter results file into GFF3 features with round suffix.
+
+    :param results_file: path to TideHunter output file
+    :param matching_table: matching table for coordinate recalculation
+    :param round_num: round number for suffix (1, 2, or 3)
+    :return: list of GFF3Feature objects
+    """
+    gff3_list = []
+    round_suffix = F"_rnd{round_num}"
+
+    with open(results_file) as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            feature = tc.TideHunterFeature(line)
+            if feature.consensus == "N" * feature.cons_length:
+                continue
+            feature.recalculate_coordinates(matching_table)
+            feature.repeat_ID = feature.repeat_ID + round_suffix
+            gff3_list.append(feature)
+
+    return gff3_list
+
+
+def save_gff3_to_file(gff3_list, filepath):
+    """
+    Save GFF3 features to file with header.
+
+    :param gff3_list: list of GFF3Feature objects
+    :param filepath: output file path
+    """
+    with open(filepath, "w") as f:
+        f.write("##gff-version 3\n")
+        for feature in gff3_list:
+            f.write(feature.gff3() + "\n")
+
+
+def run_tidehunter_round(fasta_input, tidehunter_args, chunk_size, overlap,
+                         round_num, prefix, cpu, keep_rounds=False):
+    """
+    Run a single round of TideHunter analysis.
+
+    :param fasta_input: input FASTA file (may be masked)
+    :param tidehunter_args: TideHunter command line arguments
+    :param chunk_size: size of chunks for splitting
+    :param overlap: overlap size between chunks
+    :param round_num: round number (1, 2, or 3)
+    :param prefix: output prefix for debugging files
+    :param cpu: number of CPUs
+    :param keep_rounds: if True, save permanent copy of round results
+    :return: tuple of (gff3_features_list, temp_gff3_file_path, matching_table)
+    """
+    # Add CPU threads if not specified
+    if " -t" not in tidehunter_args:
+        tidehunter_args += F" -t {cpu}"
+
+    # Split FASTA and run TideHunter
+    fasta_file_chunked, matching_table = tc.split_fasta_to_chunks(
+        fasta_input, chunk_size, overlap
+    )
+    results = tc.run_tidehunter(fasta_file_chunked, tidehunter_args)
+
+    # Parse results into GFF3
+    gff3_list = parse_tidehunter_results_to_gff3(results, matching_table, round_num)
+
+    # Write to temporary file
+    temp_gff3_file = tempfile.NamedTemporaryFile(delete=False, suffix=".gff3").name
+    save_gff3_to_file(gff3_list, temp_gff3_file)
+
+    # Save permanent copy if requested
+    if keep_rounds:
+        permanent_gff3_file = F"{prefix}_tidehunter_round{round_num}.gff3"
+        save_gff3_to_file(gff3_list, permanent_gff3_file)
+        print(f"Saved round {round_num} results to: {permanent_gff3_file}")
+
+    print(f"Round {round_num} complete: {len(gff3_list)} features found")
+
+    # Clean up intermediate files
+    os.remove(fasta_file_chunked)
+    os.remove(results)
+
+    return gff3_list, temp_gff3_file, matching_table
+
+
 def tidehunter_long(fasta, prefix, cpu=4, keep_rounds=False):
     """
     Run TideHunter in three rounds with increasing monomer size ranges.
@@ -543,181 +629,62 @@ def tidehunter_long(fasta, prefix, cpu=4, keep_rounds=False):
     output = prefix + "_tidehunter.gff3"
     output_chunks = prefix + "_chunks.bed"
 
-    # Round 1: Standard long monomers
-    print("\n=== ROUND 1: Long monomers (p=40-3000) ===")
-    tidehunter_args_r1 = "-p 40 -P 3000 -c 5 -e 0.25"
-    if " -t" not in tidehunter_args_r1:
-        tidehunter_args_r1 += F" -t {cpu}"
+    # Define rounds configuration: (description, args, input_fasta, mask_file)
+    rounds_config = [
+        ("ROUND 1: Long monomers (p=40-3000)", "-p 40 -P 3000 -c 5 -e 0.25", fasta, None),
+        ("ROUND 2: Medium-long monomers (p=3001-10000, masked for round 1)", "-p 3001 -P 10000 -c 5 -e 0.25", None, None),
+        ("ROUND 3: Very long monomers (p=10001-25000, masked for rounds 1-2)", "-p 10001 -P 25000 -c 5 -e 0.25", None, None),
+    ]
 
-    fasta_file_chunked, matching_table = tc.split_fasta_to_chunks(
-            fasta, chunk_size, overlap
-            )
-    results_r1 = tc.run_tidehunter(fasta_file_chunked, tidehunter_args_r1)
+    gff3_lists = []
+    temp_gff3_files = []
+    all_features_for_masking = []  # Track all features for masking in subsequent rounds
 
-    # Parse round 1 results into GFF3
-    gff3_r1_list = []
-    with open(results_r1) as f:
-        for line in f:
-            if line.startswith("#"):
-                continue
-            feature = tc.TideHunterFeature(line)
-            if feature.consensus == "N" * feature.cons_length:
-                continue
-            feature.recalculate_coordinates(matching_table)
-            # Add round suffix to feature ID to make IDs unique
-            feature.repeat_ID = feature.repeat_ID + "_rnd1"
-            gff3_r1_list.append(feature)
+    for round_num, (description, tidehunter_args, input_fasta, mask_file) in enumerate(rounds_config, 1):
+        print(f"\n=== {description} ===")
 
-    # Write round 1 GFF3 to temporary file
-    gff3_r1_file = tempfile.NamedTemporaryFile(delete=False, suffix=".gff3").name
-    with open(gff3_r1_file, "w") as f:
-        f.write("##gff-version 3\n")
-        for feature in gff3_r1_list:
-            f.write(feature.gff3() + "\n")
+        # Determine input FASTA for this round
+        if round_num == 1:
+            current_fasta = fasta
+        else:
+            # Create merged GFF3 file for masking from all previous rounds
+            merged_gff3_file = tempfile.NamedTemporaryFile(delete=False, suffix=".gff3").name
+            save_gff3_to_file(all_features_for_masking, merged_gff3_file)
+            current_fasta = tc.mask_fasta_with_gff3(fasta, merged_gff3_file)
+            os.remove(merged_gff3_file)
 
-    # If keep_rounds is enabled, save permanent copy of round 1
-    if keep_rounds:
-        gff3_r1_permanent = F"{prefix}_tidehunter_round1.gff3"
-        with open(gff3_r1_permanent, "w") as f:
-            f.write("##gff-version 3\n")
-            for feature in gff3_r1_list:
-                f.write(feature.gff3() + "\n")
-        print(f"Saved round 1 results to: {gff3_r1_permanent}")
+        # Run the round
+        gff3_list, temp_gff3_file, matching_table = run_tidehunter_round(
+            current_fasta, tidehunter_args, chunk_size, overlap,
+            round_num, prefix, cpu, keep_rounds
+        )
 
-    print(f"Round 1 complete: {len(gff3_r1_list)} features found")
+        gff3_lists.append(gff3_list)
+        temp_gff3_files.append(temp_gff3_file)
+        all_features_for_masking.extend(gff3_list)
 
-    # Clean up after round 1
-    os.remove(fasta_file_chunked)
-    os.remove(results_r1)
-
-    # Round 2: Medium-long monomers (masked for round 1)
-    print("\n=== ROUND 2: Medium-long monomers (p=3001-10000, masked for round 1) ===")
-    fasta_masked_r2 = tc.mask_fasta_with_gff3(fasta, gff3_r1_file)
-
-    tidehunter_args_r2 = "-p 3001 -P 10000 -c 5 -e 0.25"
-    if " -t" not in tidehunter_args_r2:
-        tidehunter_args_r2 += F" -t {cpu}"
-
-    fasta_file_chunked_r2, matching_table_r2 = tc.split_fasta_to_chunks(
-            fasta_masked_r2, chunk_size, overlap
-            )
-    results_r2 = tc.run_tidehunter(fasta_file_chunked_r2, tidehunter_args_r2)
-
-    # Parse round 2 results into GFF3
-    gff3_r2_list = []
-    with open(results_r2) as f:
-        for line in f:
-            if line.startswith("#"):
-                continue
-            feature = tc.TideHunterFeature(line)
-            if feature.consensus == "N" * feature.cons_length:
-                continue
-            feature.recalculate_coordinates(matching_table_r2)
-            # Add round suffix to feature ID to make IDs unique
-            feature.repeat_ID = feature.repeat_ID + "_rnd2"
-            gff3_r2_list.append(feature)
-
-    # Write round 2 GFF3 to temporary file
-    gff3_r2_file = tempfile.NamedTemporaryFile(delete=False, suffix=".gff3").name
-    with open(gff3_r2_file, "w") as f:
-        f.write("##gff-version 3\n")
-        for feature in gff3_r2_list:
-            f.write(feature.gff3() + "\n")
-
-    # If keep_rounds is enabled, save permanent copy of round 2
-    if keep_rounds:
-        gff3_r2_permanent = F"{prefix}_tidehunter_round2.gff3"
-        with open(gff3_r2_permanent, "w") as f:
-            f.write("##gff-version 3\n")
-            for feature in gff3_r2_list:
-                f.write(feature.gff3() + "\n")
-        print(f"Saved round 2 results to: {gff3_r2_permanent}")
-
-    print(f"Round 2 complete: {len(gff3_r2_list)} features found")
-
-    # Clean up after round 2
-    os.remove(fasta_file_chunked_r2)
-    os.remove(results_r2)
-    os.remove(fasta_masked_r2)
-
-    # Round 3: Very long monomers (masked for rounds 1 and 2)
-    print("\n=== ROUND 3: Very long monomers (p=10001-25000, masked for rounds 1-2) ===")
-
-    # Merge round 1 and 2 GFF3 files for masking
-    gff3_r1_r2_merged = tempfile.NamedTemporaryFile(delete=False, suffix=".gff3").name
-    with open(gff3_r1_r2_merged, "w") as f:
-        f.write("##gff-version 3\n")
-        for feature in gff3_r1_list:
-            f.write(feature.gff3() + "\n")
-        for feature in gff3_r2_list:
-            f.write(feature.gff3() + "\n")
-
-    fasta_masked_r3 = tc.mask_fasta_with_gff3(fasta, gff3_r1_r2_merged)
-
-    tidehunter_args_r3 = "-p 10001 -P 25000 -c 5 -e 0.25"
-    if " -t" not in tidehunter_args_r3:
-        tidehunter_args_r3 += F" -t {cpu}"
-
-    fasta_file_chunked_r3, matching_table_r3 = tc.split_fasta_to_chunks(
-            fasta_masked_r3, chunk_size, overlap
-            )
-    results_r3 = tc.run_tidehunter(fasta_file_chunked_r3, tidehunter_args_r3)
-
-    # Parse round 3 results into GFF3
-    gff3_r3_list = []
-    with open(results_r3) as f:
-        for line in f:
-            if line.startswith("#"):
-                continue
-            feature = tc.TideHunterFeature(line)
-            if feature.consensus == "N" * feature.cons_length:
-                continue
-            feature.recalculate_coordinates(matching_table_r3)
-            # Add round suffix to feature ID to make IDs unique
-            feature.repeat_ID = feature.repeat_ID + "_rnd3"
-            gff3_r3_list.append(feature)
-
-    # If keep_rounds is enabled, save permanent copy of round 3
-    if keep_rounds:
-        gff3_r3_permanent = F"{prefix}_tidehunter_round3.gff3"
-        with open(gff3_r3_permanent, "w") as f:
-            f.write("##gff-version 3\n")
-            for feature in gff3_r3_list:
-                f.write(feature.gff3() + "\n")
-        print(f"Saved round 3 results to: {gff3_r3_permanent}")
-
-    print(f"Round 3 complete: {len(gff3_r3_list)} features found")
-
-    # Clean up after round 3
-    os.remove(fasta_file_chunked_r3)
-    os.remove(results_r3)
-    os.remove(fasta_masked_r3)
-    os.remove(gff3_r1_r2_merged)
+        # Clean up masked FASTA (except for round 1)
+        if round_num > 1:
+            os.remove(current_fasta)
 
     # Merge all three rounds into final output
     print("\n=== Merging all three rounds ===")
-    with open(output, "w") as out:
-        out.write("##gff-version 3\n")
-        for feature in gff3_r1_list:
-            out.write(feature.gff3() + "\n")
-        for feature in gff3_r2_list:
-            out.write(feature.gff3() + "\n")
-        for feature in gff3_r3_list:
-            out.write(feature.gff3() + "\n")
+    save_gff3_to_file(all_features_for_masking, output)
 
     # Clean up temporary GFF3 files (unless keep_rounds is enabled)
     if not keep_rounds:
-        os.remove(gff3_r1_file)
-        os.remove(gff3_r2_file)
+        for temp_file in temp_gff3_files:
+            os.remove(temp_file)
 
     # Write chunks BED file (use matching table from first round, as it covers full genome)
     with open(output_chunks, "w") as out:
         for m in matching_table:
             out.write(F'{m[0]}\t{m[2]}\t{m[3]}\t{m[4]}\n')
 
-    total_features = len(gff3_r1_list) + len(gff3_r2_list) + len(gff3_r3_list)
+    total_features = sum(len(gff3_list) for gff3_list in gff3_lists)
+    round_stats = ", ".join([f"Round {i}: {len(gff3_lists[i-1])}" for i in range(1, 4)])
     print(f"\nTideHunter long analysis complete: {total_features} total features found")
-    print(f"Round 1: {len(gff3_r1_list)}, Round 2: {len(gff3_r2_list)}, Round 3: {len(gff3_r3_list)}")
+    print(round_stats)
 
 
 def save_args_to_file(args):
