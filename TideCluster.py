@@ -134,12 +134,25 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
         if not hasattr(args, key):
             setattr(args, key, val)
 
-    settings = (F"Input file                 : {args.fasta}\n"
+    # Use original_fasta if available (preserves user-provided path), otherwise use args.fasta
+    input_fasta = getattr(args, 'original_fasta', args.fasta)
+
+    # Determine TideHunter mode and format info
+    tidehunter_mode = getattr(args, 'long', False)
+    if tidehunter_mode:
+        th_mode_str = "Three-round (--long)"
+        th_args_str = "Round 1: p=40-3000, Round 2: p=3001-10000, Round 3: p=10001-25000"
+    else:
+        th_mode_str = "Standard"
+        th_args_str = args.tidehunter_arguments
+
+    settings = (F"Input file                 : {input_fasta}\n"
                 F"Prefix                     : {args.prefix}\n"
                 F"Minimum TRC total length   : {args.min_total_length}\n"
                 F"Minimum array length       : {args.min_length}\n"
                 F"Dust filter                : {'no' if args.no_dust else 'yes'}\n"
-                F"TideHunter arguments       : {args.tidehunter_arguments}\n"
+                F"TideHunter mode            : {th_mode_str}\n"
+                F"TideHunter arguments       : {th_args_str}\n"
                 F"CPU                        : {args.cpu}\n"
                 F"Library                    : {args.library}\n"
                 F"TideCluster version        : {version}\n")
@@ -961,6 +974,8 @@ if __name__ == "__main__":
     # Handle gzipped input FASTA files
     cleanup_fasta = None
     if hasattr(cmd_args, 'fasta') and cmd_args.fasta:
+        # Preserve the original FASTA path before modification for reporting
+        cmd_args.original_fasta = cmd_args.fasta
         cmd_args.fasta, cleanup_fasta = tc.prepare_fasta_input(cmd_args.fasta)
 
     # Wrap execution in try-finally to ensure cleanup
