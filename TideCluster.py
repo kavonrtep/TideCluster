@@ -159,13 +159,15 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
 
     # create summar with number of clusters, number of omitted clusters, number of SSRs
     # total length all clusters, total length of reference
+    # Count number of features in clustering.gff3 file
+    gff_feature_count = sum(1 for line in open(gff) if not line.startswith("#"))
+
     summary = (
         F"Number of TRCs                  : {l_debug}\n"
         F"Number of TRCs above threshold  : {l_debug - len(omitted_clusters)}\n"
         F"Number of SSRs in TRCs          : {len(ssr)}\n"
         F"Total length of TRCs            : {int(trc_total_length)} nt\n"
-        F"Number of TRAs                  :"
-        F" {sum([len(i) for i in fasta_dict.values()])}\n"
+        F"Number of TRAs                  : {gff_feature_count}\n"
         F"Input sequence length           : {input_fasta_length} nt\n"
     )
 
