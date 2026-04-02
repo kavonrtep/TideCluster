@@ -120,48 +120,57 @@ options:
   -v, --version         show program's version number and exit
 
     Example of usage:
-    
+
     # first run tidehunter on fasta file to generate raw GFF3 output
-    TideCluster.py tidehunter -c 10 -f test.fasta -pr prefix 
-    
+    TideCluster.py tidehunter -c 10 -f test.fasta -pr prefix
+
     # then run clustering on the output from previous step to cluster similar tandem repeats
-    TideCluster.py clustering -c 10 -f test.fasta -pr prefix  -m 5000
-    
+    TideCluster.py clustering -c 10 -f test.fasta -pr prefix -m 5000
+
     # then run annotation on the clustered output to annotate clusters with reference
     # library of tandem repeats in RepeatMasker format
     TideCluster.py annotation -c 10 -pr prefix -l library.fasta
-    
+
     # then run TAREAN on the annotated output to extract representative consensus
     # and generate html report
-    TideCluster.py  tarean -c 10 -f test.fasta -pr prefix
-    
+    TideCluster.py tarean -c 10 -f test.fasta -pr prefix
+
     Recommended parameters for TideHunter:
     short monomers: -T "-p 10 -P 39 -c 5 -e 0.25"
     long monomers: -T "-p 40 -P 3000 -c 5 -e 0.25" (default)
-    
-    For parallel processing include -c option before command name. 
-    
+
+    The increasing -p and -P values can be used to target longer monomers but it will lead
+    to increased computational time. If you need to target monomers for up to 25000 bp,
+    it is recommended to use --long option which will run TideHunter in three rounds
+    with increasing monomer size ranges (40-3000, 3001-10000, 10001-25000). After each round,
+    identified tandem repeats are masked in the input sequences for the next round. This
+    approach improves detection of long monomers while keeping computational time manageable.
+
+    For parallel processing include -c option before command name.
+
     For more information about TideHunter parameters see TideHunter manual.
-    
+
     Library of tandem repeats for annotation step are sequences in RepeatMasker format
     where header is in format:
-    
+
     >id#clasification
 ```
 
 ## TideHunter step
 
 ```help
-usage: TideCluster.py tidehunter [-h] -f FASTA -pr PREFIX [-T [TIDEHUNTER_ARGUMENTS]] [-c CPU]
+usage: TideCluster.py tidehunter [-h] -f FASTA -pr PREFIX [-T [TIDEHUNTER_ARGUMENTS] | --long] [--keep_rounds] [-c CPU]
 
 options:
   -h, --help            show this help message and exit
   -f FASTA, --fasta FASTA
-                        Path to reference sequence in fasta format
+                        Path to reference sequence in fasta format (gzipped files supported)
   -pr PREFIX, --prefix PREFIX
                         Base name for output files
   -T [TIDEHUNTER_ARGUMENTS], --tidehunter_arguments [TIDEHUNTER_ARGUMENTS]
                         additional arguments for TideHunter in quotes, default value: -p 40 -P 3000 -c 5 -e 0.25)
+  --long                Run TideHunter in three rounds with increasing monomer sizes (40-25000 nt)
+  --keep_rounds         Keep intermediate GFF3 files from each round for debugging (only with --long)
   -c CPU, --cpu CPU     Number of CPUs to use
 ```
 
@@ -173,9 +182,9 @@ usage: TideCluster.py clustering [-h] -f FASTA [-m MIN_LENGTH] -pr PREFIX [-g GF
 options:
   -h, --help            show this help message and exit
   -f FASTA, --fasta FASTA
-                        Reference fasta
+                        Reference fasta (gzipped files supported)
   -m MIN_LENGTH, --min_length MIN_LENGTH
-                        Minimum length of tandem repeat, default (5000)
+                        Minimum length of tandem repeat array to be included in clustering step. Shorter arrays are discarded, default (5000)
   -pr PREFIX, --prefix PREFIX
                         Prefix is used as a base name for output files.If --gff is not provided, prefix will be also usedto identify GFF file from previous tidehunter step
   -g GFF, --gff GFF     GFF3 output file from tidehunter step. If not provided the file named 'prefix_tidehunter.gff3' will be used
@@ -208,31 +217,31 @@ Required format for sequence names  in fasta is `>seqid#class/subclass`
 ## TAREAN step
 
 ```help
-usage: TideCluster.py tarean [-h] [-g GFF] -f FASTA -pr PREFIX [-c CPU]
+usage: TideCluster.py tarean [-h] [-g GFF] -f FASTA -pr PREFIX [-c CPU] [-M MIN_TOTAL_LENGTH]
 
 options:
   -h, --help            show this help message and exit
   -g GFF, --gff GFF     GFF3 output file from annotation or clustering stepIf not provided the file named 'prefix_annotation.gff3' will be used instead. If 'prefix_annotation.gff3' is not
                         found, 'prefix_clustering.gff3' will be used
   -f FASTA, --fasta FASTA
-                        Reference fasta
+                        Reference fasta (gzipped files supported)
   -pr PREFIX, --prefix PREFIX
                         Prefix is used as a base name for output files.If --gff is not provided, prefix will be also usedto identify GFF3 files from previous clustering/annotation step
   -c CPU, --cpu CPU     Number of CPUs to use
   -M MIN_TOTAL_LENGTH, --min_total_length MIN_TOTAL_LENGTH
-                        Minimum combined length of tandem repeat arrays within a single cluster, required for inclusion in TAREAN analysis.Default (50000)
-                        
+                        Minimum combined length of tandem repeat arrays within a single cluster, required for inclusion in TAREAN analysis. Default (50000)
+
 ```
 
 ## Run all steps
 
 ```help
-usage: TideCluster.py run_all [-h] -f FASTA -pr PREFIX [-l LIBRARY] [-m MIN_LENGTH] [-T [TIDEHUNTER_ARGUMENTS]] [-nd] [-c CPU]
+usage: TideCluster.py run_all [-h] -f FASTA -pr PREFIX [-l LIBRARY] [-m MIN_LENGTH] [-T [TIDEHUNTER_ARGUMENTS] | --long] [--keep_rounds] [-nd] [-c CPU] [-M MIN_TOTAL_LENGTH]
 
 options:
   -h, --help            show this help message and exit
   -f FASTA, --fasta FASTA
-                        Reference fasta
+                        Reference fasta (gzipped files supported)
   -pr PREFIX, --prefix PREFIX
                         Base name used for input and output files
   -l LIBRARY, --library LIBRARY
@@ -241,10 +250,12 @@ options:
                         Minimum length of tandem repeat (5000)
   -T [TIDEHUNTER_ARGUMENTS], --tidehunter_arguments [TIDEHUNTER_ARGUMENTS]
                         additional arguments for TideHunter in quotes, default value: -p 40 -P 3000 -c 5 -e 0.25)
+  --long                Run TideHunter in three rounds with increasing monomer sizes (40-25000 nt)
+  --keep_rounds         Keep intermediate GFF3 files from each round for debugging (only with --long)
   -nd, --no_dust        Do not use dust filter in blastn when clustering
   -c CPU, --cpu CPU     Number of CPUs to use
   -M MIN_TOTAL_LENGTH, --min_total_length MIN_TOTAL_LENGTH
-                        Minimum combined length of tandem repeat arrays within a single cluster, required for inclusion in TAREAN analysis.Default (50000)
+                        Minimum combined length of tandem repeat arrays within a single cluster, required for inclusion in TAREAN analysis. Default (50000)
 ```
 
 ## Example for full pipeline
@@ -338,7 +349,8 @@ are merged and regions shorter than twice the monomer length are excluded from t
 ### Usage:
 
 ```help
-usage: tc_reannotate.py [-h] (-r REPEATMASKER_FILE | -s REF_SEQ) -f FASTA_FILE [-c CPU] -o OUTPUT [-d]
+usage: tc_reannotate.py [-h] (-r REPEATMASKER_FILE | -s REF_SEQ) -f FASTA_FILE [-c CPU]
+                        [--sensitivity {quick,default,fast}] -o OUTPUT [-d]
 
 options:
   -h, --help            show this help message and exit
@@ -349,6 +361,9 @@ options:
   -f FASTA_FILE, --fasta_file FASTA_FILE
                         Fasta file wiht TRC library used for RepeatMasker search
   -c CPU, --cpu CPU     Number of CPUs to use
+  --sensitivity {quick,default,fast}
+                        RepeatMasker sensitivity preset to use when --ref_seq is
+                        provided
   -o OUTPUT, --output OUTPUT
                         GFF3 output file
   -d, --debug           Keep temp files for debuging
@@ -498,7 +513,43 @@ tc_summarize_comparative_analysis.R -i tc_comparative_analysis/ -o report.html
 3. **Detailed family matrix**: Family composition and lengths across samples with hierarchical clustering
 4. **Karyotype viewer**: Genomic distribution of satellite families (if GFF3 files available)
 
+## Build Singularity Container
 
+
+```bash
+conda activate singularity
+export SINGULARITY=`which singularity`
+sudo  ionice -c 3 $SINGULARITY build TideCluster.sif TideCluster.def
+
+```
+
+### Test Container
+
+After building the container, test it using the provided test data:
+
+```bash
+# Verify container installation
+singularity exec TideCluster.sif TideCluster.py --version
+
+# Get help
+singularity exec TideCluster.sif TideCluster.py --help
+
+# Run full pipeline on test data (single CPU for quick test)
+singularity exec -B $PWD:/data TideCluster.sif \
+    TideCluster.py run_all \
+    -c 4 \
+    -pr tmp/test_output \
+    -f /data/test_data/CEN6_ver
+```
+
+**Expected outputs:**
+- `test_output_tidehunter.gff3` - Detected tandem repeats
+- `test_output_clustering.gff3` - Clustered TRCs
+- `test_output_index.html` - Main HTML report
+- `test_output_tarean_report.html` - TAREAN analysis report
+- `test_output_consensus_dimer_library.fasta` - Consensus sequences
+
+**Note:** Use `-B` flag to bind mount your data directories into the container. The example above binds current directory as `/data` inside the container.
 
 ## Credits
 
@@ -515,3 +566,6 @@ Petr Novak, Jiri Macas,  Laboratory of Molecular Cytogenetics, Biology Centre CA
 ## License
 
 GNU General Public License v3.0
+
+
+

@@ -1,0 +1,2 @@
+- profiles in kite.html report need to adjust x-axis labels - larger numbers are cut off
+- tc_summarize_comparative_analysis.R does not work in conda package - missing js/html templates!!

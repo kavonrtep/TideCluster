@@ -5,8 +5,16 @@
 import argparse
 import os
 import shutil
+import subprocess
 import tempfile
 import tc_utils as tc
+
+
+SENSITIVITY_OPTIONS = {
+    "quick": "-q",
+    "default": "",
+    "fast": "-s",
+}
 
 def get_seq_lengths(fasta_file):
     """Get length of sequences in fasta file
@@ -100,6 +108,13 @@ def main():
 
     parser.add_argument("-c", "--cpu", help="Number of CPUs to use", type=int, default=1)
 
+    parser.add_argument(
+        "--sensitivity",
+        help="RepeatMasker sensitivity preset to use when --ref_seq is provided",
+        choices=SENSITIVITY_OPTIONS,
+        default="default",
+    )
+
 
     parser.add_argument(
         "-o", "--output", help="GFF3 output file", type=str, required=True
@@ -135,13 +150,24 @@ def main():
 
     if args.ref_seq:
         # run RepeatMasker in temp directory
-        cmds = (F"RepeatMasker -dir {temp_dir} {args.ref_seq} "
-                F"-nolow -no_is -e ncbi  -lib {rm_library} -pa {args.cpu}")
+        cmds = [
+            "RepeatMasker",
+            "-dir", temp_dir,
+            "-nolow",
+            "-no_is",
+            "-e", "ncbi",
+        ]
+        sensitivity_flag = SENSITIVITY_OPTIONS[args.sensitivity]
+        if sensitivity_flag:
+            cmds.append(sensitivity_flag)
+        cmds.extend([
+            "-lib", rm_library,
+            "-pa", str(args.cpu),
+            args.ref_seq,
+        ])
         print("Running RepeatMasker...")
-        print(cmds)
-        os.system(cmds)
-        # list files in temp directory
-        files = os.listdir(temp_dir)
+        print(" ".join(cmds))
+        subprocess.run(cmds, check=True)
         args.repeatmasker_file = F"{temp_dir}/{os.path.basename(args.ref_seq)}.out"
 
 
