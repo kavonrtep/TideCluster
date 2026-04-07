@@ -350,7 +350,7 @@ are merged and regions shorter than twice the monomer length are excluded from t
 
 ```help
 usage: tc_reannotate.py [-h] (-r REPEATMASKER_FILE | -s REF_SEQ) -f FASTA_FILE [-c CPU]
-                        [--sensitivity {quick,default,fast}] -o OUTPUT [-d]
+                        [--sensitivity {quick,default,rush}] -o OUTPUT [-d]
 
 options:
   -h, --help            show this help message and exit
@@ -361,7 +361,7 @@ options:
   -f FASTA_FILE, --fasta_file FASTA_FILE
                         Fasta file wiht TRC library used for RepeatMasker search
   -c CPU, --cpu CPU     Number of CPUs to use
-  --sensitivity {quick,default,fast}
+  --sensitivity {quick,default,rush}
                         RepeatMasker sensitivity preset to use when --ref_seq is
                         provided
   -o OUTPUT, --output OUTPUT
@@ -566,6 +566,5 @@ Petr Novak, Jiri Macas,  Laboratory of Molecular Cytogenetics, Biology Centre CA
 ## License
 
 GNU General Public License v3.0
-
 
 

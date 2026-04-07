@@ -13,7 +13,7 @@ import tc_utils as tc
 SENSITIVITY_OPTIONS = {
     "quick": "-q",
     "default": "",
-    "fast": "-s",
+    "rush": "-qq",
 }
 
 def get_seq_lengths(fasta_file):
