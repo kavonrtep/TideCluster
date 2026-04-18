@@ -1,0 +1,72 @@
+# Version is extracted by regex from a copy of the top-level version.py
+# placed in this recipe dir by the conda-release workflow (or manually
+# `cp ../../version.py .` prior to a local build). load_file_data does
+# not accept .py files; load_file_regex reads any text file and returns
+# the re.Match object. See playbook §7 pitfall #1-#3.
+{% set m = load_file_regex(load_file='version.py',
+                           regex_pattern="__version__\\s*=\\s*['\"]([^'\"]+)['\"]",
+                           from_recipe_dir=True) %}
+{% set version = m.group(1) if m else '0.0.0.dev' %}
+
+package:
+  name: tidecluster
+  version: {{ version }}
+
+source:
+  # Build from the checked-out source tree. CI checks out at the release
+  # tag and the build consumes that tree; no URL/sha256 needed.
+  path: ../..
+
+build:
+  number: 0
+  noarch: generic
+
+requirements:
+  run:
+    - TideHunter=1.4.3
+    - blast
+    - mmseqs2
+    - python>=3.6
+    - networkx
+    - repeatmasker=4.1.2.p1
+    - r-optparse
+    - r-igraph
+    - bioconductor-biostrings
+    - bioconductor-rtracklayer
+    - r-scales
+    - r-hwriter
+    - r-r2html
+    - r-plyr
+    - r-dplyr
+    - r-jsonlite
+    - r-reshape2
+    - mafft
+    - bedtools
+
+test:
+  commands:
+    - TideCluster.py --version
+    - TideCluster.py --help | grep -qi 'usage'
+    - tc_update_gff3.py --help | grep -qi 'usage'
+    - tc_reannotate.py --help | grep -qi 'usage'
+    - tc_merge_annotations.py --help | grep -qi 'usage'
+    - tc_comparative_analysis.R --help | grep -qi 'usage'
+    - tc_summarize_comparative_analysis.R --help | grep -qi 'usage'
+
+about:
+  home: https://github.com/kavonrtep/TideCluster
+  dev_url: https://github.com/kavonrtep/TideCluster
+  license: GPL-3.0-only
+  license_family: GPL3
+  license_file: LICENSE
+  summary: >
+    TideCluster is a wrapper for TideHunter for identifying and
+    characterizing tandem repeats in genome assemblies. It clusters
+    similar repeats using MMseqs2 and BLAST, annotates them with
+    RepeatMasker, and analyzes them with TAREAN.
+
+extra:
+  copy_test_source_files: true
+  final: true
+  recipe-maintainers:
+    - petrnovak
