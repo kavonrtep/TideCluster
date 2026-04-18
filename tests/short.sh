@@ -1,11 +1,11 @@
 #!/bin/bash
-# tests/short.sh — real pipeline on committed 18 MB CEN6 part fasta.
+# tests/short.sh — real pipeline on a committed 3 MB CEN6 carve.
 # Runs tidehunter → clustering → tarean (no annotation: no library
-# committed). Expected wall time ~ 1-3 min on 2 CPUs.
+# committed). Local wall time in tidecluster_1.8.0 env: < 30 s on 2 CPU.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-FASTA="$ROOT/test_data/CEN6_ver_220406_part.fasta"
+FASTA="$ROOT/tests/data/short/CEN6_short.fasta"
 OUT="$ROOT/tmp/tests/short"
 NCPU="${NCPU:-2}"
 

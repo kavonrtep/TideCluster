@@ -1,11 +1,11 @@
 #!/bin/bash
-# tests/long.sh — release gate. Runs the full pipeline on the 180 MB
-# CEN6 fasta (committed under test_data/). Override via LONG_FASTA
-# env var to point at something larger for deep local runs.
+# tests/long.sh — release gate. Runs the full pipeline on a committed
+# 10 MB CEN6 carve. Override via LONG_FASTA env var (e.g. point it at
+# the full 180 MB test_data/CEN6_ver_220406.fasta) for deep local runs.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-FASTA="${LONG_FASTA:-$ROOT/test_data/CEN6_ver_220406.fasta}"
+FASTA="${LONG_FASTA:-$ROOT/tests/data/long/CEN6_long.fasta}"
 OUT="$ROOT/tmp/tests/long"
 NCPU="${NCPU:-2}"
 
