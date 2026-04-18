@@ -1,0 +1,22 @@
+# conda recipe: version.py is copied in by CI (§3.4 / §7 pitfall #1).
+/conda/tidecluster/version.py
+
+# conda build artefacts
+/build_out/
+/bld/
+
+# local scratch
+/tmp/
+/__pycache__/
+**/__pycache__/
+*.pyc
+
+# IDE / editor
+/.idea/
+*.swp
+
+# Singularity build output (image is not source)
+*.sif
+
+# local debug dumps
+debug_*.RData
