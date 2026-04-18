@@ -1,3 +1,9 @@
+## 1.8.3 (2026-04-18)
+- Conda releases are now built from this repository via GitHub Actions on
+  tag push; the external `kavonrtep/recipes/tidecluster` recipe is retired.
+- Added `tests.sh` dispatcher with smoke/short/long tiers gating CI and
+  release builds.
+
 ## 1.7.1 (2025-10-09)
 - Gzip FASTA input support added
 - Interactive visualization and comparative analysis HTML reports implemented
