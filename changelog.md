@@ -1,3 +1,21 @@
+## 1.9.0 (2026-04-21)
+- KITE now classifies each tandem repeat array into one of three HOR
+  (higher-order repeat) categories — `No HOR detected`, `HOR-visible`,
+  `HOR-dominant` — using integer-multiple relationships between the
+  top three monomer-size estimates. Per-TRC counts in each category
+  are reported in the KITE HTML summary and TSV. Thresholds exposed
+  as constants at the top of `tarean/kite.R`.
+- New `tc_rerender_report.py` CLI builds an opt-in report v2 from an
+  existing TideCluster output directory. Emits `<prefix>_report_v2/`
+  containing modern DataTables-powered HTML pages (summary, all TRCs,
+  TAREAN, KITE, superfamilies) plus one per-TRC dashboard each,
+  offline-first, no new conda dependencies. The original reports are
+  left untouched.
+- Pipeline now writes `<prefix>_pipeline_stats.json` alongside the
+  index HTML so downstream tools have the summary numbers without
+  having to scrape HTML.
+- Test suite gains a `rerender` tier.
+
 ## 1.8.3 (2026-04-18)
 - Conda releases are now built from this repository via GitHub Actions on
   tag push; the external `kavonrtep/recipes/tidecluster` recipe is retired.
