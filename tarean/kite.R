@@ -48,7 +48,79 @@ prefix <- opt$prefix
 dir.create(output_dir, showWarnings = FALSE)
 
 
+## HOR CLASSIFICATION CONFIG
+# Used by classify_hor_array() below. Exposed here so tuning is discoverable.
+HOR_RATIO_TOL    <- 0.10  # fractional tolerance for integer-multiple test
+HOR_SCORE_RATIO  <- 0.80  # s2 must be >= this fraction of s1 for HOR-visible
+HOR_MIN_INTEGER  <- 2L    # smallest integer multiple n that counts as HOR
+
 ## FUNCTIONS
+# Test whether `ratio` is within `tol` of an integer >= n_min. Returns the
+# integer multiple as integer if so, NA_integer_ otherwise. NA / non-finite
+# inputs return NA.
+is_integer_multiple <- function(ratio,
+                                n_min = HOR_MIN_INTEGER,
+                                tol   = HOR_RATIO_TOL) {
+  if (is.na(ratio) || !is.finite(ratio) || ratio < n_min - tol) return(NA_integer_)
+  n <- round(ratio)
+  if (n < n_min) return(NA_integer_)
+  if (abs(ratio - n) / n <= tol) as.integer(n) else NA_integer_
+}
+
+# Classify a single tandem-repeat array by the relationship between its
+# top three monomer-size estimates (m1, m2, m3) and their scores
+# (s1, s2, s3). Returns a list(status, n) where status is one of
+# "No HOR detected", "HOR-visible", "HOR-dominant" and n is the integer
+# multiple that triggered the call (NA when status is "No HOR detected").
+#
+# Rules (per design discussion):
+#   HOR-dominant : m1/m2 ~= integer >= 2 within HOR_RATIO_TOL AND
+#                  m1/m3 ~= integer >= 2 within HOR_RATIO_TOL.
+#                  Concordance with the tertiary peak is mandatory; if
+#                  m2 or m3 is missing the call cannot be made.
+#   HOR-visible  : m2/m1 ~= integer >= 2 within HOR_RATIO_TOL AND
+#                  s2 >= HOR_SCORE_RATIO * s1.
+#                  If m2 is missing the call cannot be made.
+classify_hor_array <- function(m1, m2, m3, s1, s2, s3) {
+  if (is.na(m1) || is.na(m2)) return(list(status = "No HOR detected", n = NA_integer_))
+
+  # HOR-dominant requires both pairwise integer-multiples
+  n12 <- is_integer_multiple(m1 / m2)
+  if (!is.na(n12) && !is.na(m3)) {
+    n13 <- is_integer_multiple(m1 / m3)
+    if (!is.na(n13)) return(list(status = "HOR-dominant", n = n12))
+  }
+
+  # HOR-visible requires m2 to be a high-multiple peak with a strong score
+  n21 <- is_integer_multiple(m2 / m1)
+  if (!is.na(n21) && !is.na(s1) && !is.na(s2) && s2 >= HOR_SCORE_RATIO * s1) {
+    return(list(status = "HOR-visible", n = n21))
+  }
+
+  list(status = "No HOR detected", n = NA_integer_)
+}
+
+# Wrap a HOR status string in a coloured HTML badge for use in HTML tables.
+hor_status_badge <- function(status) {
+  cls <- switch(status,
+                "HOR-dominant"    = "hor-dom",
+                "HOR-visible"     = "hor-vis",
+                "No HOR detected" = "hor-none",
+                "hor-none")
+  sprintf('<span class="hor-badge %s">%s</span>', cls, status)
+}
+
+# Wrap a per-TRC count cell with a tinted background matching its category.
+hor_count_cell <- function(value, kind) {
+  cls <- switch(kind,
+                "dom"  = "hor-cnt-dom",
+                "vis"  = "hor-cnt-vis",
+                "none" = "hor-cnt-none",
+                "hor-cnt-none")
+  sprintf('<span class="%s" style="display:block; padding:2px 8px; text-align:center;">%d</span>',
+          cls, as.integer(value))
+}
+
 calculate_neighbor_distances <- function(dna_sequence, k) {
   dna_str <- as.character(dna_sequence)
   # Extract all k-mers from the sequence
@@ -274,6 +346,24 @@ colnames(best_peaks_concise) <- c("TRC_ID", "seqid", "start", "end", "monomer_si
                                   "score", "array_length", "monomer_size_2", "score_2",
                                   "monomer_size_3", "score_3")
 
+# Per-array HOR classification. Two new columns: HOR_status (factor-like
+# character; one of "No HOR detected" / "HOR-visible" / "HOR-dominant")
+# and HOR_multiple (the integer multiple n that triggered the call, NA
+# when status is "No HOR detected"). Both are written to the TSVs and
+# surfaced in the per-TRC HTML pages below.
+hor_calls <- mapply(classify_hor_array,
+                    best_peaks_concise$monomer_size,
+                    best_peaks_concise$monomer_size_2,
+                    best_peaks_concise$monomer_size_3,
+                    best_peaks_concise$score,
+                    best_peaks_concise$score_2,
+                    best_peaks_concise$score_3,
+                    SIMPLIFY = FALSE)
+best_peaks_concise$HOR_status   <- vapply(hor_calls, `[[`, character(1), "status")
+best_peaks_concise$HOR_multiple <- vapply(hor_calls, `[[`, integer(1),   "n")
+peaks_best$HOR_status   <- best_peaks_concise$HOR_status
+peaks_best$HOR_multiple <- best_peaks_concise$HOR_multiple
+
 
 save.image(file = paste0(output_dir, "/tcr.RData"))
 write.table(peaks_best[ord_index,], file = paste0(output_dir, "/monomer_size_best_estimate_stat.csv"), sep = "\t", quote = FALSE, row.names = FALSE)
@@ -377,6 +467,16 @@ trc_df$number_of_regions <- sapply(trc_df$TRC_ID, function(x) {
   return(length(x))
 })
 
+# Per-TRC HOR rollup: counts only (TRCs are heterogeneous, a single TRC-
+# level label was rejected by design). Three new integer columns; the
+# tinted HTML rendering happens later, just before HTML() is called.
+hor_count <- function(trc, status) {
+  sum(best_peaks_concise$TRC_ID == trc & best_peaks_concise$HOR_status == status)
+}
+trc_df$N_no_HOR       <- vapply(trc_df$TRC_ID, hor_count, integer(1), "No HOR detected")
+trc_df$N_HOR_visible  <- vapply(trc_df$TRC_ID, hor_count, integer(1), "HOR-visible")
+trc_df$N_HOR_dominant <- vapply(trc_df$TRC_ID, hor_count, integer(1), "HOR-dominant")
+
 # link image <img> to monomer size profile of top3 peaks for each TRC_ID
 trc_df$monomer_size_profile <- sapply(trc_df$TRC_ID, function(x) {
   x <- paste0("<img src=\"",output_dir_base, "/profile_plots/profile_top3_", x, ".png\" width=\"600\">")
@@ -399,14 +499,45 @@ The Monomer Size Estimate Score Plot displays weighted scores for
    For scores for each tandem repeat array within the TRC,
     follow the provided link to see detailed report.
 ", file = html_out)
+HTML(sprintf("
+<h3>Higher-order repeat (HOR) classification</h3>
+<p>Each tandem repeat array (TRA) is assigned one of three HOR categories
+based on the relationship between its top-three monomer-size estimates
+(m<sub>1</sub>, m<sub>2</sub>, m<sub>3</sub>) and their scores
+(s<sub>1</sub>, s<sub>2</sub>, s<sub>3</sub>):</p>
+<ul style=\"max-width:760px;\">
+<li>%s &mdash; m<sub>1</sub>/m<sub>2</sub> and m<sub>1</sub>/m<sub>3</sub>
+are both close to the same integer &ge; %d (within %g%%); the primary
+estimate is itself an HOR period, confirmed by two independent secondary
+peaks.</li>
+<li>%s &mdash; m<sub>2</sub>/m<sub>1</sub> is close to an integer
+&ge; %d (within %g%%) and s<sub>2</sub> &ge; %g &times; s<sub>1</sub>;
+a clear HOR period is visible above the basic monomer.</li>
+<li>%s &mdash; neither relationship holds, or m<sub>2</sub>/m<sub>3</sub>
+is missing.</li>
+</ul>
+<p class=\"hor-legend\">Per-TRC counts below show how many of that TRC's
+arrays fall into each category.</p>",
+hor_status_badge("HOR-dominant"),    HOR_MIN_INTEGER, HOR_RATIO_TOL * 100,
+hor_status_badge("HOR-visible"),     HOR_MIN_INTEGER, HOR_RATIO_TOL * 100,
+HOR_SCORE_RATIO,
+hor_status_badge("No HOR detected")), file = html_out)
 
 
 # add table with TRC_ID and link to subsections within the report
 # for each TRC_ID add link to the corresponding section (in HTML.title below)
+# Tint the per-TRC HOR count cells before renaming columns for display.
+trc_df$N_no_HOR       <- vapply(trc_df$N_no_HOR,       hor_count_cell, character(1), "none")
+trc_df$N_HOR_visible  <- vapply(trc_df$N_HOR_visible,  hor_count_cell, character(1), "vis")
+trc_df$N_HOR_dominant <- vapply(trc_df$N_HOR_dominant, hor_count_cell, character(1), "dom")
+
 # adjust column names for html output
 colnames(trc_df)[colnames(trc_df) == "monomer_size"] <- "Monomer size <br> primary estimate"
 colnames(trc_df)[colnames(trc_df) == "number_of_regions"] <- "Number of arrays"
 colnames(trc_df)[colnames(trc_df) == "monomer_size_profile"] <- "Monomer Size Estimate Score Plot"
+colnames(trc_df)[colnames(trc_df) == "N_no_HOR"]       <- "No HOR<br>detected"
+colnames(trc_df)[colnames(trc_df) == "N_HOR_visible"]  <- "HOR-visible<br>arrays"
+colnames(trc_df)[colnames(trc_df) == "N_HOR_dominant"] <- "HOR-dominant<br>arrays"
 
 
 HTML(trc_df, header = c("TRC_ID"), rownames = FALSE, align = "c", file = html_out)
@@ -438,10 +569,16 @@ for (trc in trc_list){
   HTMLInsertGraph(file = html_out_trc, GraphFileName = png_rel_path, Align="left", Width = 1000)
   df1 <- best_peaks_concise[best_peaks_concise$TRC_ID == trc,, drop = FALSE]
   df1$"TRC array index" <- 1:nrow(df1)
+  # Render HOR_status as a coloured badge, drop the integer-multiple column
+  # into the displayed table (NA shown as blank).
+  df1$HOR_status   <- vapply(df1$HOR_status, hor_status_badge, character(1))
+  df1$HOR_multiple <- ifelse(is.na(df1$HOR_multiple), "", as.character(df1$HOR_multiple))
   colnames(df1)[colnames(df1) == "monomer_size"] <- "Monomer size<br>(primary estimate)"
   colnames(df1)[colnames(df1) == "monomer_size_2"] <- "Monomer size 2<br>(alternative estimate)"
   colnames(df1)[colnames(df1) == "monomer_size_3"] <- "Monomer size 3<br>(alternative estimate)"
   colnames(df1)[colnames(df1) == "array_length"] <- "Array length [nt]"
+  colnames(df1)[colnames(df1) == "HOR_status"]   <- "HOR status"
+  colnames(df1)[colnames(df1) == "HOR_multiple"] <- "HOR multiple<br>(integer n)"
   # columns start and end are numerical, the number should be printent completelly without scientific notation
   df1$start <- format(df1$start, scientific = FALSE)
   df1$end <- format(df1$end, scientific = FALSE)
