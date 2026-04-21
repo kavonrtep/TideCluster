@@ -1,0 +1,325 @@
+/* TideCluster report v2 stylesheet.
+   Single source of truth for all v2 HTML output. Uses a modern system
+   font stack, CSS custom properties for theming (incl. prefers-color-
+   scheme dark mode), and responsive overflow-scrolling wrappers for
+   wide tables. */
+
+:root {
+  --bg:           #ffffff;
+  --fg:           #1f2937;
+  --fg-muted:     #4b5563;
+  --border:       #e5e7eb;
+  --border-strong:#cbd5e1;
+  --accent:       #1e5faa;
+  --accent-fg:    #ffffff;
+  --card:         #f8fafc;
+  --code-bg:      #f1f5f9;
+  --hover:        #eef2ff;
+  --stripe:       #f9fafb;
+
+  --hor-dom-bg:   #8fce8f;
+  --hor-dom-fg:   #0e3d0e;
+  --hor-vis-bg:   #ffd98a;
+  --hor-vis-fg:   #5a3d00;
+  --hor-none-bg:  #f0f0f0;
+  --hor-none-fg:  #666666;
+
+  --hor-cnt-dom-bg:  #dff0df;
+  --hor-cnt-vis-bg:  #fff3d6;
+  --hor-cnt-none-bg: #fafafa;
+
+  --font:      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+               "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+               "Liberation Mono", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:           #0f172a;
+    --fg:           #e2e8f0;
+    --fg-muted:     #94a3b8;
+    --border:       #334155;
+    --border-strong:#475569;
+    --accent:       #60a5fa;
+    --accent-fg:    #0f172a;
+    --card:         #1e293b;
+    --code-bg:      #1e293b;
+    --hover:        #1e293b;
+    --stripe:       #172033;
+
+    --hor-dom-bg:   #0e3d0e;
+    --hor-dom-fg:   #8fce8f;
+    --hor-vis-bg:   #5a3d00;
+    --hor-vis-fg:   #ffd98a;
+    --hor-none-bg:  #1e293b;
+    --hor-none-fg:  #94a3b8;
+
+    --hor-cnt-dom-bg:  #0e3d0e33;
+    --hor-cnt-vis-bg:  #5a3d0033;
+    --hor-cnt-none-bg: #1e293b;
+  }
+}
+
+html { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: inherit; }
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* ======== top nav + run strip ======== */
+
+.tc-nav {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--accent);
+  color: var(--accent-fg);
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 46px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+.tc-nav .tc-brand {
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0.2px;
+}
+.tc-nav a {
+  color: var(--accent-fg);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.tc-nav a:hover { background: rgba(255, 255, 255, 0.15); text-decoration: none; }
+.tc-nav a.active { background: rgba(255, 255, 255, 0.2); }
+.tc-nav .tc-spacer { flex: 1 1 auto; }
+.tc-run-strip {
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 6px 20px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.tc-run-strip strong { color: var(--fg); }
+
+/* ======== layout ======== */
+
+main {
+  max-width: 1200px;
+  margin: 24px auto;
+  padding: 0 20px;
+}
+h1 { font-size: 24px; margin: 0 0 12px; }
+h2 { font-size: 18px; margin: 24px 0 12px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+h3 { font-size: 15px; margin: 16px 0 8px; }
+
+.tc-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.tc-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+}
+.tc-card .tc-card-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+  margin-bottom: 8px;
+}
+.tc-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13px; }
+.tc-kv dt { color: var(--fg-muted); }
+.tc-kv dd { margin: 0; font-family: var(--font-mono); font-size: 12px; }
+
+/* ======== tables ======== */
+
+.tc-table-wrap {
+  overflow-x: auto;
+  margin: 12px 0 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+table.tc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+table.tc-table thead th {
+  background: var(--card);
+  color: var(--fg);
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-strong);
+  font-weight: 600;
+}
+table.tc-table tbody td,
+table.tc-table tbody th {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+table.tc-table tbody tr:hover { background: var(--hover); }
+table.tc-table tbody tr.odd   { background: var(--stripe); }
+table.tc-table img            { max-width: none; }
+
+/* ======== HOR badges + tints (v2 uses same classes as kite.R v1) ======== */
+
+.hor-badge {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 3px;
+  font-weight: 600;
+  min-width: 110px;
+  text-align: center;
+  font-family: var(--font);
+  font-size: 12px;
+}
+.hor-dom  { background: var(--hor-dom-bg);  color: var(--hor-dom-fg); }
+.hor-vis  { background: var(--hor-vis-bg);  color: var(--hor-vis-fg); }
+.hor-none { background: var(--hor-none-bg); color: var(--hor-none-fg); }
+
+.hor-cnt-dom  { background: var(--hor-cnt-dom-bg);  display: block; text-align: center; padding: 2px 8px; }
+.hor-cnt-vis  { background: var(--hor-cnt-vis-bg);  display: block; text-align: center; padding: 2px 8px; }
+.hor-cnt-none { background: var(--hor-cnt-none-bg); display: block; text-align: center; padding: 2px 8px; }
+
+/* ======== consensus block ======== */
+
+.tc-consensus {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--code-bg);
+  color: var(--fg);
+  padding: 10px 12px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+}
+.tc-consensus-toolbar {
+  display: flex;
+  gap: 8px;
+  margin: 6px 0;
+  align-items: baseline;
+  font-size: 12px;
+  color: var(--fg-muted);
+}
+.tc-consensus-toolbar .tc-btn {
+  padding: 3px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--card);
+  color: var(--fg);
+  cursor: pointer;
+  font-size: 12px;
+}
+.tc-consensus-toolbar .tc-btn:hover { background: var(--hover); }
+
+/* ======== prev/next TRC nav ======== */
+
+.tc-trc-nav {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.tc-trc-nav .tc-btn { min-width: 80px; text-align: center; }
+.tc-trc-nav select, .tc-trc-nav input[list] {
+  font-family: var(--font);
+  font-size: 13px;
+  padding: 4px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+/* ======== callouts (skipped sections, warnings) ======== */
+
+.tc-callout {
+  border-left: 3px solid var(--accent);
+  background: var(--card);
+  padding: 8px 12px;
+  margin: 12px 0;
+  font-size: 13px;
+  color: var(--fg-muted);
+}
+
+/* ======== HOR-distribution inline bar chart ======== */
+
+.tc-bar {
+  display: flex;
+  height: 22px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--card);
+  border: 1px solid var(--border);
+  margin: 6px 0 12px;
+}
+.tc-bar-seg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #000;
+}
+.tc-bar-seg.hor-dom  { background: var(--hor-dom-bg);  color: var(--hor-dom-fg); }
+.tc-bar-seg.hor-vis  { background: var(--hor-vis-bg);  color: var(--hor-vis-fg); }
+.tc-bar-seg.hor-none { background: var(--hor-none-bg); color: var(--hor-none-fg); }
+
+/* ======== figure captions / image wrappers ======== */
+
+.tc-fig { margin: 12px 0 18px; }
+.tc-fig img { max-width: 100%; height: auto; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); }
+.tc-fig-caption { font-size: 12px; color: var(--fg-muted); margin-top: 4px; }
+
+/* ======== DataTables overrides to match the theme ======== */
+
+div.dt-container {
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--fg);
+}
+div.dt-container .dt-layout-row {
+  padding: 6px 10px;
+}
+div.dt-container .dt-search input,
+div.dt-container .dt-length select {
+  border: 1px solid var(--border-strong);
+  background: var(--bg);
+  color: var(--fg);
+  border-radius: 3px;
+  padding: 3px 6px;
+}
+div.dt-container .dt-paging .dt-paging-button {
+  color: var(--fg) !important;
+}
+div.dt-container .dt-paging .dt-paging-button.current {
+  background: var(--accent) !important;
+  color: var(--accent-fg) !important;
+  border-color: var(--accent) !important;
+}
