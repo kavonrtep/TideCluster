@@ -171,6 +171,21 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
         F"Input sequence length           : {input_fasta_length} nt\n"
     )
 
+    # Persist the same numbers as structured JSON so downstream tools
+    # (tc_rerender_report.py, external parsers) don't have to scrape the
+    # rendered index.html for them.
+    stats_json = {
+        "n_trcs_total":           l_debug,
+        "n_trcs_above_threshold": l_debug - len(omitted_clusters),
+        "n_ssrs":                 len(ssr),
+        "total_tr_length":        int(trc_total_length),
+        "n_tras":                 gff_feature_count,
+        "input_sequence_length":  input_fasta_length,
+        "tidecluster_version":    version,
+    }
+    with open(F"{prefix}_pipeline_stats.json", "w") as f:
+        json.dump(stats_json, f, indent=2)
+
     # replace all PREFIX_PLACEHOLDER with prefix value and save to new file
     # replace all SETTINGS_PLACEHOLDER with settings value and save to new file
     with open(html_src, "r") as f, open(html_dst, "w") as f2:
