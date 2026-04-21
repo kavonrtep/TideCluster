@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as _dt
+import html
 import json
 import os
 import re
@@ -34,6 +35,102 @@ import sys
 from pathlib import Path
 
 __version__ = "1"  # schema version for report.json
+
+# ----------------------------------------------------------------------
+# Small HTML helpers
+# ----------------------------------------------------------------------
+
+def esc(x):
+    """Escape a cell value for safe HTML emission. None -> empty."""
+    if x is None:
+        return ""
+    return html.escape(str(x), quote=True)
+
+
+def fmt_bp(n):
+    """Human-readable length in bp/kb/Mb."""
+    if n is None: return ""
+    try: n = int(n)
+    except (TypeError, ValueError): return esc(n)
+    if n >= 1_000_000: return f"{n/1_000_000:.2f} Mb"
+    if n >= 1_000:     return f"{n/1_000:.1f} kb"
+    return f"{n} bp"
+
+
+def hor_badge(status):
+    if not status:
+        return ""
+    cls = {"HOR-dominant": "hor-dom",
+           "HOR-visible":  "hor-vis",
+           "No HOR detected": "hor-none"}.get(status, "hor-none")
+    return f'<span class="hor-badge {cls}">{esc(status)}</span>'
+
+
+def hor_count_cell(n, kind):
+    cls = {"dom": "hor-cnt-dom", "vis": "hor-cnt-vis", "none": "hor-cnt-none"}[kind]
+    return f'<span class="{cls}">{int(n)}</span>'
+
+
+def page_shell(title, active, run_meta, main_html, extra_head=""):
+    """Return a full HTML document string wrapping `main_html`."""
+    nav_items = [
+        ("index.html",          "Summary",       "index"),
+        ("trcs.html",           "All TRCs",      "trcs"),
+        ("tarean.html",         "TAREAN",        "tarean"),
+        ("kite.html",           "KITE",          "kite"),
+        ("superfamilies.html",  "Superfamilies", "sf"),
+    ]
+    def _nav_link(href, label, key):
+        cls = ' class="active"' if key == active else ""
+        return f'<a href="{href}"{cls}>{label}</a>'
+    nav_html = "".join(_nav_link(*item) for item in nav_items)
+    run_strip = (
+        f'<strong>{esc(run_meta["prefix"])}</strong>'
+        f' · TideCluster {esc(run_meta["version"])}'
+        f' · generated {esc(run_meta["generated_at"])}'
+        f' · {run_meta["stats_line"]}'
+    )
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{esc(title)} — {esc(run_meta["prefix"])}</title>
+<link rel="stylesheet" href="assets/datatables/datatables.min.css">
+<link rel="stylesheet" href="assets/tidecluster.css">
+{extra_head}
+</head>
+<body>
+<nav class="tc-nav">
+  <span class="tc-brand">TideCluster</span>
+  {nav_html}
+  <span class="tc-spacer"></span>
+</nav>
+<div class="tc-run-strip">{run_strip}</div>
+<main>
+{main_html}
+</main>
+<script src="assets/datatables/jquery-3.7.1.min.js"></script>
+<script src="assets/datatables/datatables.min.js"></script>
+<script src="assets/tidecluster.js"></script>
+</body>
+</html>
+"""
+
+
+def make_run_meta(model):
+    stats = model.get("stats", {})
+    parts = []
+    if "n_trcs_total" in stats:           parts.append(f'{stats["n_trcs_total"]} TRCs')
+    if "n_trcs_above_threshold" in stats: parts.append(f'{stats["n_trcs_above_threshold"]} analysed')
+    if "n_tras" in stats:                 parts.append(f'{stats["n_tras"]} arrays')
+    if "input_sequence_length" in stats:  parts.append(f'{fmt_bp(stats["input_sequence_length"])} input')
+    return {
+        "prefix":       model["meta"]["prefix"],
+        "version":      stats.get("tidecluster_version", "?"),
+        "generated_at": model["meta"]["generated_at"],
+        "stats_line":   " · ".join(parts),
+    }
 
 # ----------------------------------------------------------------------
 # GFF3 parsing (minimal, no dependency on tc_utils)
@@ -441,6 +538,259 @@ def build_model(input_dir: Path, prefix: str):
 
 
 # ----------------------------------------------------------------------
+# HTML page renderers
+# ----------------------------------------------------------------------
+
+def _trc_link(trc_id, text=None):
+    return f'<a href="trc/{esc(trc_id)}.html">{esc(text or trc_id)}</a>'
+
+
+def _rel_img(src_rel, width=None, alt=""):
+    """An <img> whose src points back into the original output dir."""
+    if not src_rel:
+        return ""
+    w = f' width="{int(width)}"' if width else ""
+    return f'<img src="../{esc(src_rel)}" alt="{esc(alt)}"{w}>'
+
+
+def _tarean_asset_path(trc):
+    """Relative path from report_v2/ to the per-TRC TAREAN image directory."""
+    tdir = (trc.get("tarean") or {}).get("tarean_dir")
+    return f"../{model_tarean_root}/{tdir}" if tdir else None  # not used; explicit per site
+
+
+def render_index(model, out_dir, run_meta):
+    settings = model.get("settings", {}) or {}
+    stats    = model.get("stats", {}) or {}
+    rows_settings = []
+    for k in ("command", "fasta", "original_fasta", "prefix", "min_length",
+              "min_total_length", "cpu", "no_dust", "tidehunter_arguments", "long",
+              "library"):
+        if k in settings:
+            rows_settings.append(
+                f'<dt>{esc(k)}</dt><dd>{esc(settings[k])}</dd>')
+    rows_stats = [
+        ("Number of TRCs",                   stats.get("n_trcs_total")),
+        ("TRCs above threshold",             stats.get("n_trcs_above_threshold")),
+        ("Number of SSRs in TRCs",           stats.get("n_ssrs")),
+        ("Total length of TRCs",             fmt_bp(stats.get("total_tr_length"))),
+        ("Number of TRAs",                   stats.get("n_tras")),
+        ("Input sequence length",            fmt_bp(stats.get("input_sequence_length"))),
+    ]
+    stats_html = "".join(
+        f'<dt>{esc(label)}</dt><dd>{esc(val) if val != "" else ""}</dd>'
+        for label, val in rows_stats)
+    hor_total = {"dom": 0, "vis": 0, "none": 0}
+    for t in model["trcs"]:
+        if t["kite"]:
+            hor_total["dom"]  += t["kite"]["n_hor_dominant"]
+            hor_total["vis"]  += t["kite"]["n_hor_visible"]
+            hor_total["none"] += t["kite"]["n_no_hor"]
+    n_tarean    = sum(1 for t in model["trcs"] if t["tarean"])
+    n_sf_peers  = sum(1 for t in model["trcs"] if t["superfamily"])
+    cards = f"""
+    <section class="tc-cards">
+      <div class="tc-card"><div class="tc-card-title">Run summary</div>
+        <dl class="tc-kv">{stats_html}</dl></div>
+      <div class="tc-card"><div class="tc-card-title">Reports</div>
+        <dl class="tc-kv">
+          <dt>All TRCs</dt>       <dd><a href="trcs.html">{len(model["trcs"])} total</a></dd>
+          <dt>TAREAN-analysed</dt><dd><a href="tarean.html">{n_tarean}</a></dd>
+          <dt>HOR calls</dt>      <dd>{hor_badge("HOR-dominant")} {hor_total["dom"]} ·
+                                      {hor_badge("HOR-visible")} {hor_total["vis"]}</dd>
+          <dt>Superfamilies</dt>  <dd><a href="superfamilies.html">{len(model["superfamilies"])}</a>,
+                                      {n_sf_peers} TRCs grouped</dd>
+        </dl></div>
+      <div class="tc-card"><div class="tc-card-title">Run settings</div>
+        <dl class="tc-kv">{"".join(rows_settings)}</dl></div>
+    </section>"""
+    main = f"""
+    <h1>TideCluster report — {esc(model["meta"]["prefix"])}</h1>
+    {cards}
+    <p class="tc-callout">This is report v2. The original reports are
+    still available alongside: <a href="../{esc(model["paths"].get("index_html") or "")}">index.html</a>,
+    <a href="../{esc(model["paths"].get("tarean_report_html") or "")}">TAREAN</a>,
+    and KITE page. Nothing was modified.</p>
+    """
+    (out_dir / "index.html").write_text(page_shell("Summary", "index", run_meta, main))
+
+
+def _all_trcs_rows(model):
+    rows = []
+    for t in model["trcs"]:
+        tarean = t["tarean"] or {}
+        kite = t["kite"] or {}
+        hor_cell = ""
+        if kite:
+            hor_cell = (f'{hor_count_cell(kite["n_hor_dominant"], "dom")}'
+                        f'{hor_count_cell(kite["n_hor_visible"], "vis")}'
+                        f'{hor_count_cell(kite["n_no_hor"], "none")}')
+        sf_cell = (f'<a href="superfamilies.html#sf-{t["superfamily"]}">SF {t["superfamily"]}</a>'
+                   if t["superfamily"] else "")
+        rows.append(
+            "<tr>"
+            f'<td>{_trc_link(t["id"])}</td>'
+            f'<td>{esc(t["repeat_type"] or "")}</td>'
+            f'<td>{esc(t["annotation"] or "")}</td>'
+            f'<td data-order="{t["n_arrays"]}">{t["n_arrays"]}</td>'
+            f'<td data-order="{t["total_size"]}">{fmt_bp(t["total_size"])}</td>'
+            f'<td data-order="{t.get("min_array") or 0}">{fmt_bp(t.get("min_array"))}</td>'
+            f'<td data-order="{t.get("max_array") or 0}">{fmt_bp(t.get("max_array"))}</td>'
+            f'<td data-order="{tarean.get("monomer_length") or 0}">'
+              f'{esc(tarean.get("monomer_length")) if tarean.get("monomer_length") else ""}</td>'
+            f'<td>{hor_cell}</td>'
+            f'<td>{sf_cell}</td>'
+            "</tr>")
+    return "".join(rows)
+
+
+def render_trcs(model, out_dir, run_meta):
+    body = f"""
+    <h1>All tandem repeat clusters</h1>
+    <p>{len(model["trcs"])} TRCs. Click a TRC to open its dashboard.</p>
+    <div class="tc-table-wrap">
+    <table class="tc-table tc-datatable" data-page-length="50"
+           data-order='[[3,"desc"]]'>
+      <thead><tr>
+        <th>TRC</th><th>Type</th><th>Annotation</th>
+        <th>Arrays</th><th>Total size</th><th>Min array</th><th>Max array</th>
+        <th>Monomer</th><th>HOR&nbsp;(dom/vis/none)</th><th>Superfamily</th>
+      </tr></thead>
+      <tbody>{_all_trcs_rows(model)}</tbody>
+    </table>
+    </div>
+    """
+    (out_dir / "trcs.html").write_text(page_shell("All TRCs", "trcs", run_meta, body))
+
+
+def render_tarean(model, out_dir, run_meta):
+    rows = []
+    for t in model["trcs"]:
+        if not t["tarean"]:
+            continue
+        ta = t["tarean"]
+        graph = _rel_img(ta.get("graph_png"), width=100, alt="k-mer graph")
+        logo  = _rel_img(ta.get("logo_png"),  width=200, alt="logo")
+        cons_short = esc((ta.get("consensus") or "")[:80])
+        if ta.get("consensus") and len(ta["consensus"]) > 80:
+            cons_short += "…"
+        rows.append(
+            "<tr>"
+            f'<td>{_trc_link(t["id"])}</td>'
+            f'<td data-order="{ta.get("monomer_length") or 0}">{esc(ta.get("monomer_length"))}</td>'
+            f'<td data-order="{ta.get("total_score") or 0}">{esc(round(ta["total_score"], 4)) if ta.get("total_score") is not None else ""}</td>'
+            f'<td data-order="{ta.get("total_size") or 0}">{fmt_bp(ta.get("total_size"))}</td>'
+            f'<td>{esc(ta.get("annotation") or "")}</td>'
+            f'<td data-order="{ta.get("n_arrays") or 0}">{esc(ta.get("n_arrays"))}</td>'
+            f'<td><code>{cons_short}</code></td>'
+            f'<td>{graph}</td>'
+            f'<td>{logo}</td>'
+            "</tr>")
+    body = f"""
+    <h1>TAREAN-analysed TRCs</h1>
+    <p>{sum(1 for t in model["trcs"] if t["tarean"])} TRCs passed the
+    minimum total length threshold and were processed by TAREAN.</p>
+    <div class="tc-table-wrap">
+    <table class="tc-table tc-datatable" data-page-length="25" data-order='[[3,"desc"]]'>
+      <thead><tr>
+        <th>TRC</th><th>Monomer</th><th>Score</th><th>Total size</th>
+        <th>Annotation</th><th>Arrays</th><th>Consensus (preview)</th>
+        <th>Graph</th><th>Logo</th>
+      </tr></thead>
+      <tbody>{"".join(rows)}</tbody>
+    </table>
+    </div>
+    """
+    (out_dir / "tarean.html").write_text(page_shell("TAREAN", "tarean", run_meta, body))
+
+
+def render_kite(model, out_dir, run_meta):
+    hor_total = {"dom": 0, "vis": 0, "none": 0}
+    for t in model["trcs"]:
+        if t["kite"]:
+            hor_total["dom"]  += t["kite"]["n_hor_dominant"]
+            hor_total["vis"]  += t["kite"]["n_hor_visible"]
+            hor_total["none"] += t["kite"]["n_no_hor"]
+    total = sum(hor_total.values()) or 1
+    bar = ""
+    for kind, label in (("dom", "HOR-dominant"), ("vis", "HOR-visible"), ("none", "No HOR")):
+        pct = 100 * hor_total[kind] / total
+        if pct < 1 and hor_total[kind] == 0:
+            continue
+        bar += (f'<div class="tc-bar-seg hor-{kind}" '
+                f'style="width:{pct:.2f}%" title="{label}: {hor_total[kind]}">'
+                f'{hor_total[kind] if pct > 3 else ""}</div>')
+    rows = []
+    for t in model["trcs"]:
+        if not t["kite"]:
+            continue
+        k = t["kite"]
+        profile = _rel_img(k.get("profile_top3_png"), width=300, alt="profile")
+        monomer = (t["tarean"] or {}).get("monomer_length")
+        rows.append(
+            "<tr>"
+            f'<td>{_trc_link(t["id"])}</td>'
+            f'<td data-order="{monomer or 0}">{esc(monomer)}</td>'
+            f'<td data-order="{t["n_arrays"]}">{t["n_arrays"]}</td>'
+            f'<td data-order="{k["n_hor_dominant"]}">{hor_count_cell(k["n_hor_dominant"],"dom")}</td>'
+            f'<td data-order="{k["n_hor_visible"]}">{hor_count_cell(k["n_hor_visible"],"vis")}</td>'
+            f'<td data-order="{k["n_no_hor"]}">{hor_count_cell(k["n_no_hor"],"none")}</td>'
+            f'<td>{profile}</td>'
+            "</tr>")
+    body = f"""
+    <h1>K-mer interval tandem repeat estimation (KITE)</h1>
+    <h3>HOR distribution across all analysed arrays</h3>
+    <div class="tc-bar" title="Total arrays: {total}">{bar}</div>
+    <p style="font-size:12px;color:var(--fg-muted)">
+      {hor_badge("HOR-dominant")} {hor_total["dom"]}
+      · {hor_badge("HOR-visible")} {hor_total["vis"]}
+      · {hor_badge("No HOR detected")} {hor_total["none"]}
+      (total {total} arrays).
+    </p>
+    <h2>Per-TRC HOR summary</h2>
+    <div class="tc-table-wrap">
+    <table class="tc-table tc-datatable" data-page-length="25" data-order='[[3,"desc"]]'>
+      <thead><tr>
+        <th>TRC</th><th>Monomer<br>(TAREAN)</th><th>Arrays</th>
+        <th>HOR-dom</th><th>HOR-vis</th><th>No&nbsp;HOR</th>
+        <th>Profile</th>
+      </tr></thead>
+      <tbody>{"".join(rows)}</tbody>
+    </table>
+    </div>
+    """
+    (out_dir / "kite.html").write_text(page_shell("KITE", "kite", run_meta, body))
+
+
+def render_superfamilies(model, out_dir, run_meta):
+    if not model["superfamilies"]:
+        body = ('<h1>TRC Superfamilies</h1>'
+                '<p class="tc-callout">No TRC superfamilies were identified '
+                '(either insufficient TRCs reached the clustering step or none shared '
+                'significant consensus similarity).</p>')
+        (out_dir / "superfamilies.html").write_text(
+            page_shell("Superfamilies", "sf", run_meta, body))
+        return
+    sections = []
+    for sf in model["superfamilies"]:
+        peers = ", ".join(_trc_link(t) for t in sf["trcs"])
+        img = (f'<div class="tc-fig"><a href="../{esc(sf["dotplot"])}">'
+               f'<img src="../{esc(sf["dotplot"])}" width="500" alt="dotplot"></a>'
+               f'<div class="tc-fig-caption">pairwise dotplot of superfamily '
+               f'{sf["id"]} consensus sequences</div></div>'
+               if sf["dotplot"] else "")
+        sections.append(
+            f'<section id="sf-{sf["id"]}">'
+            f'<h2>Superfamily {sf["id"]} ({len(sf["trcs"])} TRCs)</h2>'
+            f'<p>{peers}</p>{img}</section>')
+    body = (f'<h1>TRC superfamilies</h1>'
+            f'<p>{len(model["superfamilies"])} superfamilies identified.</p>'
+            + "".join(sections))
+    (out_dir / "superfamilies.html").write_text(
+        page_shell("Superfamilies", "sf", run_meta, body))
+
+
+# ----------------------------------------------------------------------
 # Asset copy
 # ----------------------------------------------------------------------
 
@@ -496,6 +846,14 @@ def main(argv=None):
     with (out_dir / "data" / "report.json").open("w") as f:
         json.dump(model, f, indent=2, default=str)
     print(f"wrote: {out_dir / 'data' / 'report.json'}")
+
+    run_meta = make_run_meta(model)
+    render_index(model, out_dir, run_meta)
+    render_trcs(model, out_dir, run_meta)
+    render_tarean(model, out_dir, run_meta)
+    render_kite(model, out_dir, run_meta)
+    render_superfamilies(model, out_dir, run_meta)
+    print(f"rendered: index, trcs, tarean, kite, superfamilies")
 
 
 if __name__ == "__main__":
