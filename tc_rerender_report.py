@@ -541,16 +541,20 @@ def build_model(input_dir: Path, prefix: str):
 # HTML page renderers
 # ----------------------------------------------------------------------
 
-def _trc_link(trc_id, text=None):
-    return f'<a href="trc/{esc(trc_id)}.html">{esc(text or trc_id)}</a>'
+def _trc_link(trc_id, text=None, prefix="trc/"):
+    """Link to a TRC dashboard. Default prefix matches top-level pages."""
+    return f'<a href="{prefix}{esc(trc_id)}.html">{esc(text or trc_id)}</a>'
 
 
-def _rel_img(src_rel, width=None, alt=""):
-    """An <img> whose src points back into the original output dir."""
+def _rel_img(src_rel, width=None, alt="", src_prefix="../"):
+    """An <img> whose src points back into the original output dir.
+
+    src_prefix defaults to one `../` (right for top-level pages); dashboards
+    pass `../../` since they sit one dir deeper."""
     if not src_rel:
         return ""
     w = f' width="{int(width)}"' if width else ""
-    return f'<img src="../{esc(src_rel)}" alt="{esc(alt)}"{w}>'
+    return f'<img src="{src_prefix}{esc(src_rel)}" alt="{esc(alt)}"{w}>'
 
 
 def _tarean_asset_path(trc):
@@ -791,6 +795,300 @@ def render_superfamilies(model, out_dir, run_meta):
 
 
 # ----------------------------------------------------------------------
+# Per-TRC dashboard
+# ----------------------------------------------------------------------
+
+def _is_ssr(trc):
+    return (trc.get("repeat_type") or "").upper() == "SSR" or trc.get("ssr_motif")
+
+
+def _arrays_table(arrays, include_hor=True):
+    """Render the per-array DataTable body for a TRC dashboard."""
+    rows = []
+    for i, a in enumerate(arrays, 1):
+        hor_bcell = hor_badge(a.get("hor_status")) if include_hor else ""
+        rows.append(
+            "<tr>"
+            f'<td>{i}</td>'
+            f'<td>{esc(a.get("seqid"))}</td>'
+            f'<td data-order="{a.get("start") or 0}">{esc(a.get("start"))}</td>'
+            f'<td data-order="{a.get("end") or 0}">{esc(a.get("end"))}</td>'
+            f'<td data-order="{a.get("length") or 0}">{fmt_bp(a.get("length"))}</td>'
+            + (
+                f'<td data-order="{a.get("m1") or 0}">{esc(a.get("m1"))}</td>'
+                f'<td data-order="{a.get("m2") or 0}">{esc(a.get("m2"))}</td>'
+                f'<td data-order="{a.get("m3") or 0}">{esc(a.get("m3"))}</td>'
+                f'<td>{hor_bcell}</td>'
+                f'<td>{esc(a.get("hor_multiple") or "")}</td>'
+                if include_hor else ""
+            )
+            + (
+                f'<td>{esc(a.get("ssr") or "")}</td>'
+                if not include_hor else ""
+            )
+            + "</tr>"
+        )
+    return "".join(rows)
+
+
+def _variants_table(variants, tarean_dir, show=20, src_prefix="../"):
+    """Top-N TAREAN variants table with graph + logo thumbs."""
+    if not variants or not tarean_dir:
+        return ""
+    rows = []
+    for v in variants[:show]:
+        graph = (f'<img src="{src_prefix}{esc(tarean_dir)}/{esc(v["graph_link"])}" width="80">'
+                 if v.get("graph_link") else "")
+        logo  = (f'<img src="{src_prefix}{esc(tarean_dir)}/{esc(v["logo_link"])}" width="200">'
+                 if v.get("logo_link") else "")
+        rows.append(
+            "<tr>"
+            f'<td>{esc(v["kmer"])}</td>'
+            f'<td>{esc(v["variant"])}</td>'
+            f'<td data-order="{v.get("total_score") or 0}">'
+              f'{esc(round(v["total_score"], 4)) if v.get("total_score") is not None else ""}</td>'
+            f'<td>{esc(v.get("monomer_length"))}</td>'
+            f'<td>{esc(v.get("n_gap50"))}</td>'
+            f'<td>{graph}</td>'
+            f'<td>{logo}</td>'
+            "</tr>"
+        )
+    more = ""
+    if len(variants) > show:
+        more = (f'<p class="tc-callout">Showing top {show} of '
+                f'{len(variants)} variants by score. Full list in the original '
+                f'<a href="{src_prefix}{esc(tarean_dir)}/report.html">TAREAN TRC report</a>.</p>')
+    return f"""
+    <details>
+      <summary><strong>TAREAN variants tested</strong> ({len(variants)})</summary>
+      <div class="tc-table-wrap">
+      <table class="tc-table" data-order='[[2,"desc"]]'>
+        <thead><tr>
+          <th>k-mer</th><th>Variant</th><th>Score</th>
+          <th>Monomer length</th><th>n_gap50</th>
+          <th>Graph</th><th>Logo</th>
+        </tr></thead>
+        <tbody>{"".join(rows)}</tbody>
+      </table>
+      </div>
+      {more}
+    </details>"""
+
+
+def _trc_jumper(ordered_ids, current_id):
+    opts = "".join(
+        f'<option value="{esc(tid)}"{" selected" if tid == current_id else ""}>{esc(tid)}</option>'
+        for tid in ordered_ids)
+    return (f'<select class="tc-trc-jumper" data-base="">'
+            f'{opts}</select>')
+
+
+def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta):
+    # Inside trc/ directory:
+    #   - site-internal links to report_v2 sibling pages need "../"
+    #   - links back into the original output dir need "../../"
+    #   - links to another dashboard in the same dir need no prefix
+    SITE = "../"           # up one to report_v2/
+    SRC  = "../../"        # up two to the original output dir
+    prev_id = ordered_ids[idx - 1] if idx > 0 else None
+    next_id = ordered_ids[idx + 1] if idx + 1 < len(ordered_ids) else None
+    prev_html = (f'<a class="tc-btn" href="{esc(prev_id)}.html">← {esc(prev_id)}</a>'
+                 if prev_id else '<span class="tc-btn" style="opacity:.4">← prev</span>')
+    next_html = (f'<a class="tc-btn" href="{esc(next_id)}.html">{esc(next_id)} →</a>'
+                 if next_id else '<span class="tc-btn" style="opacity:.4">next →</span>')
+    jump = _trc_jumper(ordered_ids, trc["id"])
+
+    def trc_link(tid, text=None):
+        return _trc_link(tid, text, prefix="")  # sibling in same dir
+    def img_src(src_rel, width=None, alt=""):
+        return _rel_img(src_rel, width=width, alt=alt, src_prefix=SRC)
+
+    # Stats card
+    stats_kv = [
+        ("Type",         trc.get("repeat_type") or "—"),
+        ("Arrays",       trc["n_arrays"]),
+        ("Total size",   fmt_bp(trc["total_size"])),
+        ("Array size",
+         f'min {fmt_bp(trc.get("min_array"))} · max {fmt_bp(trc.get("max_array"))}'),
+        ("Annotation",   trc.get("annotation") or "—"),
+    ]
+    stats_html = "".join(f'<dt>{esc(k)}</dt><dd>{esc(v)}</dd>' for k, v in stats_kv)
+
+    # Classification / HOR card
+    kite = trc.get("kite") or {}
+    class_rows = []
+    if kite:
+        class_rows.append(("HOR-dominant arrays", kite["n_hor_dominant"]))
+        class_rows.append(("HOR-visible arrays",  kite["n_hor_visible"]))
+        class_rows.append(("No HOR detected",     kite["n_no_hor"]))
+    if trc.get("superfamily"):
+        class_rows.append(
+            ("Superfamily",
+             f'<a href="{SITE}superfamilies.html#sf-{trc["superfamily"]}">SF {trc["superfamily"]}</a>'
+             f' ({len(trc.get("sf_peers", []))} peers)'))
+    else:
+        class_rows.append(("Superfamily", "—"))
+    class_html = "".join(
+        f'<dt>{esc(k)}</dt><dd>{v if "<" in str(v) else esc(v)}</dd>'
+        for k, v in class_rows)
+
+    # Classification details (SSR motif / HOR / below-threshold callouts)
+    callouts = []
+    if _is_ssr(trc):
+        callouts.append(
+            f'<div class="tc-callout"><strong>Simple Sequence Repeat.</strong> '
+            f'TAREAN and KITE are not performed on SSR TRCs by design. '
+            f'Motif(s): <code>{esc((trc.get("ssr_motif") or "").replace("%25","%"))}</code></div>')
+    elif not trc.get("tarean"):
+        callouts.append(
+            '<div class="tc-callout"><strong>Below TAREAN threshold.</strong> '
+            f'Total TRC length {fmt_bp(trc["total_size"])} is less than the '
+            f'run&#39;s minimum total length; TAREAN and KITE were not '
+            'performed for this cluster.</div>')
+
+    # Consensus + graph/logo
+    consensus_block = ""
+    ta = trc.get("tarean") or {}
+    if ta.get("consensus"):
+        cons = ta["consensus"]
+        pre_id = f"cons-{trc['id']}"
+        length = len(cons)
+        gc = 0
+        if cons:
+            gc = 100.0 * sum(1 for c in cons.upper() if c in "GC") / max(1, len(cons))
+        graph = img_src(ta.get("graph_png"), width=160, alt="k-mer graph")
+        logo  = img_src(ta.get("logo_png"),  width=320, alt="logo")
+        consensus_block = f"""
+        <h2>TAREAN consensus</h2>
+        <div class="tc-consensus-toolbar">
+          <span>monomer {ta.get("monomer_length")} bp · k-mer {ta.get("kmer")} ·
+                score {ta.get("total_score"):.4f} ·
+                length {length} bp · GC {gc:.1f}%</span>
+          <button class="tc-btn" data-copy-target="#{pre_id}">copy</button>
+          <a class="tc-btn" data-download-source="#{pre_id}"
+             data-download="{esc(trc["id"])}_consensus.fasta">download .fa</a>
+        </div>
+        <pre id="{pre_id}" class="tc-consensus">&gt;{esc(trc["id"])}
+{esc(cons)}</pre>
+        <div style="display:flex; gap:16px; flex-wrap:wrap;">
+          {f'<div class="tc-fig">{graph}<div class="tc-fig-caption">k-mer graph</div></div>' if graph else ""}
+          {f'<div class="tc-fig">{logo}<div class="tc-fig-caption">sequence logo</div></div>' if logo else ""}
+        </div>"""
+
+    # Arrays table
+    include_hor = not _is_ssr(trc) and any(a.get("m1") is not None for a in trc["arrays"])
+    if include_hor:
+        head = ("<th>#</th><th>seqid</th><th>start</th><th>end</th><th>length</th>"
+                "<th>m1</th><th>m2</th><th>m3</th><th>HOR status</th><th>HOR n</th>")
+    else:
+        head = ("<th>#</th><th>seqid</th><th>start</th><th>end</th><th>length</th>"
+                "<th>SSR motif</th>") if _is_ssr(trc) else (
+               "<th>#</th><th>seqid</th><th>start</th><th>end</th><th>length</th>"
+               "<th>—</th>")
+    arrays_section = f"""
+    <h2>Tandem repeat arrays ({trc["n_arrays"]})</h2>
+    <div class="tc-table-wrap">
+    <table class="tc-table tc-datatable" data-page-length="25" data-order='[[4,"desc"]]'>
+      <thead><tr>{head}</tr></thead>
+      <tbody>{_arrays_table(trc["arrays"], include_hor=include_hor)}</tbody>
+    </table>
+    </div>"""
+
+    # KITE profile heatmap — suppressed for SSR (not biologically meaningful)
+    kite_section = ""
+    if kite and kite.get("profile_png") and not _is_ssr(trc):
+        kite_section = f"""
+        <h2>KITE array profile</h2>
+        <div class="tc-fig">
+          <img src="{SRC}{esc(kite["profile_png"])}"
+               alt="per-array monomer-size heatmap">
+          <div class="tc-fig-caption">per-array k-mer-interval monomer-size
+          heatmap; rows are arrays, columns are candidate monomer lengths.</div>
+        </div>"""
+
+    # TAREAN variants drill-down — suppress for SSR
+    variants_section = ""
+    if ta.get("variants") and ta.get("tarean_dir") and not _is_ssr(trc):
+        tarean_root = Path(model["paths"]["tarean_dir"] or "").as_posix()
+        variants_section = _variants_table(
+            ta["variants"], f'{tarean_root}/{ta["tarean_dir"]}',
+            show=20, src_prefix=SRC)
+
+    # Superfamily context
+    sf_section = ""
+    if trc.get("superfamily"):
+        peers = ", ".join(trc_link(t) for t in trc.get("sf_peers", []))
+        dotplot = ""
+        if trc.get("sf_dotplot"):
+            dotplot = (f'<div class="tc-fig"><img src="{SRC}{esc(trc["sf_dotplot"])}" '
+                       f'width="500" alt="superfamily dotplot">'
+                       f'<div class="tc-fig-caption">pairwise dotplot of '
+                       f'superfamily {trc["superfamily"]} members</div></div>')
+        sf_section = f"""
+        <h2>Superfamily context</h2>
+        <p>This TRC belongs to <a href="{SITE}superfamilies.html#sf-{trc["superfamily"]}">
+        Superfamily {trc["superfamily"]}</a> with peers: {peers}.</p>
+        {dotplot}"""
+
+    # Parity links
+    paths = model["paths"]
+    tarean_href = (f'{SRC}{paths["tarean_dir"]}/{trc["id"]}.fasta_tarean/report.html'
+                   if paths.get("tarean_dir") and ta else None)
+    parity_bits = []
+    if tarean_href:
+        parity_bits.append(f'<a href="{esc(tarean_href)}">original TAREAN TRC page</a>')
+    if paths.get("clustering_gff3"):
+        parity_bits.append(f'<a href="{SRC}{esc(paths["clustering_gff3"])}">clustering.gff3</a>')
+    if paths.get("annotation_gff3"):
+        parity_bits.append(f'<a href="{SRC}{esc(paths["annotation_gff3"])}">annotation.gff3</a>')
+    parity_html = (f'<p class="tc-callout">Parity links: {" · ".join(parity_bits)}</p>'
+                   if parity_bits else "")
+
+    body = f"""
+    <div class="tc-trc-nav">
+      {prev_html}
+      {jump}
+      {next_html}
+      <span class="tc-spacer" style="flex:1"></span>
+    </div>
+    <h1>{esc(trc["id"])}</h1>
+    {"".join(callouts)}
+    <section class="tc-cards">
+      <div class="tc-card"><div class="tc-card-title">Cluster stats</div>
+        <dl class="tc-kv">{stats_html}</dl></div>
+      <div class="tc-card"><div class="tc-card-title">Classification</div>
+        <dl class="tc-kv">{class_html}</dl></div>
+    </section>
+    {consensus_block}
+    {arrays_section}
+    {kite_section}
+    {variants_section}
+    {sf_section}
+    {parity_html}
+    """
+    shell = page_shell(trc["id"], "trcs", run_meta, body)
+    # Fix nav + asset paths: dashboards live in trc/, one dir deeper than
+    # top-level pages. Body already uses explicit SITE/SRC prefixes so
+    # only the page_shell output needs these rewrites.
+    shell = shell.replace('href="assets/', 'href="../assets/')
+    shell = shell.replace('src="assets/',  'src="../assets/')
+    shell = shell.replace('href="index.html"',         'href="../index.html"')
+    shell = shell.replace('href="trcs.html"',          'href="../trcs.html"')
+    shell = shell.replace('href="tarean.html"',        'href="../tarean.html"')
+    shell = shell.replace('href="kite.html"',          'href="../kite.html"')
+    shell = shell.replace('href="superfamilies.html"', 'href="../superfamilies.html"')
+    (out_dir / "trc" / f"{trc['id']}.html").write_text(shell)
+
+
+def render_all_trc_dashboards(model, out_dir, run_meta):
+    (out_dir / "trc").mkdir(exist_ok=True)
+    ordered = [t["id"] for t in model["trcs"]]  # already sorted numerically
+    for i, trc in enumerate(model["trcs"]):
+        render_trc_dashboard(trc, model, out_dir, ordered, i, run_meta)
+    return len(ordered)
+
+
+# ----------------------------------------------------------------------
 # Asset copy
 # ----------------------------------------------------------------------
 
@@ -853,7 +1151,8 @@ def main(argv=None):
     render_tarean(model, out_dir, run_meta)
     render_kite(model, out_dir, run_meta)
     render_superfamilies(model, out_dir, run_meta)
-    print(f"rendered: index, trcs, tarean, kite, superfamilies")
+    n_dash = render_all_trc_dashboards(model, out_dir, run_meta)
+    print(f"rendered: index, trcs, tarean, kite, superfamilies, {n_dash} TRC dashboards")
 
 
 if __name__ == "__main__":
