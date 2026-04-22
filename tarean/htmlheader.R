@@ -76,16 +76,20 @@ htmlheader <- "
 		border:1px solid #03476F;
 		color:#000000;
 		}
-		/* KITE HOR classification badges + tinted count cells */
+		/* KITE HOR classification badges + tinted count cells (4 bins).
+		   Palette: grey -> pale yellow -> amber -> green as confidence
+		   rises. See docs/hor_classification.md. */
 		.hor-badge { display:inline-block; padding:2px 10px; border-radius:3px;
 		             font-weight:bold; min-width:110px; text-align:center;
 		             font-family:verdana, arial, helvetica, sans-serif; }
-		.hor-none  { background-color:#f0f0f0; color:#666666; }
-		.hor-vis   { background-color:#ffd98a; color:#5a3d00; }
-		.hor-dom   { background-color:#8fce8f; color:#0e3d0e; }
-		.hor-cnt-none { background-color:#fafafa; }
-		.hor-cnt-vis  { background-color:#fff3d6; }
-		.hor-cnt-dom  { background-color:#dff0df; }
+		.hor-none   { background-color:#f0f0f0; color:#666666; }
+		.hor-weak   { background-color:#fff1b8; color:#6b5500; }
+		.hor-mod    { background-color:#ffc97a; color:#5a3600; }
+		.hor-strong { background-color:#8fce8f; color:#0e3d0e; }
+		.hor-cnt-none   { background-color:#fafafa; }
+		.hor-cnt-weak   { background-color:#fff8dc; }
+		.hor-cnt-mod    { background-color:#ffe4b5; }
+		.hor-cnt-strong { background-color:#dff0df; }
 		.hor-legend { font-size:11px; color:#444; margin:6px 0 14px 0; }
 		.hor-legend .hor-badge { min-width:90px; margin-right:6px; }
 		-->

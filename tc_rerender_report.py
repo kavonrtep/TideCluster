@@ -36,7 +36,90 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-__version__ = "1"  # schema version for report.json
+__version__ = "2"  # schema version for report.json (v2: 4-bin HOR)
+
+# ----------------------------------------------------------------------
+# HOR classification — mirrors tarean/kite.R. See
+# docs/hor_classification.md for the algorithm and rationale.
+# ----------------------------------------------------------------------
+HOR_TOL             = 0.10
+HOR_HARMONIC_BONUS  = 0.5
+HOR_BIN_WEAK        = 0.10
+HOR_BIN_MODERATE    = 0.20
+HOR_BIN_STRONG      = 0.40
+HOR_MAX_K           = 5
+HOR_GRID_STEP       = 1
+
+
+def _score_m_star(ms, ss, m_star):
+    if m_star is None or m_star <= 0: return None
+    total = sum(s for s in ss if s is not None and s > 0)
+    if total <= 0: return None
+    ks, errs, close = [None] * len(ms), [None] * len(ms), [0.0] * len(ms)
+    for i, m in enumerate(ms):
+        if m is None: continue
+        k = round(m / m_star)
+        if k < 1: return None
+        ks[i] = k
+        errs[i] = abs(m - k * m_star) / m_star
+        close[i] = max(0.0, 1.0 - errs[i] / HOR_TOL)
+    if not any(k == 1 for k in ks if k is not None): return None
+    if not any(k is not None and k >= 2 for k in ks): return None
+    base_w = sum(ss[i] * close[i] for i in range(len(ms))
+                 if ks[i] == 1 and ss[i] is not None)
+    harm_w = sum(ss[i] * close[i] for i in range(len(ms))
+                 if ks[i] is not None and ks[i] >= 2 and ss[i] is not None)
+    f_base, f_harm = base_w / total, harm_w / total
+    distinct = len({ks[i] for i in range(len(ms))
+                    if ks[i] is not None and ks[i] >= 2 and close[i] > 0})
+    bonus = 1.0 + HOR_HARMONIC_BONUS * max(0, distinct - 1)
+    conf = ((max(0.0, f_base) * max(0.0, f_harm)) ** 0.5) * bonus
+    contributing = [ks[i] for i in range(len(ms))
+                    if ks[i] is not None and ks[i] >= 2 and close[i] > 0]
+    k_max = max(contributing) if contributing else None
+    return {"m_star": float(m_star), "ks": ks, "confidence": conf,
+            "distinct": distinct, "k_max": k_max}
+
+
+def _hor_candidates(ms):
+    valid = [m for m in ms if m is not None and m > 0]
+    if not valid: return []
+    out = {round(m) for m in valid}
+    for k in range(2, HOR_MAX_K + 1):
+        out.update(round(m / k) for m in valid)
+    lo = max(5, int(min(valid) * 0.5))
+    hi = int(max(valid) * 0.55)
+    if hi > lo:
+        out.update(range(lo, hi + 1, HOR_GRID_STEP))
+    return [x for x in out if x > 0]
+
+
+def compute_hor(m1, m2, m3, s1, s2, s3):
+    """Return dict of HOR fields for one array (mirrors kite.R).
+
+    Fields: status, confidence, base_monomer, hor_period, n_harmonics."""
+    ms, ss = [m1, m2, m3], [s1, s2, s3]
+    best = None
+    for m_star in _hor_candidates(ms):
+        fit = _score_m_star(ms, ss, m_star)
+        if fit and (best is None or fit["confidence"] > best["confidence"]):
+            best = fit
+    conf = best["confidence"] if best else 0.0
+    if conf < HOR_BIN_WEAK:     status = "No HOR"
+    elif conf < HOR_BIN_MODERATE: status = "HOR weak"
+    elif conf < HOR_BIN_STRONG:   status = "HOR moderate"
+    else:                         status = "HOR strong"
+    if best:
+        base_monomer = int(round(best["m_star"]))
+        hor_period   = (int(round(best["k_max"] * best["m_star"]))
+                        if best["k_max"] else None)
+        n_harmonics  = int(best["distinct"])
+    else:
+        base_monomer = hor_period = None
+        n_harmonics  = 0
+    return {"hor_status": status, "hor_confidence": round(conf, 4),
+            "hor_base_monomer": base_monomer, "hor_hor_period": hor_period,
+            "hor_n_harmonics": n_harmonics}
 
 # ----------------------------------------------------------------------
 # Small HTML helpers
@@ -62,14 +145,16 @@ def fmt_bp(n):
 def hor_badge(status):
     if not status:
         return ""
-    cls = {"HOR-dominant": "hor-dom",
-           "HOR-visible":  "hor-vis",
-           "No HOR detected": "hor-none"}.get(status, "hor-none")
+    cls = {"HOR strong":   "hor-strong",
+           "HOR moderate": "hor-mod",
+           "HOR weak":     "hor-weak",
+           "No HOR":       "hor-none"}.get(status, "hor-none")
     return f'<span class="hor-badge {cls}">{esc(status)}</span>'
 
 
 def hor_count_cell(n, kind):
-    cls = {"dom": "hor-cnt-dom", "vis": "hor-cnt-vis", "none": "hor-cnt-none"}[kind]
+    cls = {"strong": "hor-cnt-strong", "mod":  "hor-cnt-mod",
+           "weak":   "hor-cnt-weak",   "none": "hor-cnt-none"}[kind]
     return f'<span class="{cls}">{int(n)}</span>'
 
 
@@ -350,11 +435,23 @@ def load_tarean_summary(paths):
 
 
 def load_kite_top3(paths):
-    """Per-TRA KITE records keyed by (trc_id, seqid, start, end)."""
+    """Per-TRA KITE records keyed by (trc_id, seqid, start, end).
+
+    Both schemas are accepted:
+      - New (post-1.9.0): reads HOR_status / HOR_confidence / HOR_base_monomer
+        / HOR_hor_period / HOR_n_harmonics directly.
+      - Legacy (pre-1.9.0, incl. HOR_multiple column): the HOR columns are
+        recomputed from (m1..m3, s1..s3) using compute_hor(). This lets
+        rerender produce up-to-date HOR calls on old output directories
+        without re-running the KITE R script."""
     p = paths["kite_top3_csv"]
     if not p:
         return {}
     out = {}
+    # Peek at headers to decide legacy vs new.
+    with open(p, newline="") as f:
+        header = next(csv.reader(f, delimiter="\t"))
+    is_new = "HOR_confidence" in header
     for row in _read_rows(p, "\t"):
         trc = (row.get("TRC_ID") or "").strip()
         sid = (row.get("seqid") or "").strip()
@@ -370,17 +467,25 @@ def load_kite_top3(paths):
         def ni(v):
             x = num(v)
             return int(x) if x is not None else None
-        hor_mult = row.get("HOR_multiple")
+        m1 = ni(row.get("monomer_size"));   s1 = num(row.get("score"))
+        m2 = ni(row.get("monomer_size_2")); s2 = num(row.get("score_2"))
+        m3 = ni(row.get("monomer_size_3")); s3 = num(row.get("score_3"))
+
+        if is_new:
+            hor = {
+                "hor_status":       (row.get("HOR_status") or "").strip() or "No HOR",
+                "hor_confidence":   num(row.get("HOR_confidence")) or 0.0,
+                "hor_base_monomer": ni(row.get("HOR_base_monomer")),
+                "hor_hor_period":   ni(row.get("HOR_hor_period")),
+                "hor_n_harmonics":  ni(row.get("HOR_n_harmonics")) or 0,
+            }
+        else:
+            hor = compute_hor(m1, m2, m3, s1, s2, s3)
+
         out[(trc, sid, start, end)] = {
-            "m1": ni(row.get("monomer_size")),
-            "s1": num(row.get("score")),
-            "m2": ni(row.get("monomer_size_2")),
-            "s2": num(row.get("score_2")),
-            "m3": ni(row.get("monomer_size_3")),
-            "s3": num(row.get("score_3")),
+            "m1": m1, "s1": s1, "m2": m2, "s2": s2, "m3": m3, "s3": s3,
             "array_length": ni(row.get("array_length")),
-            "hor_status":   (row.get("HOR_status") or "").strip() or None,
-            "hor_multiple": None if hor_mult in (None, "", "NA") else int(float(hor_mult)),
+            **hor,
         }
     return out
 
@@ -470,7 +575,9 @@ def build_model(input_dir: Path, prefix: str):
     for trc_id in sorted(tras_by_trc, key=_trc_sort_key):
         arrays = tras_by_trc[trc_id]
         # Merge KITE per-array fields
-        kite_counts = {"no_hor": 0, "hor_visible": 0, "hor_dominant": 0}
+        kite_counts = {"no_hor": 0, "hor_weak": 0, "hor_moderate": 0,
+                       "hor_strong": 0}
+        confidences = []
         m1_values = []
         for arr in arrays:
             key = (trc_id, arr["seqid"], arr["start"], arr["end"])
@@ -478,9 +585,12 @@ def build_model(input_dir: Path, prefix: str):
             if k:
                 arr.update(k)
                 status = k.get("hor_status")
-                if status == "HOR-dominant": kite_counts["hor_dominant"] += 1
-                elif status == "HOR-visible": kite_counts["hor_visible"] += 1
-                elif status == "No HOR detected": kite_counts["no_hor"] += 1
+                if   status == "HOR strong":    kite_counts["hor_strong"]   += 1
+                elif status == "HOR moderate":  kite_counts["hor_moderate"] += 1
+                elif status == "HOR weak":      kite_counts["hor_weak"]     += 1
+                elif status == "No HOR":        kite_counts["no_hor"]       += 1
+                c = k.get("hor_confidence")
+                if c is not None: confidences.append(c)
                 if k.get("m1") is not None:
                     m1_values.append(k["m1"])
         # TRC-level aggregates
@@ -498,10 +608,13 @@ def build_model(input_dir: Path, prefix: str):
             # (matches original kite_report.R's monomer_size column).
             monomer_primary = Counter(m1_values).most_common(1)[0][0]
             kite_block = {
-                "monomer_primary": int(monomer_primary),
-                "n_no_hor":        kite_counts["no_hor"],
-                "n_hor_visible":   kite_counts["hor_visible"],
-                "n_hor_dominant":  kite_counts["hor_dominant"],
+                "monomer_primary":  int(monomer_primary),
+                "n_no_hor":         kite_counts["no_hor"],
+                "n_hor_weak":       kite_counts["hor_weak"],
+                "n_hor_moderate":   kite_counts["hor_moderate"],
+                "n_hor_strong":     kite_counts["hor_strong"],
+                "median_confidence": (round(statistics.median(confidences), 4)
+                                      if confidences else None),
                 "profile_png":      f"{kite_dir_rel}/profile_plots/profile_{trc_id}.png",
                 "profile_top3_png": f"{kite_dir_rel}/profile_plots/profile_top3_{trc_id}.png",
             }
@@ -593,12 +706,13 @@ def render_index(model, out_dir, run_meta):
     stats_html = "".join(
         f'<dt>{esc(label)}</dt><dd>{esc(val) if val != "" else ""}</dd>'
         for label, val in rows_stats)
-    hor_total = {"dom": 0, "vis": 0, "none": 0}
+    hor_total = {"strong": 0, "mod": 0, "weak": 0, "none": 0}
     for t in model["trcs"]:
         if t["kite"]:
-            hor_total["dom"]  += t["kite"]["n_hor_dominant"]
-            hor_total["vis"]  += t["kite"]["n_hor_visible"]
-            hor_total["none"] += t["kite"]["n_no_hor"]
+            hor_total["strong"] += t["kite"]["n_hor_strong"]
+            hor_total["mod"]    += t["kite"]["n_hor_moderate"]
+            hor_total["weak"]   += t["kite"]["n_hor_weak"]
+            hor_total["none"]   += t["kite"]["n_no_hor"]
     n_tarean    = sum(1 for t in model["trcs"] if t["tarean"])
     n_sf_peers  = sum(1 for t in model["trcs"] if t["superfamily"])
     cards = f"""
@@ -609,8 +723,9 @@ def render_index(model, out_dir, run_meta):
         <dl class="tc-kv">
           <dt>TRCs total</dt>     <dd><a href="tarean.html">{len(model["trcs"])}</a></dd>
           <dt>TAREAN-analysed</dt><dd><a href="tarean.html">{n_tarean}</a></dd>
-          <dt>HOR calls</dt>      <dd>{hor_badge("HOR-dominant")} {hor_total["dom"]} ·
-                                      {hor_badge("HOR-visible")} {hor_total["vis"]}</dd>
+          <dt>HOR calls</dt>      <dd>{hor_badge("HOR strong")} {hor_total["strong"]} ·
+                                      {hor_badge("HOR moderate")} {hor_total["mod"]} ·
+                                      {hor_badge("HOR weak")} {hor_total["weak"]}</dd>
           <dt>Superfamilies</dt>  <dd><a href="superfamilies.html">{len(model["superfamilies"])}</a>,
                                       {n_sf_peers} TRCs grouped</dd>
         </dl></div>
@@ -662,9 +777,10 @@ def _thumb(src_rel, kind, src_prefix="../", alt=""):
 def _render_tarean_row(t, src_prefix="../"):
     ta = t["tarean"] or {}
     kite = t["kite"] or {}
-    hor_cell = (f'{hor_count_cell(kite["n_hor_dominant"], "dom")}'
-                f'{hor_count_cell(kite["n_hor_visible"], "vis")}'
-                f'{hor_count_cell(kite["n_no_hor"], "none")}') if kite else ""
+    hor_cell = (f'{hor_count_cell(kite["n_hor_strong"],   "strong")}'
+                f'{hor_count_cell(kite["n_hor_moderate"], "mod")}'
+                f'{hor_count_cell(kite["n_hor_weak"],     "weak")}'
+                f'{hor_count_cell(kite["n_no_hor"],       "none")}') if kite else ""
     sf_cell = (f'<a href="superfamilies.html#sf-{t["superfamily"]}">SF {t["superfamily"]}</a>'
                if t["superfamily"] else "")
     cons_short = ""
@@ -722,7 +838,7 @@ def render_tarean(model, out_dir, run_meta):
         <th>Score<br>(TAREAN)</th>
         <th>SSR motif</th>
         <th>Annotation</th>
-        <th>HOR<br>(dom / vis / none)</th>
+        <th>HOR<br>(strong / mod / weak / none)</th>
         <th>Superfamily</th>
         <th>Graph</th>
         <th>Logo</th>
@@ -741,15 +857,17 @@ def render_tarean(model, out_dir, run_meta):
 
 
 def render_kite(model, out_dir, run_meta):
-    hor_total = {"dom": 0, "vis": 0, "none": 0}
+    hor_total = {"strong": 0, "mod": 0, "weak": 0, "none": 0}
     for t in model["trcs"]:
         if t["kite"]:
-            hor_total["dom"]  += t["kite"]["n_hor_dominant"]
-            hor_total["vis"]  += t["kite"]["n_hor_visible"]
-            hor_total["none"] += t["kite"]["n_no_hor"]
+            hor_total["strong"] += t["kite"]["n_hor_strong"]
+            hor_total["mod"]    += t["kite"]["n_hor_moderate"]
+            hor_total["weak"]   += t["kite"]["n_hor_weak"]
+            hor_total["none"]   += t["kite"]["n_no_hor"]
     total = sum(hor_total.values()) or 1
     bar = ""
-    for kind, label in (("dom", "HOR-dominant"), ("vis", "HOR-visible"), ("none", "No HOR")):
+    for kind, label in (("strong", "HOR strong"), ("mod", "HOR moderate"),
+                        ("weak",   "HOR weak"),   ("none", "No HOR")):
         pct = 100 * hor_total[kind] / total
         if pct < 1 and hor_total[kind] == 0:
             continue
@@ -765,6 +883,8 @@ def render_kite(model, out_dir, run_meta):
                                src_prefix="../", alt="KITE profile")
         tarean_mon = (t["tarean"] or {}).get("monomer_length")
         kite_mon   = k.get("monomer_primary")
+        med_conf   = k.get("median_confidence")
+        med_str    = f"{med_conf:.3f}" if med_conf is not None else ""
         rows.append(
             "<tr>"
             f'<td data-order="{t["index"]}">{_trc_link(t["id"])}</td>'
@@ -772,9 +892,11 @@ def render_kite(model, out_dir, run_meta):
             f'<td data-order="{tarean_mon or 0}">{esc(tarean_mon)}</td>'
             f'<td data-order="{t["n_arrays"]}">{t["n_arrays"]}</td>'
             f'<td data-order="{t["total_size"]}">{fmt_bp(t["total_size"])}</td>'
-            f'<td data-order="{k["n_hor_dominant"]}">{hor_count_cell(k["n_hor_dominant"],"dom")}</td>'
-            f'<td data-order="{k["n_hor_visible"]}">{hor_count_cell(k["n_hor_visible"],"vis")}</td>'
-            f'<td data-order="{k["n_no_hor"]}">{hor_count_cell(k["n_no_hor"],"none")}</td>'
+            f'<td data-order="{k["n_hor_strong"]}">{hor_count_cell(k["n_hor_strong"],   "strong")}</td>'
+            f'<td data-order="{k["n_hor_moderate"]}">{hor_count_cell(k["n_hor_moderate"], "mod")}</td>'
+            f'<td data-order="{k["n_hor_weak"]}">{hor_count_cell(k["n_hor_weak"],     "weak")}</td>'
+            f'<td data-order="{k["n_no_hor"]}">{hor_count_cell(k["n_no_hor"],       "none")}</td>'
+            f'<td data-order="{med_conf or 0}">{med_str}</td>'
             f'<td>{profile_thumb}</td>'
             "</tr>")
     body = f"""
@@ -782,17 +904,20 @@ def render_kite(model, out_dir, run_meta):
     <h3>HOR distribution across all analysed arrays</h3>
     <div class="tc-bar" title="Total arrays: {total}">{bar}</div>
     <p style="font-size:12px;color:var(--fg-muted)">
-      {hor_badge("HOR-dominant")} {hor_total["dom"]}
-      · {hor_badge("HOR-visible")} {hor_total["vis"]}
-      · {hor_badge("No HOR detected")} {hor_total["none"]}
-      (total {total} arrays).
+      {hor_badge("HOR strong")} {hor_total["strong"]}
+      · {hor_badge("HOR moderate")} {hor_total["mod"]}
+      · {hor_badge("HOR weak")} {hor_total["weak"]}
+      · {hor_badge("No HOR")} {hor_total["none"]}
+      (total {total} arrays). See <code>docs/hor_classification.md</code>
+      for the scoring formula and category thresholds.
     </p>
     <h2>Per-TRC HOR summary</h2>
     <p style="font-size:12px;color:var(--fg-muted)">
       <strong>Monomer (KITE)</strong> is the most-frequent primary
       k-mer-interval estimate across the arrays of a given TRC.
       <strong>Monomer (TAREAN)</strong> is the TAREAN de&nbsp;Bruijn
-      consensus length.
+      consensus length. <strong>Median conf.</strong> is the median
+      HOR confidence of the TRC's arrays.
     </p>
     <div class="tc-table-wrap">
     <table class="tc-table tc-datatable" data-page-length="25" data-order='[[0,"asc"]]'>
@@ -802,7 +927,11 @@ def render_kite(model, out_dir, run_meta):
         <th>Monomer<br>(TAREAN)</th>
         <th>Arrays</th>
         <th>Total size</th>
-        <th>HOR-dom</th><th>HOR-vis</th><th>No&nbsp;HOR</th>
+        <th>HOR<br>strong</th>
+        <th>HOR<br>moderate</th>
+        <th>HOR<br>weak</th>
+        <th>No&nbsp;HOR</th>
+        <th>Median<br>conf.</th>
         <th>Profile</th>
       </tr></thead>
       <tbody>{"".join(rows)}</tbody>
@@ -857,15 +986,18 @@ def _fmt_score(x):
 def _arrays_table(arrays, include_hor=True):
     """Render the per-array DataTable body for a TRC dashboard.
 
-    When include_hor is True the table has m1..m3 and s1..s3 columns
-    plus HOR status + n (integer multiple). SSR dashboards instead get
-    an `SSR motif` column since neither TAREAN nor KITE apply to them
-    meaningfully."""
+    When include_hor is True the table carries m1..m3, s1..s3,
+    HOR status, confidence, base monomer, and HOR period columns.
+    SSR dashboards instead get an `SSR motif` column since neither
+    TAREAN nor KITE apply to them meaningfully."""
     rows = []
     for i, a in enumerate(arrays, 1):
         if include_hor:
             hor_bcell = hor_badge(a.get("hor_status"))
-            hor_n = a.get("hor_multiple")
+            conf = a.get("hor_confidence")
+            base = a.get("hor_base_monomer")
+            perd = a.get("hor_hor_period")
+            conf_str = f"{conf:.3f}" if conf is not None else ""
             rows.append(
                 "<tr>"
                 f'<td>{i}</td>'
@@ -880,7 +1012,9 @@ def _arrays_table(arrays, include_hor=True):
                 f'<td data-order="{a.get("m3") or 0}">{esc(a.get("m3"))}</td>'
                 f'<td data-order="{a.get("s3") or 0}">{_fmt_score(a.get("s3"))}</td>'
                 f'<td>{hor_bcell}</td>'
-                f'<td>{esc(hor_n) if hor_n else ""}</td>'
+                f'<td data-order="{conf or 0}">{conf_str}</td>'
+                f'<td data-order="{base or 0}">{esc(base) if base else ""}</td>'
+                f'<td data-order="{perd or 0}">{esc(perd) if perd else ""}</td>'
                 "</tr>")
         else:
             rows.append(
@@ -900,9 +1034,15 @@ ARRAYS_LEGEND = """
   <dt>m<sub>1</sub></dt><dd>Monomer size — primary estimate</dd>
   <dt>m<sub>2</sub>, m<sub>3</sub></dt><dd>Alternative estimates (2nd and 3rd KITE peaks)</dd>
   <dt>s<sub>1</sub>, s<sub>2</sub>, s<sub>3</sub></dt><dd>k-mer-interval scores for each peak</dd>
-  <dt>n</dt><dd>integer multiple that triggered the HOR call
-      (e.g. <code>n=3</code> means m<sub>1</sub> ≈ 3 &times; m<sub>2</sub>);
-      empty when no HOR was detected</dd>
+  <dt>HOR status</dt><dd>category derived from the continuous confidence:
+      <span class="hor-badge hor-none">No HOR</span>
+      <span class="hor-badge hor-weak">HOR weak</span>
+      <span class="hor-badge hor-mod">HOR moderate</span>
+      <span class="hor-badge hor-strong">HOR strong</span></dd>
+  <dt>Confidence</dt><dd>continuous HOR score (base&times;harmonic geometric-mean,
+      bonus for multiple harmonics); 0 when the array has no base+harmonic structure.</dd>
+  <dt>Base (bp) / HOR period (bp)</dt><dd>fitted base monomer <em>m*</em> and
+      the largest supported harmonic <em>k<sub>max</sub>&middot;m*</em>.</dd>
 </div>
 """
 
@@ -1000,9 +1140,13 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta):
     kite = trc.get("kite") or {}
     class_rows = []
     if kite:
-        class_rows.append(("HOR-dominant arrays", kite["n_hor_dominant"]))
-        class_rows.append(("HOR-visible arrays",  kite["n_hor_visible"]))
+        class_rows.append(("HOR strong arrays",   kite["n_hor_strong"]))
+        class_rows.append(("HOR moderate arrays", kite["n_hor_moderate"]))
+        class_rows.append(("HOR weak arrays",     kite["n_hor_weak"]))
         class_rows.append(("No HOR detected",     kite["n_no_hor"]))
+        if kite.get("median_confidence") is not None:
+            class_rows.append(("Median HOR confidence",
+                               f'{kite["median_confidence"]:.3f}'))
     if trc.get("superfamily"):
         class_rows.append(
             ("Superfamily",
@@ -1064,7 +1208,10 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta):
                 "<th>m<sub>1</sub></th><th>s<sub>1</sub></th>"
                 "<th>m<sub>2</sub></th><th>s<sub>2</sub></th>"
                 "<th>m<sub>3</sub></th><th>s<sub>3</sub></th>"
-                "<th>HOR status</th><th>n</th>")
+                "<th>HOR status</th>"
+                "<th>Confidence</th>"
+                "<th>Base (bp)</th>"
+                "<th>HOR period (bp)</th>")
         legend = ARRAYS_LEGEND
     elif _is_ssr(trc):
         head = ("<th>#</th><th>seqid</th><th>start</th><th>end</th><th>length</th>"
@@ -1223,10 +1370,15 @@ def main(argv=None):
     trc_count = len(model["trcs"])
     analysed  = sum(1 for t in model["trcs"] if t.get("tarean"))
     sf_count  = len(model["superfamilies"])
-    hor_dom   = sum((t["kite"]["n_hor_dominant"] if t.get("kite") else 0) for t in model["trcs"])
-    hor_vis   = sum((t["kite"]["n_hor_visible"]  if t.get("kite") else 0) for t in model["trcs"])
+    hor_s = hor_m = hor_w = 0
+    for t in model["trcs"]:
+        if not t.get("kite"): continue
+        hor_s += t["kite"]["n_hor_strong"]
+        hor_m += t["kite"]["n_hor_moderate"]
+        hor_w += t["kite"]["n_hor_weak"]
     print(f"TRCs: {trc_count}  TAREAN-analysed: {analysed}  "
-          f"superfamilies: {sf_count}  HOR dom/vis: {hor_dom}/{hor_vis}")
+          f"superfamilies: {sf_count}  "
+          f"HOR strong/moderate/weak: {hor_s}/{hor_m}/{hor_w}")
 
     script_path = Path(__file__).resolve()
     copy_assets(out_dir / "assets", script_path)

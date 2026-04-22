@@ -49,73 +49,115 @@ dir.create(output_dir, showWarnings = FALSE)
 
 
 ## HOR CLASSIFICATION CONFIG
-# Used by classify_hor_array() below. Exposed here so tuning is discoverable.
-HOR_RATIO_TOL    <- 0.10  # fractional tolerance for integer-multiple test
-HOR_SCORE_RATIO  <- 0.80  # s2 must be >= this fraction of s1 for HOR-visible
-HOR_MIN_INTEGER  <- 2L    # smallest integer multiple n that counts as HOR
+# Principles and rationale: see docs/hor_classification.md.
+# All tunables live here so they are discoverable; edit here and the
+# per-array and per-TRC outputs reflect the new calibration.
+HOR_TOL              <- 0.10   # fractional tolerance around integer ratios
+HOR_HARMONIC_BONUS   <- 0.5    # weight per extra distinct harmonic k >= 2
+HOR_BIN_WEAK         <- 0.10   # confidence thresholds; see §3.4 of docs
+HOR_BIN_MODERATE     <- 0.20
+HOR_BIN_STRONG       <- 0.40
+HOR_MAX_K            <- 5L     # enumerate m_i/k candidates up to k = MAX_K
+HOR_GRID_STEP        <- 1L     # bp resolution of the fine candidate grid
 
 ## FUNCTIONS
-# Test whether `ratio` is within `tol` of an integer >= n_min. Returns the
-# integer multiple as integer if so, NA_integer_ otherwise. NA / non-finite
-# inputs return NA.
-is_integer_multiple <- function(ratio,
-                                n_min = HOR_MIN_INTEGER,
-                                tol   = HOR_RATIO_TOL) {
-  if (is.na(ratio) || !is.finite(ratio) || ratio < n_min - tol) return(NA_integer_)
-  n <- round(ratio)
-  if (n < n_min) return(NA_integer_)
-  if (abs(ratio - n) / n <= tol) as.integer(n) else NA_integer_
+# Score a single candidate base monomer m* against the top-3 peaks
+# (ms = c(m1, m2, m3), ss = c(s1, s2, s3)). Returns a list with the
+# fit info + confidence, or NULL if m* cannot be interpreted as a
+# base-with-harmonic explanation of these peaks.
+score_m_star <- function(ms, ss, m_star) {
+  if (is.na(m_star) || m_star <= 0) return(NULL)
+  total <- sum(ss, na.rm = TRUE)
+  if (!is.finite(total) || total <= 0) return(NULL)
+  n_peaks <- length(ms)
+  ks    <- rep(NA_integer_, n_peaks)
+  errs  <- rep(NA_real_, n_peaks)
+  close <- rep(0, n_peaks)
+  for (i in seq_len(n_peaks)) {
+    if (is.na(ms[i])) next
+    k <- as.integer(round(ms[i] / m_star))
+    if (k < 1L) return(NULL)           # m_star larger than this peak
+    ks[i]    <- k
+    errs[i]  <- abs(ms[i] - k * m_star) / m_star
+    close[i] <- max(0, 1 - errs[i] / HOR_TOL)
+  }
+  # Require at least one k == 1 (base present) AND at least one k >= 2
+  if (!any(ks == 1L, na.rm = TRUE))  return(NULL)
+  if (!any(ks >= 2L, na.rm = TRUE)) return(NULL)
+
+  base_w <- sum((ss * close)[!is.na(ks) & ks == 1L], na.rm = TRUE)
+  harm_w <- sum((ss * close)[!is.na(ks) & ks >= 2L], na.rm = TRUE)
+  f_base <- base_w / total
+  f_harm <- harm_w / total
+  distinct_h <- length(unique(ks[!is.na(ks) & ks >= 2L & close > 0]))
+  bonus   <- 1 + HOR_HARMONIC_BONUS * max(0, distinct_h - 1)
+  support <- sqrt(max(0, f_base) * max(0, f_harm))
+  conf    <- support * bonus
+  contributing_ks <- ks[!is.na(ks) & ks >= 2L & close > 0]
+  k_max <- if (length(contributing_ks) > 0) max(contributing_ks) else NA_integer_
+  list(m_star = m_star, ks = ks, errs = errs, close = close,
+       f_base = f_base, f_harm = f_harm, distinct = distinct_h,
+       bonus = bonus, confidence = conf, k_max = k_max, total_s = total)
 }
 
-# Classify a single tandem-repeat array by the relationship between its
-# top three monomer-size estimates (m1, m2, m3) and their scores
-# (s1, s2, s3). Returns a list(status, n) where status is one of
-# "No HOR detected", "HOR-visible", "HOR-dominant" and n is the integer
-# multiple that triggered the call (NA when status is "No HOR detected").
-#
-# Rules (per design discussion):
-#   HOR-dominant : m1/m2 ~= integer >= 2 within HOR_RATIO_TOL AND
-#                  m1/m3 ~= integer >= 2 within HOR_RATIO_TOL.
-#                  Concordance with the tertiary peak is mandatory; if
-#                  m2 or m3 is missing the call cannot be made.
-#   HOR-visible  : m2/m1 ~= integer >= 2 within HOR_RATIO_TOL AND
-#                  s2 >= HOR_SCORE_RATIO * s1.
-#                  If m2 is missing the call cannot be made.
-classify_hor_array <- function(m1, m2, m3, s1, s2, s3) {
-  if (is.na(m1) || is.na(m2)) return(list(status = "No HOR detected", n = NA_integer_))
-
-  # HOR-dominant requires both pairwise integer-multiples
-  n12 <- is_integer_multiple(m1 / m2)
-  if (!is.na(n12) && !is.na(m3)) {
-    n13 <- is_integer_multiple(m1 / m3)
-    if (!is.na(n13)) return(list(status = "HOR-dominant", n = n12))
+# Build the candidate m* set for an array: observed peaks, their k-th
+# fractions for k in 2..HOR_MAX_K, and a 1 bp grid between min(m)/2
+# and max(m)/2 (the range where a real base monomer is plausible).
+hor_candidates <- function(ms) {
+  valid <- ms[!is.na(ms) & ms > 0]
+  if (length(valid) == 0) return(integer(0))
+  cand <- as.integer(round(valid))
+  for (k in 2:HOR_MAX_K) {
+    cand <- c(cand, as.integer(round(valid / k)))
   }
+  lo <- max(5L, as.integer(min(valid) * 0.5))
+  hi <- as.integer(max(valid) * 0.55)
+  if (hi > lo) cand <- c(cand, seq.int(lo, hi, by = HOR_GRID_STEP))
+  unique(cand[cand > 0])
+}
 
-  # HOR-visible requires m2 to be a high-multiple peak with a strong score
-  n21 <- is_integer_multiple(m2 / m1)
-  if (!is.na(n21) && !is.na(s1) && !is.na(s2) && s2 >= HOR_SCORE_RATIO * s1) {
-    return(list(status = "HOR-visible", n = n21))
+# Find the best-fitting m* for one array (highest confidence).
+# Returns the score_m_star() result for that m*, or NULL if no
+# candidate satisfied the base + harmonic requirement.
+best_hor_fit <- function(m1, m2, m3, s1, s2, s3) {
+  ms <- c(m1, m2, m3); ss <- c(s1, s2, s3)
+  if (all(is.na(ms))) return(NULL)
+  best <- NULL
+  for (m_star in hor_candidates(ms)) {
+    fit <- score_m_star(ms, ss, m_star)
+    if (is.null(fit)) next
+    if (is.null(best) || fit$confidence > best$confidence) best <- fit
   }
+  best
+}
 
-  list(status = "No HOR detected", n = NA_integer_)
+# Map a continuous confidence to a categorical label.
+classify_hor_confidence <- function(conf) {
+  if (is.na(conf) || conf < HOR_BIN_WEAK)     return("No HOR")
+  if (conf < HOR_BIN_MODERATE)                 return("HOR weak")
+  if (conf < HOR_BIN_STRONG)                   return("HOR moderate")
+  "HOR strong"
 }
 
 # Wrap a HOR status string in a coloured HTML badge for use in HTML tables.
 hor_status_badge <- function(status) {
   cls <- switch(status,
-                "HOR-dominant"    = "hor-dom",
-                "HOR-visible"     = "hor-vis",
-                "No HOR detected" = "hor-none",
+                "HOR strong"   = "hor-strong",
+                "HOR moderate" = "hor-mod",
+                "HOR weak"     = "hor-weak",
+                "No HOR"       = "hor-none",
                 "hor-none")
   sprintf('<span class="hor-badge %s">%s</span>', cls, status)
 }
 
 # Wrap a per-TRC count cell with a tinted background matching its category.
+# kind is one of "strong", "mod", "weak", "none".
 hor_count_cell <- function(value, kind) {
   cls <- switch(kind,
-                "dom"  = "hor-cnt-dom",
-                "vis"  = "hor-cnt-vis",
-                "none" = "hor-cnt-none",
+                "strong" = "hor-cnt-strong",
+                "mod"    = "hor-cnt-mod",
+                "weak"   = "hor-cnt-weak",
+                "none"   = "hor-cnt-none",
                 "hor-cnt-none")
   sprintf('<span class="%s" style="display:block; padding:2px 8px; text-align:center;">%d</span>',
           cls, as.integer(value))
@@ -346,23 +388,38 @@ colnames(best_peaks_concise) <- c("TRC_ID", "seqid", "start", "end", "monomer_si
                                   "score", "array_length", "monomer_size_2", "score_2",
                                   "monomer_size_3", "score_3")
 
-# Per-array HOR classification. Two new columns: HOR_status (factor-like
-# character; one of "No HOR detected" / "HOR-visible" / "HOR-dominant")
-# and HOR_multiple (the integer multiple n that triggered the call, NA
-# when status is "No HOR detected"). Both are written to the TSVs and
-# surfaced in the per-TRC HTML pages below.
-hor_calls <- mapply(classify_hor_array,
-                    best_peaks_concise$monomer_size,
-                    best_peaks_concise$monomer_size_2,
-                    best_peaks_concise$monomer_size_3,
-                    best_peaks_concise$score,
-                    best_peaks_concise$score_2,
-                    best_peaks_concise$score_3,
-                    SIMPLIFY = FALSE)
-best_peaks_concise$HOR_status   <- vapply(hor_calls, `[[`, character(1), "status")
-best_peaks_concise$HOR_multiple <- vapply(hor_calls, `[[`, integer(1),   "n")
-peaks_best$HOR_status   <- best_peaks_concise$HOR_status
-peaks_best$HOR_multiple <- best_peaks_concise$HOR_multiple
+# Per-array HOR classification via confidence search. Five columns are
+# added: HOR_status (4-bin label), HOR_confidence (continuous score),
+# HOR_base_monomer (fitted m*, bp), HOR_hor_period (k_max * m*, bp),
+# HOR_n_harmonics (distinct k >= 2 that contributed). See
+# docs/hor_classification.md for the algorithm and rationale.
+hor_fits <- lapply(seq_len(nrow(best_peaks_concise)), function(i) {
+  best_hor_fit(best_peaks_concise$monomer_size[i],
+               best_peaks_concise$monomer_size_2[i],
+               best_peaks_concise$monomer_size_3[i],
+               best_peaks_concise$score[i],
+               best_peaks_concise$score_2[i],
+               best_peaks_concise$score_3[i])
+})
+best_peaks_concise$HOR_confidence <- vapply(hor_fits,
+  function(f) if (is.null(f)) 0 else f$confidence, numeric(1))
+best_peaks_concise$HOR_status <- vapply(best_peaks_concise$HOR_confidence,
+  classify_hor_confidence, character(1))
+best_peaks_concise$HOR_base_monomer <- vapply(hor_fits,
+  function(f) if (is.null(f)) NA_integer_ else as.integer(round(f$m_star)),
+  integer(1))
+best_peaks_concise$HOR_hor_period <- vapply(hor_fits, function(f) {
+  if (is.null(f) || is.na(f$k_max)) NA_integer_
+  else as.integer(round(f$k_max * f$m_star))
+}, integer(1))
+best_peaks_concise$HOR_n_harmonics <- vapply(hor_fits,
+  function(f) if (is.null(f)) 0L else as.integer(f$distinct), integer(1))
+
+peaks_best$HOR_status       <- best_peaks_concise$HOR_status
+peaks_best$HOR_confidence   <- best_peaks_concise$HOR_confidence
+peaks_best$HOR_base_monomer <- best_peaks_concise$HOR_base_monomer
+peaks_best$HOR_hor_period   <- best_peaks_concise$HOR_hor_period
+peaks_best$HOR_n_harmonics  <- best_peaks_concise$HOR_n_harmonics
 
 
 save.image(file = paste0(output_dir, "/tcr.RData"))
@@ -467,15 +524,19 @@ trc_df$number_of_regions <- sapply(trc_df$TRC_ID, function(x) {
   return(length(x))
 })
 
-# Per-TRC HOR rollup: counts only (TRCs are heterogeneous, a single TRC-
-# level label was rejected by design). Three new integer columns; the
-# tinted HTML rendering happens later, just before HTML() is called.
+# Per-TRC HOR rollup: 4-bin counts + median confidence. No single TRC-
+# level HOR label (TRCs are often heterogeneous).
 hor_count <- function(trc, status) {
   sum(best_peaks_concise$TRC_ID == trc & best_peaks_concise$HOR_status == status)
 }
-trc_df$N_no_HOR       <- vapply(trc_df$TRC_ID, hor_count, integer(1), "No HOR detected")
-trc_df$N_HOR_visible  <- vapply(trc_df$TRC_ID, hor_count, integer(1), "HOR-visible")
-trc_df$N_HOR_dominant <- vapply(trc_df$TRC_ID, hor_count, integer(1), "HOR-dominant")
+trc_df$N_no_HOR       <- vapply(trc_df$TRC_ID, hor_count, integer(1), "No HOR")
+trc_df$N_HOR_weak     <- vapply(trc_df$TRC_ID, hor_count, integer(1), "HOR weak")
+trc_df$N_HOR_moderate <- vapply(trc_df$TRC_ID, hor_count, integer(1), "HOR moderate")
+trc_df$N_HOR_strong   <- vapply(trc_df$TRC_ID, hor_count, integer(1), "HOR strong")
+trc_df$HOR_median_conf <- vapply(trc_df$TRC_ID, function(t) {
+  v <- best_peaks_concise$HOR_confidence[best_peaks_concise$TRC_ID == t]
+  if (length(v) == 0) NA_real_ else median(v, na.rm = TRUE)
+}, numeric(1))
 
 # link image <img> to monomer size profile of top3 peaks for each TRC_ID
 trc_df$monomer_size_profile <- sapply(trc_df$TRC_ID, function(x) {
@@ -501,43 +562,50 @@ The Monomer Size Estimate Score Plot displays weighted scores for
 ", file = html_out)
 HTML(sprintf("
 <h3>Higher-order repeat (HOR) classification</h3>
-<p>Each tandem repeat array (TRA) is assigned one of three HOR categories
-based on the relationship between its top-three monomer-size estimates
-(m<sub>1</sub>, m<sub>2</sub>, m<sub>3</sub>) and their scores
-(s<sub>1</sub>, s<sub>2</sub>, s<sub>3</sub>):</p>
+<p>Each tandem repeat array (TRA) is assigned a continuous HOR
+confidence score by searching for a base monomer m* that best explains
+the three observed peaks as a harmonic series, and measuring how much
+real score mass sits on the base and on the harmonics. See
+<code>docs/hor_classification.md</code> in the TideCluster source for
+the full algorithm. The score is binned into four categories:</p>
 <ul style=\"max-width:760px;\">
-<li>%s &mdash; m<sub>1</sub>/m<sub>2</sub> and m<sub>1</sub>/m<sub>3</sub>
-are both close to the same integer &ge; %d (within %g%%); the primary
-estimate is itself an HOR period, confirmed by two independent secondary
-peaks.</li>
-<li>%s &mdash; m<sub>2</sub>/m<sub>1</sub> is close to an integer
-&ge; %d (within %g%%) and s<sub>2</sub> &ge; %g &times; s<sub>1</sub>;
-a clear HOR period is visible above the basic monomer.</li>
-<li>%s &mdash; neither relationship holds, or m<sub>2</sub>/m<sub>3</sub>
-is missing.</li>
+<li>%s &mdash; confidence &ge; %.2f. Clean base + one or more
+well-supported harmonics at integer multiples within %.0f%%.</li>
+<li>%s &mdash; %.2f &le; confidence &lt; %.2f. Base and harmonic
+both visible but one of them carries modest score mass or sits
+slightly outside the tolerance band.</li>
+<li>%s &mdash; %.2f &le; confidence &lt; %.2f. Weak evidence: a
+harmonic is present but with low score, or the integer-multiple fit
+is noisy.</li>
+<li>%s &mdash; confidence &lt; %.2f. No supported HOR structure.</li>
 </ul>
 <p class=\"hor-legend\">Per-TRC counts below show how many of that TRC's
-arrays fall into each category.</p>",
-hor_status_badge("HOR-dominant"),    HOR_MIN_INTEGER, HOR_RATIO_TOL * 100,
-hor_status_badge("HOR-visible"),     HOR_MIN_INTEGER, HOR_RATIO_TOL * 100,
-HOR_SCORE_RATIO,
-hor_status_badge("No HOR detected")), file = html_out)
+arrays fall into each category, plus the median confidence.</p>",
+hor_status_badge("HOR strong"),   HOR_BIN_STRONG, HOR_TOL * 100,
+hor_status_badge("HOR moderate"), HOR_BIN_MODERATE, HOR_BIN_STRONG,
+hor_status_badge("HOR weak"),     HOR_BIN_WEAK,     HOR_BIN_MODERATE,
+hor_status_badge("No HOR"),       HOR_BIN_WEAK), file = html_out)
 
 
 # add table with TRC_ID and link to subsections within the report
 # for each TRC_ID add link to the corresponding section (in HTML.title below)
 # Tint the per-TRC HOR count cells before renaming columns for display.
 trc_df$N_no_HOR       <- vapply(trc_df$N_no_HOR,       hor_count_cell, character(1), "none")
-trc_df$N_HOR_visible  <- vapply(trc_df$N_HOR_visible,  hor_count_cell, character(1), "vis")
-trc_df$N_HOR_dominant <- vapply(trc_df$N_HOR_dominant, hor_count_cell, character(1), "dom")
+trc_df$N_HOR_weak     <- vapply(trc_df$N_HOR_weak,     hor_count_cell, character(1), "weak")
+trc_df$N_HOR_moderate <- vapply(trc_df$N_HOR_moderate, hor_count_cell, character(1), "mod")
+trc_df$N_HOR_strong   <- vapply(trc_df$N_HOR_strong,   hor_count_cell, character(1), "strong")
+trc_df$HOR_median_conf <- ifelse(is.na(trc_df$HOR_median_conf), "",
+                                 sprintf("%.3f", trc_df$HOR_median_conf))
 
 # adjust column names for html output
 colnames(trc_df)[colnames(trc_df) == "monomer_size"] <- "Monomer size <br> primary estimate"
 colnames(trc_df)[colnames(trc_df) == "number_of_regions"] <- "Number of arrays"
 colnames(trc_df)[colnames(trc_df) == "monomer_size_profile"] <- "Monomer Size Estimate Score Plot"
-colnames(trc_df)[colnames(trc_df) == "N_no_HOR"]       <- "No HOR<br>detected"
-colnames(trc_df)[colnames(trc_df) == "N_HOR_visible"]  <- "HOR-visible<br>arrays"
-colnames(trc_df)[colnames(trc_df) == "N_HOR_dominant"] <- "HOR-dominant<br>arrays"
+colnames(trc_df)[colnames(trc_df) == "N_no_HOR"]       <- "No HOR"
+colnames(trc_df)[colnames(trc_df) == "N_HOR_weak"]     <- "HOR weak"
+colnames(trc_df)[colnames(trc_df) == "N_HOR_moderate"] <- "HOR moderate"
+colnames(trc_df)[colnames(trc_df) == "N_HOR_strong"]   <- "HOR strong"
+colnames(trc_df)[colnames(trc_df) == "HOR_median_conf"] <- "Median<br>confidence"
 
 
 HTML(trc_df, header = c("TRC_ID"), rownames = FALSE, align = "c", file = html_out)
@@ -569,16 +637,24 @@ for (trc in trc_list){
   HTMLInsertGraph(file = html_out_trc, GraphFileName = png_rel_path, Align="left", Width = 1000)
   df1 <- best_peaks_concise[best_peaks_concise$TRC_ID == trc,, drop = FALSE]
   df1$"TRC array index" <- 1:nrow(df1)
-  # Render HOR_status as a coloured badge, drop the integer-multiple column
-  # into the displayed table (NA shown as blank).
-  df1$HOR_status   <- vapply(df1$HOR_status, hor_status_badge, character(1))
-  df1$HOR_multiple <- ifelse(is.na(df1$HOR_multiple), "", as.character(df1$HOR_multiple))
-  colnames(df1)[colnames(df1) == "monomer_size"] <- "Monomer size<br>(primary estimate)"
+  # Render HOR_status as a coloured badge. Base / HOR period / confidence
+  # become displayable columns; HOR_n_harmonics is kept in the TSV only.
+  df1$HOR_status <- vapply(df1$HOR_status, hor_status_badge, character(1))
+  df1$HOR_confidence <- sprintf("%.3f", df1$HOR_confidence)
+  df1$HOR_base_monomer <- ifelse(is.na(df1$HOR_base_monomer), "",
+                                 as.character(df1$HOR_base_monomer))
+  df1$HOR_hor_period <- ifelse(is.na(df1$HOR_hor_period), "",
+                               as.character(df1$HOR_hor_period))
+  # drop the TSV-only column from the HTML view
+  df1$HOR_n_harmonics <- NULL
+  colnames(df1)[colnames(df1) == "monomer_size"]   <- "Monomer size<br>(primary estimate)"
   colnames(df1)[colnames(df1) == "monomer_size_2"] <- "Monomer size 2<br>(alternative estimate)"
   colnames(df1)[colnames(df1) == "monomer_size_3"] <- "Monomer size 3<br>(alternative estimate)"
-  colnames(df1)[colnames(df1) == "array_length"] <- "Array length [nt]"
-  colnames(df1)[colnames(df1) == "HOR_status"]   <- "HOR status"
-  colnames(df1)[colnames(df1) == "HOR_multiple"] <- "HOR multiple<br>(integer n)"
+  colnames(df1)[colnames(df1) == "array_length"]   <- "Array length [nt]"
+  colnames(df1)[colnames(df1) == "HOR_status"]       <- "HOR status"
+  colnames(df1)[colnames(df1) == "HOR_confidence"]   <- "HOR confidence"
+  colnames(df1)[colnames(df1) == "HOR_base_monomer"] <- "Base monomer (bp)"
+  colnames(df1)[colnames(df1) == "HOR_hor_period"]   <- "HOR period (bp)"
   # columns start and end are numerical, the number should be printent completelly without scientific notation
   df1$start <- format(df1$start, scientific = FALSE)
   df1$end <- format(df1$end, scientific = FALSE)

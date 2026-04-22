@@ -17,16 +17,15 @@
   --hover:        #eef2ff;
   --stripe:       #f9fafb;
 
-  --hor-dom-bg:   #8fce8f;
-  --hor-dom-fg:   #0e3d0e;
-  --hor-vis-bg:   #ffd98a;
-  --hor-vis-fg:   #5a3d00;
-  --hor-none-bg:  #f0f0f0;
-  --hor-none-fg:  #666666;
+  --hor-strong-bg: #8fce8f;  --hor-strong-fg: #0e3d0e;
+  --hor-mod-bg:    #ffc97a;  --hor-mod-fg:    #5a3600;
+  --hor-weak-bg:   #fff1b8;  --hor-weak-fg:   #6b5500;
+  --hor-none-bg:   #f0f0f0;  --hor-none-fg:   #666666;
 
-  --hor-cnt-dom-bg:  #dff0df;
-  --hor-cnt-vis-bg:  #fff3d6;
-  --hor-cnt-none-bg: #fafafa;
+  --hor-cnt-strong-bg: #dff0df;
+  --hor-cnt-mod-bg:    #ffe4b5;
+  --hor-cnt-weak-bg:   #fff8dc;
+  --hor-cnt-none-bg:   #fafafa;
 
   --font:      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
                "Helvetica Neue", Arial, sans-serif;
@@ -48,16 +47,15 @@
     --hover:        #1e293b;
     --stripe:       #172033;
 
-    --hor-dom-bg:   #0e3d0e;
-    --hor-dom-fg:   #8fce8f;
-    --hor-vis-bg:   #5a3d00;
-    --hor-vis-fg:   #ffd98a;
-    --hor-none-bg:  #1e293b;
-    --hor-none-fg:  #94a3b8;
+    --hor-strong-bg: #0e3d0e;  --hor-strong-fg: #8fce8f;
+    --hor-mod-bg:    #5a3600;  --hor-mod-fg:    #ffc97a;
+    --hor-weak-bg:   #6b5500;  --hor-weak-fg:   #fff1b8;
+    --hor-none-bg:   #1e293b;  --hor-none-fg:   #94a3b8;
 
-    --hor-cnt-dom-bg:  #0e3d0e33;
-    --hor-cnt-vis-bg:  #5a3d0033;
-    --hor-cnt-none-bg: #1e293b;
+    --hor-cnt-strong-bg: #0e3d0e33;
+    --hor-cnt-mod-bg:    #5a360033;
+    --hor-cnt-weak-bg:   #6b550033;
+    --hor-cnt-none-bg:   #1e293b;
   }
 }
 
@@ -195,13 +193,15 @@ table.tc-table img            { max-width: none; }
   font-family: var(--font);
   font-size: 12px;
 }
-.hor-dom  { background: var(--hor-dom-bg);  color: var(--hor-dom-fg); }
-.hor-vis  { background: var(--hor-vis-bg);  color: var(--hor-vis-fg); }
-.hor-none { background: var(--hor-none-bg); color: var(--hor-none-fg); }
+.hor-strong { background: var(--hor-strong-bg); color: var(--hor-strong-fg); }
+.hor-mod    { background: var(--hor-mod-bg);    color: var(--hor-mod-fg); }
+.hor-weak   { background: var(--hor-weak-bg);   color: var(--hor-weak-fg); }
+.hor-none   { background: var(--hor-none-bg);   color: var(--hor-none-fg); }
 
-.hor-cnt-dom  { background: var(--hor-cnt-dom-bg);  display: block; text-align: center; padding: 2px 8px; }
-.hor-cnt-vis  { background: var(--hor-cnt-vis-bg);  display: block; text-align: center; padding: 2px 8px; }
-.hor-cnt-none { background: var(--hor-cnt-none-bg); display: block; text-align: center; padding: 2px 8px; }
+.hor-cnt-strong { background: var(--hor-cnt-strong-bg); display: block; text-align: center; padding: 2px 8px; }
+.hor-cnt-mod    { background: var(--hor-cnt-mod-bg);    display: block; text-align: center; padding: 2px 8px; }
+.hor-cnt-weak   { background: var(--hor-cnt-weak-bg);   display: block; text-align: center; padding: 2px 8px; }
+.hor-cnt-none   { background: var(--hor-cnt-none-bg);   display: block; text-align: center; padding: 2px 8px; }
 
 /* ======== consensus block ======== */
 
@@ -287,9 +287,10 @@ table.tc-table img            { max-width: none; }
   font-weight: 600;
   color: #000;
 }
-.tc-bar-seg.hor-dom  { background: var(--hor-dom-bg);  color: var(--hor-dom-fg); }
-.tc-bar-seg.hor-vis  { background: var(--hor-vis-bg);  color: var(--hor-vis-fg); }
-.tc-bar-seg.hor-none { background: var(--hor-none-bg); color: var(--hor-none-fg); }
+.tc-bar-seg.hor-strong { background: var(--hor-strong-bg); color: var(--hor-strong-fg); }
+.tc-bar-seg.hor-mod    { background: var(--hor-mod-bg);    color: var(--hor-mod-fg); }
+.tc-bar-seg.hor-weak   { background: var(--hor-weak-bg);   color: var(--hor-weak-fg); }
+.tc-bar-seg.hor-none   { background: var(--hor-none-bg);   color: var(--hor-none-fg); }
 
 /* ======== figure captions / image wrappers ======== */
 
