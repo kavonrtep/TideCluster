@@ -1092,8 +1092,11 @@ def _render_ideogram(majors, by_seqid):
         )
         # Arrays — sorted by ascending confidence so stronger ones draw on top.
         # No stroke: the fill has been darkened so small rectangles stay
-        # prominent without a border muting their colour.
-        arrs = sorted(by_seqid[sid], key=lambda a: (a.get("hor_confidence") or 0))
+        # prominent without a border muting their colour. Empty list for
+        # major scaffolds that carry no arrays of this TRC — the backing
+        # contig bar stays visible (absence is informative).
+        arrs = sorted(by_seqid.get(sid, []),
+                      key=lambda a: (a.get("hor_confidence") or 0))
         for arr in arrs:
             x_start = label_w + (arr["start"] / max_len) * bar_w
             w = max(min_rect_w, ((arr["end"] - arr["start"]) / max_len) * bar_w)
@@ -1182,51 +1185,69 @@ def _render_minor_table(minors, by_seqid):
 
 def render_trc_distribution(trc, seqid_lengths):
     """Return the `<h2> + summary + ideogram + minor-table` HTML block,
-    or an empty string if the TRC has no arrays."""
+    or an empty string if the TRC has no arrays.
+
+    The ideogram always draws the SAME set of major contigs for every
+    TRC (the longest scaffolds in the assembly) even if this TRC has
+    no arrays on them — the absence of signal on a chromosome is itself
+    informative. The minor-contig table below only lists minor contigs
+    that *do* carry arrays of this TRC, since listing the long tail of
+    empty small contigs would drown out the actual data."""
     by_seqid = {}
     for arr in trc["arrays"]:
         by_seqid.setdefault(arr["seqid"], []).append(arr)
     if not by_seqid:
         return ""
 
-    def _length(sid):
-        if sid in seqid_lengths: return int(seqid_lengths[sid])
-        # Fallback: max(end) across this TRC's arrays; at least covers
-        # the range we're about to draw so relative positions are sane.
-        return max(a["end"] for a in by_seqid[sid])
+    # Build a dict of all contigs we're aware of. The side-car gives
+    # the assembly-wide set; any seqid that appears in arrays but is
+    # missing from the side-car (legacy runs without seqid_lengths.tsv)
+    # gets a lower-bound length from its max(end).
+    contig_lengths = {sid: int(l) for sid, l in seqid_lengths.items()
+                      if l and l > 0}
+    for sid, arrs in by_seqid.items():
+        if sid not in contig_lengths:
+            contig_lengths[sid] = max(a["end"] for a in arrs)
+    all_contigs = sorted(contig_lengths.items(),
+                         key=lambda kv: (-kv[1], kv[0]))
 
-    contigs = [(sid, _length(sid)) for sid in by_seqid]
-    contigs.sort(key=lambda x: (-x[1], x[0]))
-
-    # Partition major/minor using the two-threshold scheme: for small
-    # genomes (count <= MAX_COUNT) everything is major; above that we
-    # apply the 1 Mb length filter and cap at MAX_COUNT longest.
-    if len(contigs) <= TRC_DIST_MAJOR_MAX_COUNT:
-        majors = contigs
+    # Partition major/minor on the full assembly set (not just contigs
+    # with arrays): for small assemblies every contig is major, for
+    # fragmented ones the 1 Mb filter + 50-cap kicks in.
+    if len(all_contigs) <= TRC_DIST_MAJOR_MAX_COUNT:
+        majors = all_contigs
     else:
-        majors = [c for c in contigs if c[1] >= TRC_DIST_MAJOR_MIN_LENGTH]
+        majors = [c for c in all_contigs if c[1] >= TRC_DIST_MAJOR_MIN_LENGTH]
         if len(majors) > TRC_DIST_MAJOR_MAX_COUNT:
             majors = majors[:TRC_DIST_MAJOR_MAX_COUNT]
     major_ids = {s for s, _ in majors}
-    minors = [c for c in contigs if c[0] not in major_ids]
+    # Minor table only lists minor contigs that actually carry arrays
+    # of this TRC; empty minor contigs would just be noise.
+    minors_with_arrays = [(s, l) for s, l in all_contigs
+                          if s not in major_ids and s in by_seqid]
 
-    n_major_arrays = sum(len(by_seqid[s]) for s, _ in majors)
-    n_minor_arrays = sum(len(by_seqid[s]) for s, _ in minors)
+    n_majors_with_arrays = sum(1 for s, _ in majors if s in by_seqid)
+    n_major_arrays       = sum(len(by_seqid[s]) for s, _ in majors if s in by_seqid)
+    n_minor_arrays       = sum(len(by_seqid[s]) for s, _ in minors_with_arrays)
 
     summary_parts = []
-    if majors:
+    summary_parts.append(
+        f"{len(majors)} major scaffold{'' if len(majors) == 1 else 's'} "
+        f"shown ({n_majors_with_arrays} with arrays, "
+        f"{n_major_arrays} array{'' if n_major_arrays == 1 else 's'})")
+    if minors_with_arrays:
         summary_parts.append(
-            f"{len(majors)} major scaffold{'' if len(majors) == 1 else 's'} "
-            f"({n_major_arrays} array{'' if n_major_arrays == 1 else 's'})")
-    if minors:
-        summary_parts.append(
-            f"{len(minors)} minor contig{'' if len(minors) == 1 else 's'} "
+            f"{len(minors_with_arrays)} minor contig"
+            f"{'' if len(minors_with_arrays) == 1 else 's'} with arrays "
             f"({n_minor_arrays} array{'' if n_minor_arrays == 1 else 's'})")
     summary = (
         f'<p style="font-size:12px;color:var(--fg-muted)">'
-        f'Genome distribution of this TRC&#39;s arrays: '
+        f'Genome distribution of this TRC&#39;s arrays across the '
+        f'assembly: '
         + " · ".join(summary_parts) +
-        f'. Array colour encodes HOR confidence &mdash; '
+        f'. Every major scaffold is drawn even when it carries no '
+        f'arrays of this TRC &mdash; absence is informative too. '
+        f'Array colour encodes HOR confidence &mdash; '
         f'{hor_badge("HOR strong")} '
         f'{hor_badge("HOR moderate")} '
         f'{hor_badge("HOR weak")} '
@@ -1238,7 +1259,7 @@ def render_trc_distribution(trc, seqid_lengths):
         f'<h2>TRA genome distribution</h2>'
         f'{summary}'
         f'<div class="tc-ideogram">{_render_ideogram(majors, by_seqid)}</div>'
-        f'{_render_minor_table(minors, by_seqid)}'
+        f'{_render_minor_table(minors_with_arrays, by_seqid)}'
     )
 
 
