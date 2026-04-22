@@ -103,6 +103,12 @@ a:hover { text-decoration: underline; }
 .tc-nav a:hover { background: rgba(255, 255, 255, 0.15); text-decoration: none; }
 .tc-nav a.active { background: rgba(255, 255, 255, 0.2); }
 .tc-nav .tc-spacer { flex: 1 1 auto; }
+.tc-nav a.tc-nav-ext {
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  font-size: 12px;
+  padding: 4px 10px;
+}
+.tc-nav a.tc-nav-ext:hover { background: rgba(255, 255, 255, 0.15); }
 .tc-run-strip {
   background: var(--card);
   border-bottom: 1px solid var(--border);

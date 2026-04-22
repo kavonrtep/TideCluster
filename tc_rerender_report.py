@@ -170,6 +170,15 @@ def page_shell(title, active, run_meta, main_html, extra_head=""):
         cls = ' class="active"' if key == active else ""
         return f'<a href="{href}"{cls}>{label}</a>'
     nav_html = "".join(_nav_link(*item) for item in nav_items)
+    # Legacy report link — always present on the right of the nav so
+    # users can toggle between v1 and v2 easily. "legacy_href" is
+    # injected by page_shell's per-page rewrites; in report_v2/index.html
+    # it resolves to ../<prefix>_index.html, and in dashboards under
+    # report_v2/trc/ to ../../<prefix>_index.html.
+    legacy_href = f"../{run_meta['prefix']}_index.html"
+    legacy_link = (f'<a href="{legacy_href}" class="tc-nav-ext" '
+                   f'title="Open the original v1 TideCluster report">'
+                   f'Legacy report &#x2197;</a>')
     run_strip = (
         f'<strong>{esc(run_meta["prefix"])}</strong>'
         f' · TideCluster {esc(run_meta["version"])}'
@@ -191,6 +200,7 @@ def page_shell(title, active, run_meta, main_html, extra_head=""):
   <span class="tc-brand">TideCluster</span>
   {nav_html}
   <span class="tc-spacer"></span>
+  {legacy_link}
 </nav>
 <div class="tc-run-strip">{run_strip}</div>
 <main>
@@ -1614,6 +1624,9 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta):
     shell = shell.replace('href="tarean.html"',        'href="../tarean.html"')
     shell = shell.replace('href="kite.html"',          'href="../kite.html"')
     shell = shell.replace('href="superfamilies.html"', 'href="../superfamilies.html"')
+    # Legacy link: report_v2/trc/TRC_N.html needs ../../<prefix>_index.html
+    shell = shell.replace(f'href="../{run_meta["prefix"]}_index.html"',
+                          f'href="../../{run_meta["prefix"]}_index.html"')
     (out_dir / "trc" / f"{trc['id']}.html").write_text(shell)
 
 
@@ -1642,6 +1655,57 @@ def copy_assets(dest: Path, script_path: Path):
 # CLI
 # ----------------------------------------------------------------------
 
+def build_report(input_dir, prefix=None, output_dir=None, *, quiet=False):
+    """Importable entry point for the report-v2 build.
+
+    Called by TideCluster.py at the end of the tarean step so every
+    pipeline run produces a v2 report alongside the v1 artefacts.
+    Returns the output directory as a Path."""
+    input_dir = Path(input_dir).resolve()
+    if not input_dir.is_dir():
+        raise SystemExit(f"input-dir is not a directory: {input_dir}")
+    prefix  = prefix or detect_prefix(input_dir)
+    out_dir = Path(output_dir) if output_dir else (input_dir / f"{prefix}_report_v2")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "data").mkdir(exist_ok=True)
+
+    if not quiet:
+        print(f"input:  {input_dir}")
+        print(f"prefix: {prefix}")
+        print(f"output: {out_dir}")
+
+    model = build_model(input_dir, prefix)
+
+    trc_count = len(model["trcs"])
+    analysed  = sum(1 for t in model["trcs"] if t.get("tarean"))
+    sf_count  = len(model["superfamilies"])
+    hor_s = sum(t["kite"]["n_hor_strong"]   for t in model["trcs"] if t.get("kite"))
+    hor_m = sum(t["kite"]["n_hor_moderate"] for t in model["trcs"] if t.get("kite"))
+    hor_w = sum(t["kite"]["n_hor_weak"]     for t in model["trcs"] if t.get("kite"))
+    if not quiet:
+        print(f"TRCs: {trc_count}  TAREAN-analysed: {analysed}  "
+              f"superfamilies: {sf_count}  "
+              f"HOR strong/moderate/weak: {hor_s}/{hor_m}/{hor_w}")
+
+    script_path = Path(__file__).resolve()
+    copy_assets(out_dir / "assets", script_path)
+    with (out_dir / "data" / "report.json").open("w") as f:
+        json.dump(model, f, indent=2, default=str)
+    if not quiet:
+        print(f"wrote: {out_dir / 'data' / 'report.json'}")
+
+    run_meta = make_run_meta(model)
+    render_index(model, out_dir, run_meta)
+    render_tarean(model, out_dir, run_meta)
+    render_kite(model, out_dir, run_meta)
+    render_superfamilies(model, out_dir, run_meta)
+    n_dash = render_all_trc_dashboards(model, out_dir, run_meta)
+    if not quiet:
+        print(f"rendered: index, tarean, kite, superfamilies, "
+              f"{n_dash} TRC dashboards")
+    return out_dir
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     p.add_argument("--input-dir", required=True, type=Path,
@@ -1651,49 +1715,7 @@ def main(argv=None):
     p.add_argument("--output-dir", type=Path,
                    help="Output directory; defaults to <input-dir>/<prefix>_report_v2/.")
     args = p.parse_args(argv)
-
-    input_dir = args.input_dir.resolve()
-    if not input_dir.is_dir():
-        p.error(f"input-dir is not a directory: {input_dir}")
-    prefix = args.prefix or detect_prefix(input_dir)
-    out_dir = args.output_dir or (input_dir / f"{prefix}_report_v2")
-    out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "data").mkdir(exist_ok=True)
-
-    print(f"input:  {input_dir}")
-    print(f"prefix: {prefix}")
-    print(f"output: {out_dir}")
-
-    model = build_model(input_dir, prefix)
-
-    # Stats one-liner for sanity.
-    trc_count = len(model["trcs"])
-    analysed  = sum(1 for t in model["trcs"] if t.get("tarean"))
-    sf_count  = len(model["superfamilies"])
-    hor_s = hor_m = hor_w = 0
-    for t in model["trcs"]:
-        if not t.get("kite"): continue
-        hor_s += t["kite"]["n_hor_strong"]
-        hor_m += t["kite"]["n_hor_moderate"]
-        hor_w += t["kite"]["n_hor_weak"]
-    print(f"TRCs: {trc_count}  TAREAN-analysed: {analysed}  "
-          f"superfamilies: {sf_count}  "
-          f"HOR strong/moderate/weak: {hor_s}/{hor_m}/{hor_w}")
-
-    script_path = Path(__file__).resolve()
-    copy_assets(out_dir / "assets", script_path)
-
-    with (out_dir / "data" / "report.json").open("w") as f:
-        json.dump(model, f, indent=2, default=str)
-    print(f"wrote: {out_dir / 'data' / 'report.json'}")
-
-    run_meta = make_run_meta(model)
-    render_index(model, out_dir, run_meta)
-    render_tarean(model, out_dir, run_meta)
-    render_kite(model, out_dir, run_meta)
-    render_superfamilies(model, out_dir, run_meta)
-    n_dash = render_all_trc_dashboards(model, out_dir, run_meta)
-    print(f"rendered: index, tarean, kite, superfamilies, {n_dash} TRC dashboards")
+    build_report(args.input_dir, prefix=args.prefix, output_dir=args.output_dir)
 
 
 if __name__ == "__main__":

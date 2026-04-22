@@ -215,6 +215,7 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
             print("TRC similarity clustering not performed due to lack of TAREAN "
                   "consensus sequences.", file=open(html_file, "w"))
 
+        _build_report_v2(prefix)
         return
 
     print("running TAREAN")
@@ -245,6 +246,26 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
         F"{script_path}/tarean/compare_trc_by_blast.R -i {prefix}_consensus_dimer_library.fasta"
         F" -p {prefix} -t {cpu}")
     tc.run_cmd(cmd)
+
+    _build_report_v2(prefix)
+
+
+def _build_report_v2(prefix):
+    """Generate the modern v2 HTML report alongside the legacy output.
+
+    Runs at the end of tarean() (both the normal and the early-return
+    paths) so every pipeline run ships a v2 report. Wrapped in
+    try/except: a rerender failure never fails the pipeline, since
+    the legacy v1 HTML is already written by the time we get here."""
+    try:
+        import tc_rerender_report
+        prefix_dir = os.path.dirname(os.path.abspath(prefix)) or "."
+        prefix_name = os.path.basename(prefix)
+        print("Building report v2")
+        tc_rerender_report.build_report(prefix_dir, prefix=prefix_name, quiet=True)
+        print(F"Report v2 written to {prefix_dir}/{prefix_name}_report_v2/")
+    except Exception as e:
+        print(F"WARNING: report v2 generation failed: {e}", file=sys.stderr)
 
 
 

@@ -6,8 +6,7 @@ A **higher-order repeat** (HOR) is a tandem repeat in which a block of
 several basic monomers has itself been duplicated. The characteristic
 signature on a raw sequence level is that the array shows periodicity
 at the basic monomer length *m* **and** at an integer multiple
-*n · m* corresponding to the HOR period. In centromeric satellites
-HOR structures with *n* up to 30 or more are common.
+*n · m* corresponding to the HOR period. 
 
 TideCluster's KITE module (`tarean/kite.R`) detects these periods by
 computing the distribution of distances between every pair of
