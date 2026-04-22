@@ -288,6 +288,7 @@ def resolve_paths(input_dir: Path, prefix: str) -> dict:
     return {
         "cmd_args":              first(f"{prefix}_cmd_args.json"),
         "pipeline_stats":        first(f"{prefix}_pipeline_stats.json"),
+        "seqid_lengths":         first(f"{prefix}_seqid_lengths.tsv"),
         "clustering_gff3":       first(f"{prefix}_clustering.gff3"),
         "annotation_gff3":       first(f"{prefix}_annotation.gff3"),
         "tarean_report_tsv":     first(f"{prefix}_tarean_report.tsv"),
@@ -340,6 +341,48 @@ def load_stats(paths: dict) -> dict:
     if paths["index_html"]:
         return parse_stats_from_index_html(paths["index_html"])
     return {}
+
+
+def load_seqid_lengths(paths: dict) -> dict:
+    """Return seqid -> length (bp). Prefers <prefix>_seqid_lengths.tsv
+    emitted by TideCluster.py tarean(); falls back to a lower-bound
+    derived from max(end) across the tidehunter + clustering GFF3s for
+    legacy outputs that pre-date the sidecar. A missing seqid is
+    fine; consumers use .get() with a per-array-coord fallback."""
+    p = paths.get("seqid_lengths")
+    out = {}
+    if p and p.exists():
+        with open(p) as f:
+            next(f, None)  # header
+            for line in f:
+                s, l = line.rstrip("\n").split("\t")[:2]
+                try: out[s] = int(l)
+                except ValueError: continue
+        return out
+    # Legacy fallback: scan every GFF3 for max(end) per seqid.
+    for key in ("clustering_gff3", "annotation_gff3"):
+        p = paths.get(key)
+        if not p: continue
+        for feat in read_gff3(p):
+            sid = feat["seqid"]
+            if feat["end"] > out.get(sid, 0):
+                out[sid] = feat["end"]
+    th = paths.get("input_dir") if isinstance(paths.get("input_dir"), Path) else None
+    # Also mine the raw tidehunter GFF3 if available (max(end) there is
+    # a tighter lower bound since every detected array contributes).
+    prefix = None
+    ann = paths.get("clustering_gff3")
+    if ann:
+        name = ann.name
+        if name.endswith("_clustering.gff3"):
+            prefix = name[:-len("_clustering.gff3")]
+            th_path = ann.parent / f"{prefix}_tidehunter.gff3"
+            if th_path.exists():
+                for feat in read_gff3(th_path):
+                    sid = feat["seqid"]
+                    if feat["end"] > out.get(sid, 0):
+                        out[sid] = feat["end"]
+    return out
 
 
 # ----------------------------------------------------------------------
@@ -559,6 +602,7 @@ def build_model(input_dir: Path, prefix: str):
     paths = resolve_paths(input_dir, prefix)
     settings = json.loads(paths["cmd_args"].read_text()) if paths["cmd_args"] else {}
     stats = load_stats(paths)
+    seqid_lengths    = load_seqid_lengths(paths)
     tras_by_trc      = load_tras(paths)
     tarean_summary   = load_tarean_summary(paths)
     kite_by_array    = load_kite_top3(paths)
@@ -654,6 +698,7 @@ def build_model(input_dir: Path, prefix: str):
         "paths":         {k: (str(v.relative_to(input_dir)) if isinstance(v, Path) and v
                               else None)
                           for k, v in paths.items()},
+        "seqid_lengths": seqid_lengths,
         "trcs":          trcs,
         "superfamilies": superfams,
     }
@@ -970,6 +1015,230 @@ def render_superfamilies(model, out_dir, run_meta):
 
 
 # ----------------------------------------------------------------------
+# Per-TRC genome-distribution visualisation (ideogram + minor-contig
+# table). Pure inline SVG; no JS dep beyond the existing DataTables
+# enhancement on the minor table. See the "TRC distribution" section
+# of the docs for the design rationale.
+# ----------------------------------------------------------------------
+
+TRC_DIST_MAJOR_MAX_COUNT  = 50          # all contigs kept as major if <= this
+TRC_DIST_MAJOR_MIN_LENGTH = 1_000_000   # fallback length threshold above that
+TRC_DIST_SVG_WIDTH        = 920
+TRC_DIST_LABEL_WIDTH      = 190
+TRC_DIST_ROW_HEIGHT       = 22
+TRC_DIST_BAR_HEIGHT       = 12
+TRC_DIST_MINI_WIDTH       = 180
+TRC_DIST_MINI_HEIGHT      = 12
+
+# Hard-coded fill colours matching the HOR palette so SVG renders
+# correctly both in current and future reports (CSS variables apply
+# to `fill` via var() but only in modern browsers; inline colours are
+# universally safe and avoid a dark-mode styling step for SVG).
+_HOR_FILL = {
+    "HOR strong":   "#8fce8f",
+    "HOR moderate": "#ffc97a",
+    "HOR weak":     "#fff1b8",
+    "No HOR":       "#cccccc",
+}
+
+
+def _hor_fill(arr):
+    return _HOR_FILL.get(arr.get("hor_status"), "#cccccc")
+
+
+def _array_title(arr):
+    conf = arr.get("hor_confidence")
+    status = arr.get("hor_status") or "—"
+    span = f"{arr['seqid']}:{arr['start']:,}-{arr['end']:,}"
+    length = f"{fmt_bp(arr['end'] - arr['start'])}"
+    conf_s = f"{conf:.3f}" if conf is not None else "—"
+    return f"{span} · {length} · {status} · conf {conf_s}"
+
+
+def _render_ideogram(majors, by_seqid):
+    """Return inline SVG for a linear ideogram stack of major contigs.
+
+    `majors` is a list of (seqid, length). Each TRA in by_seqid[seqid]
+    is drawn as a coloured rectangle whose width is the array length
+    scaled to the shared x-axis (= max major length)."""
+    if not majors: return ""
+    max_len = max(l for _, l in majors)
+    label_w = TRC_DIST_LABEL_WIDTH
+    bar_w   = TRC_DIST_SVG_WIDTH - label_w - 20
+    row_h   = TRC_DIST_ROW_HEIGHT
+    bar_h   = TRC_DIST_BAR_HEIGHT
+    min_rect_w = 2.0
+    height = len(majors) * row_h + 50
+    parts = [
+        f'<svg viewBox="0 0 {TRC_DIST_SVG_WIDTH} {height}" '
+        f'class="tc-ideogram-svg" style="max-width:100%;height:auto;">'
+    ]
+    for i, (sid, length) in enumerate(majors):
+        y = i * row_h + 6
+        # Label (seqid + length, truncated if the name is long)
+        label = sid if len(sid) <= 22 else sid[:20] + "…"
+        parts.append(
+            f'<text x="4" y="{y + bar_h * 0.75:.0f}" font-size="11" '
+            f'fill="currentColor">{esc(label)}</text>'
+        )
+        parts.append(
+            f'<text x="{label_w - 6}" y="{y + bar_h * 0.75:.0f}" font-size="10" '
+            f'text-anchor="end" fill="currentColor" opacity="0.65">{fmt_bp(length)}</text>'
+        )
+        # Backing contig bar
+        contig_px = (length / max_len) * bar_w
+        parts.append(
+            f'<rect x="{label_w}" y="{y}" width="{contig_px:.2f}" '
+            f'height="{bar_h}" fill="#efefef" stroke="#888" stroke-width="0.4"/>'
+        )
+        # Arrays — sorted by ascending confidence so stronger ones draw on top.
+        arrs = sorted(by_seqid[sid], key=lambda a: (a.get("hor_confidence") or 0))
+        for arr in arrs:
+            x_start = label_w + (arr["start"] / max_len) * bar_w
+            w = max(min_rect_w, ((arr["end"] - arr["start"]) / max_len) * bar_w)
+            parts.append(
+                f'<rect x="{x_start:.2f}" y="{y}" width="{w:.2f}" '
+                f'height="{bar_h}" fill="{_hor_fill(arr)}" '
+                f'stroke="#555" stroke-width="0.3">'
+                f'<title>{esc(_array_title(arr))}</title></rect>'
+            )
+    # Scale bar
+    scale_y = len(majors) * row_h + 18
+    parts.append(
+        f'<line x1="{label_w}" y1="{scale_y}" x2="{label_w + bar_w}" '
+        f'y2="{scale_y}" stroke="#888" stroke-width="0.5"/>')
+    parts.append(
+        f'<text x="{label_w}" y="{scale_y + 14}" font-size="10" '
+        f'fill="currentColor">0</text>')
+    parts.append(
+        f'<text x="{label_w + bar_w}" y="{scale_y + 14}" font-size="10" '
+        f'text-anchor="end" fill="currentColor">{fmt_bp(max_len)}</text>')
+    parts.append("</svg>")
+    return "\n".join(parts)
+
+
+def _render_minor_table(minors, by_seqid):
+    """DataTables row per minor contig with inline mini-SVG + HOR mix."""
+    if not minors: return ""
+    rows = []
+    for sid, length in minors:
+        arrs = by_seqid[sid]
+        n = len(arrs)
+        total_arr_len = sum(a["end"] - a["start"] for a in arrs)
+        statuses = Counter(a.get("hor_status", "No HOR") for a in arrs)
+        mix_cells = (
+            f'{hor_count_cell(statuses.get("HOR strong", 0),   "strong")}'
+            f'{hor_count_cell(statuses.get("HOR moderate", 0), "mod")}'
+            f'{hor_count_cell(statuses.get("HOR weak", 0),     "weak")}'
+            f'{hor_count_cell(statuses.get("No HOR", 0),       "none")}'
+        )
+        mini = [f'<svg viewBox="0 0 {TRC_DIST_MINI_WIDTH} {TRC_DIST_MINI_HEIGHT}" '
+                f'class="tc-mini-svg" style="width:{TRC_DIST_MINI_WIDTH}px;'
+                f'height:{TRC_DIST_MINI_HEIGHT}px;">']
+        mini.append(
+            f'<rect x="0" y="4" width="{TRC_DIST_MINI_WIDTH}" height="4" '
+            f'fill="#efefef" stroke="#888" stroke-width="0.3"/>')
+        for arr in sorted(arrs, key=lambda a: (a.get("hor_confidence") or 0)):
+            x_start = (arr["start"] / max(length, 1)) * TRC_DIST_MINI_WIDTH
+            w = max(1.5, ((arr["end"] - arr["start"]) / max(length, 1))
+                    * TRC_DIST_MINI_WIDTH)
+            mini.append(
+                f'<rect x="{x_start:.2f}" y="2" width="{w:.2f}" height="8" '
+                f'fill="{_hor_fill(arr)}">'
+                f'<title>{esc(_array_title(arr))}</title></rect>')
+        mini.append("</svg>")
+        rows.append(
+            "<tr>"
+            f'<td>{esc(sid)}</td>'
+            f'<td data-order="{length}">{fmt_bp(length)}</td>'
+            f'<td data-order="{n}">{n}</td>'
+            f'<td data-order="{total_arr_len}">{fmt_bp(total_arr_len)}</td>'
+            f'<td>{mix_cells}</td>'
+            f'<td>{"".join(mini)}</td>'
+            "</tr>"
+        )
+    return f"""
+    <h3>Minor contigs carrying arrays of this TRC ({len(minors)})</h3>
+    <div class="tc-table-wrap">
+    <table class="tc-table tc-datatable" data-page-length="10"
+           data-order='[[1,"desc"]]'>
+      <thead><tr>
+        <th>Contig</th>
+        <th>Length</th>
+        <th>Arrays</th>
+        <th>Total TRA length</th>
+        <th>HOR mix<br>(strong / mod / weak / none)</th>
+        <th>Positions</th>
+      </tr></thead>
+      <tbody>{"".join(rows)}</tbody>
+    </table>
+    </div>
+    """
+
+
+def render_trc_distribution(trc, seqid_lengths):
+    """Return the `<h2> + summary + ideogram + minor-table` HTML block,
+    or an empty string if the TRC has no arrays."""
+    by_seqid = {}
+    for arr in trc["arrays"]:
+        by_seqid.setdefault(arr["seqid"], []).append(arr)
+    if not by_seqid:
+        return ""
+
+    def _length(sid):
+        if sid in seqid_lengths: return int(seqid_lengths[sid])
+        # Fallback: max(end) across this TRC's arrays; at least covers
+        # the range we're about to draw so relative positions are sane.
+        return max(a["end"] for a in by_seqid[sid])
+
+    contigs = [(sid, _length(sid)) for sid in by_seqid]
+    contigs.sort(key=lambda x: (-x[1], x[0]))
+
+    # Partition major/minor using the two-threshold scheme: for small
+    # genomes (count <= MAX_COUNT) everything is major; above that we
+    # apply the 1 Mb length filter and cap at MAX_COUNT longest.
+    if len(contigs) <= TRC_DIST_MAJOR_MAX_COUNT:
+        majors = contigs
+    else:
+        majors = [c for c in contigs if c[1] >= TRC_DIST_MAJOR_MIN_LENGTH]
+        if len(majors) > TRC_DIST_MAJOR_MAX_COUNT:
+            majors = majors[:TRC_DIST_MAJOR_MAX_COUNT]
+    major_ids = {s for s, _ in majors}
+    minors = [c for c in contigs if c[0] not in major_ids]
+
+    n_major_arrays = sum(len(by_seqid[s]) for s, _ in majors)
+    n_minor_arrays = sum(len(by_seqid[s]) for s, _ in minors)
+
+    summary_parts = []
+    if majors:
+        summary_parts.append(
+            f"{len(majors)} major scaffold{'' if len(majors) == 1 else 's'} "
+            f"({n_major_arrays} array{'' if n_major_arrays == 1 else 's'})")
+    if minors:
+        summary_parts.append(
+            f"{len(minors)} minor contig{'' if len(minors) == 1 else 's'} "
+            f"({n_minor_arrays} array{'' if n_minor_arrays == 1 else 's'})")
+    summary = (
+        f'<p style="font-size:12px;color:var(--fg-muted)">'
+        f'Genome distribution of this TRC&#39;s arrays: '
+        + " · ".join(summary_parts) +
+        f'. Array colour encodes HOR confidence &mdash; '
+        f'{hor_badge("HOR strong")} '
+        f'{hor_badge("HOR moderate")} '
+        f'{hor_badge("HOR weak")} '
+        f'{hor_badge("No HOR")}.'
+        f' Hover a rectangle to see coordinates and confidence.'
+        f'</p>'
+    )
+    return (
+        f'<h2>TRA genome distribution</h2>'
+        f'{summary}'
+        f'<div class="tc-ideogram">{_render_ideogram(majors, by_seqid)}</div>'
+        f'{_render_minor_table(minors, by_seqid)}'
+    )
+
+
+# ----------------------------------------------------------------------
 # Per-TRC dashboard
 # ----------------------------------------------------------------------
 
@@ -1231,6 +1500,11 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta):
     </table>
     </div>"""
 
+    # Genome distribution — every TRC gets this section regardless of
+    # type (arrays are always present; HOR colouring gracefully falls
+    # back to grey for arrays without a computed HOR status).
+    distribution_section = render_trc_distribution(trc, model.get("seqid_lengths", {}))
+
     # KITE profile heatmap — suppressed for SSR (not biologically meaningful)
     kite_section = ""
     if kite and kite.get("profile_png") and not _is_ssr(trc):
@@ -1298,6 +1572,7 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta):
     </section>
     {consensus_block}
     {arrays_section}
+    {distribution_section}
     {kite_section}
     {variants_section}
     {sf_section}

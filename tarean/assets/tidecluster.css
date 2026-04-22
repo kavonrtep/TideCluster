@@ -315,6 +315,19 @@ table.tc-table img            { max-width: none; }
 .tc-thumb-logo  { width: 160px; height: 40px; }
 .tc-thumb-profile { width: 220px; height: 60px; }
 
+/* ======== TRC genome-distribution ideogram ========
+   Linear ideogram + minor-contig mini-SVGs on the per-TRC dashboard. */
+.tc-ideogram {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  margin: 8px 0 14px;
+  overflow-x: auto;
+}
+.tc-ideogram-svg text   { font-family: var(--font); }
+.tc-mini-svg            { vertical-align: middle; }
+
 /* ======== m1/m2/m3 + HOR legend block ========
    Small explanatory panel shown above the dashboard arrays table. */
 .tc-legend {

@@ -57,8 +57,16 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
         os.mkdir(tarean_dir_fasta)
 
     fasta_dict = tc.extract_sequences_from_gff3(gff, fasta, tarean_dir_fasta)
-    # get total length of all sequences in fasta file
-    input_fasta_length = sum([i for i in tc.read_fasta_sequence_size(fasta).values()])
+    # get per-contig lengths and the total (reused below for the summary
+    # block and persisted as a TSV side-car for downstream tools e.g.
+    # tc_rerender_report.py genome-distribution visualisation).
+    seqid_lengths = tc.read_fasta_sequence_size(fasta)
+    input_fasta_length = sum(seqid_lengths.values())
+    with open(F"{prefix}_seqid_lengths.tsv", "w") as _f:
+        _f.write("seqid\tlength\n")
+        for _sid, _len in sorted(seqid_lengths.items(),
+                                 key=lambda kv: (-kv[1], kv[0])):
+            _f.write(F"{_sid}\t{int(_len)}\n")
     l_debug = 0
     cmd_list = []
 
