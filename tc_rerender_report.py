@@ -31,7 +31,9 @@ import json
 import os
 import re
 import shutil
+import statistics
 import sys
+from collections import Counter
 from pathlib import Path
 
 __version__ = "1"  # schema version for report.json
@@ -75,7 +77,6 @@ def page_shell(title, active, run_meta, main_html, extra_head=""):
     """Return a full HTML document string wrapping `main_html`."""
     nav_items = [
         ("index.html",          "Summary",       "index"),
-        ("trcs.html",           "All TRCs",      "trcs"),
         ("tarean.html",         "TAREAN",        "tarean"),
         ("kite.html",           "KITE",          "kite"),
         ("superfamilies.html",  "Superfamilies", "sf"),
@@ -470,6 +471,7 @@ def build_model(input_dir: Path, prefix: str):
         arrays = tras_by_trc[trc_id]
         # Merge KITE per-array fields
         kite_counts = {"no_hor": 0, "hor_visible": 0, "hor_dominant": 0}
+        m1_values = []
         for arr in arrays:
             key = (trc_id, arr["seqid"], arr["start"], arr["end"])
             k = kite_by_array.get(key)
@@ -479,6 +481,8 @@ def build_model(input_dir: Path, prefix: str):
                 if status == "HOR-dominant": kite_counts["hor_dominant"] += 1
                 elif status == "HOR-visible": kite_counts["hor_visible"] += 1
                 elif status == "No HOR detected": kite_counts["no_hor"] += 1
+                if k.get("m1") is not None:
+                    m1_values.append(k["m1"])
         # TRC-level aggregates
         repeat_type = next((a["repeat_type"] for a in arrays if a.get("repeat_type")), None)
         annotation  = next((a["annotation"]  for a in arrays if a.get("annotation")),  None)
@@ -487,13 +491,17 @@ def build_model(input_dir: Path, prefix: str):
         tarean = tarean_summary.get(trc_id)
         has_tarean = tarean is not None and (paths["tarean_dir"]
                                              and (paths["tarean_dir"] / f"{trc_id}.fasta_tarean").exists())
-        has_kite = any(k for k in [arrays] if any("m1" in a for a in arrays))
+        has_kite = bool(m1_values)
         kite_block = None
         if has_kite and kite_dir_rel:
+            # "monomer_primary" = most-frequent m1 across the TRC's arrays
+            # (matches original kite_report.R's monomer_size column).
+            monomer_primary = Counter(m1_values).most_common(1)[0][0]
             kite_block = {
-                "n_no_hor":       kite_counts["no_hor"],
-                "n_hor_visible":  kite_counts["hor_visible"],
-                "n_hor_dominant": kite_counts["hor_dominant"],
+                "monomer_primary": int(monomer_primary),
+                "n_no_hor":        kite_counts["no_hor"],
+                "n_hor_visible":   kite_counts["hor_visible"],
+                "n_hor_dominant":  kite_counts["hor_dominant"],
                 "profile_png":      f"{kite_dir_rel}/profile_plots/profile_{trc_id}.png",
                 "profile_top3_png": f"{kite_dir_rel}/profile_plots/profile_top3_{trc_id}.png",
             }
@@ -512,6 +520,7 @@ def build_model(input_dir: Path, prefix: str):
             "total_size":   sum(lengths),
             "min_array":    min(lengths) if lengths else None,
             "max_array":    max(lengths) if lengths else None,
+            "median_array": int(statistics.median(lengths)) if lengths else None,
             "arrays":       arrays,
             "tarean":       tarean_block,
             "kite":         kite_block,
@@ -598,7 +607,7 @@ def render_index(model, out_dir, run_meta):
         <dl class="tc-kv">{stats_html}</dl></div>
       <div class="tc-card"><div class="tc-card-title">Reports</div>
         <dl class="tc-kv">
-          <dt>All TRCs</dt>       <dd><a href="trcs.html">{len(model["trcs"])} total</a></dd>
+          <dt>TRCs total</dt>     <dd><a href="tarean.html">{len(model["trcs"])}</a></dd>
           <dt>TAREAN-analysed</dt><dd><a href="tarean.html">{n_tarean}</a></dd>
           <dt>HOR calls</dt>      <dd>{hor_badge("HOR-dominant")} {hor_total["dom"]} ·
                                       {hor_badge("HOR-visible")} {hor_total["vis"]}</dd>
@@ -619,93 +628,116 @@ def render_index(model, out_dir, run_meta):
     (out_dir / "index.html").write_text(page_shell("Summary", "index", run_meta, main))
 
 
-def _all_trcs_rows(model):
-    rows = []
-    for t in model["trcs"]:
-        tarean = t["tarean"] or {}
-        kite = t["kite"] or {}
-        hor_cell = ""
-        if kite:
-            hor_cell = (f'{hor_count_cell(kite["n_hor_dominant"], "dom")}'
-                        f'{hor_count_cell(kite["n_hor_visible"], "vis")}'
-                        f'{hor_count_cell(kite["n_no_hor"], "none")}')
-        sf_cell = (f'<a href="superfamilies.html#sf-{t["superfamily"]}">SF {t["superfamily"]}</a>'
-                   if t["superfamily"] else "")
-        rows.append(
-            "<tr>"
-            f'<td>{_trc_link(t["id"])}</td>'
-            f'<td>{esc(t["repeat_type"] or "")}</td>'
-            f'<td>{esc(t["annotation"] or "")}</td>'
-            f'<td data-order="{t["n_arrays"]}">{t["n_arrays"]}</td>'
-            f'<td data-order="{t["total_size"]}">{fmt_bp(t["total_size"])}</td>'
-            f'<td data-order="{t.get("min_array") or 0}">{fmt_bp(t.get("min_array"))}</td>'
-            f'<td data-order="{t.get("max_array") or 0}">{fmt_bp(t.get("max_array"))}</td>'
-            f'<td data-order="{tarean.get("monomer_length") or 0}">'
-              f'{esc(tarean.get("monomer_length")) if tarean.get("monomer_length") else ""}</td>'
-            f'<td>{hor_cell}</td>'
-            f'<td>{sf_cell}</td>'
-            "</tr>")
-    return "".join(rows)
+def _trc_type_label(t):
+    """Human-readable type label for the merged TAREAN table."""
+    if (t.get("repeat_type") or "").upper() == "SSR" or t.get("ssr_motif"):
+        return "SSR"
+    if t.get("tarean"):
+        return "TR"
+    return "TR&nbsp;(below&nbsp;threshold)"
 
 
-def render_trcs(model, out_dir, run_meta):
-    body = f"""
-    <h1>All tandem repeat clusters</h1>
-    <p>{len(model["trcs"])} TRCs. Click a TRC to open its dashboard.</p>
-    <div class="tc-table-wrap">
-    <table class="tc-table tc-datatable" data-page-length="50"
-           data-order='[[3,"desc"]]'>
-      <thead><tr>
-        <th>TRC</th><th>Type</th><th>Annotation</th>
-        <th>Arrays</th><th>Total size</th><th>Min array</th><th>Max array</th>
-        <th>Monomer</th><th>HOR&nbsp;(dom/vis/none)</th><th>Superfamily</th>
-      </tr></thead>
-      <tbody>{_all_trcs_rows(model)}</tbody>
-    </table>
-    </div>
-    """
-    (out_dir / "trcs.html").write_text(page_shell("All TRCs", "trcs", run_meta, body))
+def _array_size_cell(t):
+    """Stacked min/median/max cell, matching the original TAREAN report."""
+    mn, md, mx = t.get("min_array"), t.get("median_array"), t.get("max_array")
+    if mn is None:
+        return ""
+    return (f"min: {fmt_bp(mn)}<br>median: {fmt_bp(md)}<br>max: {fmt_bp(mx)}")
+
+
+def _thumb(src_rel, kind, src_prefix="../", alt=""):
+    """Fixed-size thumbnail wrapper; full PNG opens on click.
+
+    kind is one of "graph", "logo", "profile" → maps to a CSS size class."""
+    if not src_rel:
+        return ""
+    klass = {"graph": "tc-thumb-graph",
+             "logo":  "tc-thumb-logo",
+             "profile": "tc-thumb-profile"}.get(kind, "tc-thumb-graph")
+    url = f"{src_prefix}{esc(src_rel)}"
+    return (f'<a class="tc-thumb {klass}" href="{url}" target="_blank" '
+            f'rel="noopener"><img src="{url}" alt="{esc(alt)}"></a>')
+
+
+def _render_tarean_row(t, src_prefix="../"):
+    ta = t["tarean"] or {}
+    kite = t["kite"] or {}
+    hor_cell = (f'{hor_count_cell(kite["n_hor_dominant"], "dom")}'
+                f'{hor_count_cell(kite["n_hor_visible"], "vis")}'
+                f'{hor_count_cell(kite["n_no_hor"], "none")}') if kite else ""
+    sf_cell = (f'<a href="superfamilies.html#sf-{t["superfamily"]}">SF {t["superfamily"]}</a>'
+               if t["superfamily"] else "")
+    cons_short = ""
+    if ta.get("consensus"):
+        cons_short = esc(ta["consensus"][:80])
+        if len(ta["consensus"]) > 80:
+            cons_short += "…"
+    graph_thumb = _thumb(ta.get("graph_png"), "graph", src_prefix=src_prefix, alt="k-mer graph")
+    logo_thumb  = _thumb(ta.get("logo_png"),  "logo",  src_prefix=src_prefix, alt="logo")
+    return (
+        "<tr>"
+        f'<td data-order="{t["index"]}">{_trc_link(t["id"])}</td>'
+        f'<td>{_trc_type_label(t)}</td>'
+        f'<td data-order="{t["total_size"]}">{fmt_bp(t["total_size"])}</td>'
+        f'<td data-order="{t["n_arrays"]}">{t["n_arrays"]}</td>'
+        f'<td data-order="{t.get("max_array") or 0}">{_array_size_cell(t)}</td>'
+        f'<td data-order="{ta.get("monomer_length") or 0}">{esc(ta.get("monomer_length"))}</td>'
+        f'<td data-order="{ta.get("total_score") or 0}">'
+            f'{esc(round(ta["total_score"], 4)) if ta.get("total_score") is not None else ""}</td>'
+        f'<td>{esc((t.get("ssr_motif") or "").replace("%25","%"))}</td>'
+        f'<td>{esc(t.get("annotation") or "")}</td>'
+        f'<td>{hor_cell}</td>'
+        f'<td>{sf_cell}</td>'
+        f'<td>{graph_thumb}</td>'
+        f'<td>{logo_thumb}</td>'
+        f'<td><code style="font-size:11px;">{cons_short}</code></td>'
+        "</tr>")
 
 
 def render_tarean(model, out_dir, run_meta):
-    rows = []
-    for t in model["trcs"]:
-        if not t["tarean"]:
-            continue
-        ta = t["tarean"]
-        graph = _rel_img(ta.get("graph_png"), width=100, alt="k-mer graph")
-        logo  = _rel_img(ta.get("logo_png"),  width=200, alt="logo")
-        cons_short = esc((ta.get("consensus") or "")[:80])
-        if ta.get("consensus") and len(ta["consensus"]) > 80:
-            cons_short += "…"
-        rows.append(
-            "<tr>"
-            f'<td>{_trc_link(t["id"])}</td>'
-            f'<td data-order="{ta.get("monomer_length") or 0}">{esc(ta.get("monomer_length"))}</td>'
-            f'<td data-order="{ta.get("total_score") or 0}">{esc(round(ta["total_score"], 4)) if ta.get("total_score") is not None else ""}</td>'
-            f'<td data-order="{ta.get("total_size") or 0}">{fmt_bp(ta.get("total_size"))}</td>'
-            f'<td>{esc(ta.get("annotation") or "")}</td>'
-            f'<td data-order="{ta.get("n_arrays") or 0}">{esc(ta.get("n_arrays"))}</td>'
-            f'<td><code>{cons_short}</code></td>'
-            f'<td>{graph}</td>'
-            f'<td>{logo}</td>'
-            "</tr>")
+    """Merged TAREAN / All-TRCs table. Every TRC from clustering.gff3
+    appears here (TAREAN-analysed, below-threshold, SSR). TAREAN-specific
+    columns are empty for rows where TAREAN was not performed."""
+    rows = "".join(_render_tarean_row(t) for t in model["trcs"])
+    n_total   = len(model["trcs"])
+    n_tarean  = sum(1 for t in model["trcs"] if t["tarean"])
+    n_ssr     = sum(1 for t in model["trcs"] if _trc_type_label(t) == "SSR")
+    n_below   = n_total - n_tarean - n_ssr
     body = f"""
-    <h1>TAREAN-analysed TRCs</h1>
-    <p>{sum(1 for t in model["trcs"] if t["tarean"])} TRCs passed the
-    minimum total length threshold and were processed by TAREAN.</p>
+    <h1>Tandem repeat clusters (TAREAN)</h1>
+    <p>{n_total} TRCs total — {n_tarean} analysed by TAREAN,
+       {n_ssr} SSR clusters, {n_below} below the TAREAN size threshold.
+       Click a TRC to open its per-TRC dashboard.
+       Graph and logo thumbnails open the full image.</p>
     <div class="tc-table-wrap">
-    <table class="tc-table tc-datatable" data-page-length="25" data-order='[[3,"desc"]]'>
+    <table class="tc-table tc-datatable" data-page-length="50"
+           data-order='[[0,"asc"]]'>
       <thead><tr>
-        <th>TRC</th><th>Monomer</th><th>Score</th><th>Total size</th>
-        <th>Annotation</th><th>Arrays</th><th>Consensus (preview)</th>
-        <th>Graph</th><th>Logo</th>
+        <th>TRC</th>
+        <th>Type</th>
+        <th>Total size</th>
+        <th>Arrays</th>
+        <th>Array sizes<br>(min / med / max)</th>
+        <th>Monomer<br>(TAREAN)</th>
+        <th>Score<br>(TAREAN)</th>
+        <th>SSR motif</th>
+        <th>Annotation</th>
+        <th>HOR<br>(dom / vis / none)</th>
+        <th>Superfamily</th>
+        <th>Graph</th>
+        <th>Logo</th>
+        <th>Consensus<br>(preview)</th>
       </tr></thead>
-      <tbody>{"".join(rows)}</tbody>
+      <tbody>{rows}</tbody>
     </table>
     </div>
     """
     (out_dir / "tarean.html").write_text(page_shell("TAREAN", "tarean", run_meta, body))
+    # Old (pre-merge) page no longer makes sense; clean it up so the nav
+    # stays consistent when rerender runs over an existing report_v2 dir.
+    old = out_dir / "trcs.html"
+    if old.exists():
+        old.unlink()
 
 
 def render_kite(model, out_dir, run_meta):
@@ -729,17 +761,21 @@ def render_kite(model, out_dir, run_meta):
         if not t["kite"]:
             continue
         k = t["kite"]
-        profile = _rel_img(k.get("profile_top3_png"), width=300, alt="profile")
-        monomer = (t["tarean"] or {}).get("monomer_length")
+        profile_thumb = _thumb(k.get("profile_top3_png"), "profile",
+                               src_prefix="../", alt="KITE profile")
+        tarean_mon = (t["tarean"] or {}).get("monomer_length")
+        kite_mon   = k.get("monomer_primary")
         rows.append(
             "<tr>"
-            f'<td>{_trc_link(t["id"])}</td>'
-            f'<td data-order="{monomer or 0}">{esc(monomer)}</td>'
+            f'<td data-order="{t["index"]}">{_trc_link(t["id"])}</td>'
+            f'<td data-order="{kite_mon or 0}">{esc(kite_mon)}</td>'
+            f'<td data-order="{tarean_mon or 0}">{esc(tarean_mon)}</td>'
             f'<td data-order="{t["n_arrays"]}">{t["n_arrays"]}</td>'
+            f'<td data-order="{t["total_size"]}">{fmt_bp(t["total_size"])}</td>'
             f'<td data-order="{k["n_hor_dominant"]}">{hor_count_cell(k["n_hor_dominant"],"dom")}</td>'
             f'<td data-order="{k["n_hor_visible"]}">{hor_count_cell(k["n_hor_visible"],"vis")}</td>'
             f'<td data-order="{k["n_no_hor"]}">{hor_count_cell(k["n_no_hor"],"none")}</td>'
-            f'<td>{profile}</td>'
+            f'<td>{profile_thumb}</td>'
             "</tr>")
     body = f"""
     <h1>K-mer interval tandem repeat estimation (KITE)</h1>
@@ -752,10 +788,20 @@ def render_kite(model, out_dir, run_meta):
       (total {total} arrays).
     </p>
     <h2>Per-TRC HOR summary</h2>
+    <p style="font-size:12px;color:var(--fg-muted)">
+      <strong>Monomer (KITE)</strong> is the most-frequent primary
+      k-mer-interval estimate across the arrays of a given TRC.
+      <strong>Monomer (TAREAN)</strong> is the TAREAN de&nbsp;Bruijn
+      consensus length.
+    </p>
     <div class="tc-table-wrap">
-    <table class="tc-table tc-datatable" data-page-length="25" data-order='[[3,"desc"]]'>
+    <table class="tc-table tc-datatable" data-page-length="25" data-order='[[0,"asc"]]'>
       <thead><tr>
-        <th>TRC</th><th>Monomer<br>(TAREAN)</th><th>Arrays</th>
+        <th>TRC</th>
+        <th>Monomer<br>(KITE&nbsp;primary)</th>
+        <th>Monomer<br>(TAREAN)</th>
+        <th>Arrays</th>
+        <th>Total size</th>
         <th>HOR-dom</th><th>HOR-vis</th><th>No&nbsp;HOR</th>
         <th>Profile</th>
       </tr></thead>
@@ -802,33 +848,63 @@ def _is_ssr(trc):
     return (trc.get("repeat_type") or "").upper() == "SSR" or trc.get("ssr_motif")
 
 
+def _fmt_score(x):
+    if x is None: return ""
+    try: return f"{float(x):.3f}"
+    except (TypeError, ValueError): return esc(x)
+
+
 def _arrays_table(arrays, include_hor=True):
-    """Render the per-array DataTable body for a TRC dashboard."""
+    """Render the per-array DataTable body for a TRC dashboard.
+
+    When include_hor is True the table has m1..m3 and s1..s3 columns
+    plus HOR status + n (integer multiple). SSR dashboards instead get
+    an `SSR motif` column since neither TAREAN nor KITE apply to them
+    meaningfully."""
     rows = []
     for i, a in enumerate(arrays, 1):
-        hor_bcell = hor_badge(a.get("hor_status")) if include_hor else ""
-        rows.append(
-            "<tr>"
-            f'<td>{i}</td>'
-            f'<td>{esc(a.get("seqid"))}</td>'
-            f'<td data-order="{a.get("start") or 0}">{esc(a.get("start"))}</td>'
-            f'<td data-order="{a.get("end") or 0}">{esc(a.get("end"))}</td>'
-            f'<td data-order="{a.get("length") or 0}">{fmt_bp(a.get("length"))}</td>'
-            + (
+        if include_hor:
+            hor_bcell = hor_badge(a.get("hor_status"))
+            hor_n = a.get("hor_multiple")
+            rows.append(
+                "<tr>"
+                f'<td>{i}</td>'
+                f'<td>{esc(a.get("seqid"))}</td>'
+                f'<td data-order="{a.get("start") or 0}">{esc(a.get("start"))}</td>'
+                f'<td data-order="{a.get("end") or 0}">{esc(a.get("end"))}</td>'
+                f'<td data-order="{a.get("length") or 0}">{fmt_bp(a.get("length"))}</td>'
                 f'<td data-order="{a.get("m1") or 0}">{esc(a.get("m1"))}</td>'
+                f'<td data-order="{a.get("s1") or 0}">{_fmt_score(a.get("s1"))}</td>'
                 f'<td data-order="{a.get("m2") or 0}">{esc(a.get("m2"))}</td>'
+                f'<td data-order="{a.get("s2") or 0}">{_fmt_score(a.get("s2"))}</td>'
                 f'<td data-order="{a.get("m3") or 0}">{esc(a.get("m3"))}</td>'
+                f'<td data-order="{a.get("s3") or 0}">{_fmt_score(a.get("s3"))}</td>'
                 f'<td>{hor_bcell}</td>'
-                f'<td>{esc(a.get("hor_multiple") or "")}</td>'
-                if include_hor else ""
-            )
-            + (
+                f'<td>{esc(hor_n) if hor_n else ""}</td>'
+                "</tr>")
+        else:
+            rows.append(
+                "<tr>"
+                f'<td>{i}</td>'
+                f'<td>{esc(a.get("seqid"))}</td>'
+                f'<td data-order="{a.get("start") or 0}">{esc(a.get("start"))}</td>'
+                f'<td data-order="{a.get("end") or 0}">{esc(a.get("end"))}</td>'
+                f'<td data-order="{a.get("length") or 0}">{fmt_bp(a.get("length"))}</td>'
                 f'<td>{esc(a.get("ssr") or "")}</td>'
-                if not include_hor else ""
-            )
-            + "</tr>"
-        )
+                "</tr>")
     return "".join(rows)
+
+
+ARRAYS_LEGEND = """
+<div class="tc-legend">
+  <dt>m<sub>1</sub></dt><dd>Monomer size — primary estimate</dd>
+  <dt>m<sub>2</sub>, m<sub>3</sub></dt><dd>Alternative estimates (2nd and 3rd KITE peaks)</dd>
+  <dt>s<sub>1</sub>, s<sub>2</sub>, s<sub>3</sub></dt><dd>k-mer-interval scores for each peak</dd>
+  <dt>n</dt><dd>integer multiple that triggered the HOR call
+      (e.g. <code>n=3</code> means m<sub>1</sub> ≈ 3 &times; m<sub>2</sub>);
+      empty when no HOR was detected</dd>
+</div>
+"""
 
 
 def _variants_table(variants, tarean_dir, show=20, src_prefix="../"):
@@ -837,9 +913,11 @@ def _variants_table(variants, tarean_dir, show=20, src_prefix="../"):
         return ""
     rows = []
     for v in variants[:show]:
-        graph = (f'<img src="{src_prefix}{esc(tarean_dir)}/{esc(v["graph_link"])}" width="80">'
+        graph = (_thumb(f'{tarean_dir}/{v["graph_link"]}', "graph",
+                        src_prefix=src_prefix, alt="k-mer graph")
                  if v.get("graph_link") else "")
-        logo  = (f'<img src="{src_prefix}{esc(tarean_dir)}/{esc(v["logo_link"])}" width="200">'
+        logo  = (_thumb(f'{tarean_dir}/{v["logo_link"]}',  "logo",
+                        src_prefix=src_prefix, alt="logo")
                  if v.get("logo_link") else "")
         rows.append(
             "<tr>"
@@ -847,7 +925,7 @@ def _variants_table(variants, tarean_dir, show=20, src_prefix="../"):
             f'<td>{esc(v["variant"])}</td>'
             f'<td data-order="{v.get("total_score") or 0}">'
               f'{esc(round(v["total_score"], 4)) if v.get("total_score") is not None else ""}</td>'
-            f'<td>{esc(v.get("monomer_length"))}</td>'
+            f'<td>{esc(v.get("consensus_length"))}</td>'
             f'<td>{esc(v.get("n_gap50"))}</td>'
             f'<td>{graph}</td>'
             f'<td>{logo}</td>'
@@ -864,9 +942,13 @@ def _variants_table(variants, tarean_dir, show=20, src_prefix="../"):
       <div class="tc-table-wrap">
       <table class="tc-table" data-order='[[2,"desc"]]'>
         <thead><tr>
-          <th>k-mer</th><th>Variant</th><th>Score</th>
-          <th>Monomer length</th><th>n_gap50</th>
-          <th>Graph</th><th>Logo</th>
+          <th>k-mer length</th>
+          <th>Variant index</th>
+          <th>k-mer coverage score</th>
+          <th>Consensus length</th>
+          <th>n_gap50</th>
+          <th>k-mer based graph</th>
+          <th>Sequence logo</th>
         </tr></thead>
         <tbody>{"".join(rows)}</tbody>
       </table>
@@ -979,16 +1061,24 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta):
     include_hor = not _is_ssr(trc) and any(a.get("m1") is not None for a in trc["arrays"])
     if include_hor:
         head = ("<th>#</th><th>seqid</th><th>start</th><th>end</th><th>length</th>"
-                "<th>m1</th><th>m2</th><th>m3</th><th>HOR status</th><th>HOR n</th>")
+                "<th>m<sub>1</sub></th><th>s<sub>1</sub></th>"
+                "<th>m<sub>2</sub></th><th>s<sub>2</sub></th>"
+                "<th>m<sub>3</sub></th><th>s<sub>3</sub></th>"
+                "<th>HOR status</th><th>n</th>")
+        legend = ARRAYS_LEGEND
+    elif _is_ssr(trc):
+        head = ("<th>#</th><th>seqid</th><th>start</th><th>end</th><th>length</th>"
+                "<th>SSR motif</th>")
+        legend = ""
     else:
         head = ("<th>#</th><th>seqid</th><th>start</th><th>end</th><th>length</th>"
-                "<th>SSR motif</th>") if _is_ssr(trc) else (
-               "<th>#</th><th>seqid</th><th>start</th><th>end</th><th>length</th>"
-               "<th>—</th>")
+                "<th>—</th>")
+        legend = ""
     arrays_section = f"""
     <h2>Tandem repeat arrays ({trc["n_arrays"]})</h2>
+    {legend}
     <div class="tc-table-wrap">
-    <table class="tc-table tc-datatable" data-page-length="25" data-order='[[4,"desc"]]'>
+    <table class="tc-table tc-datatable" data-page-length="25" data-order='[[2,"asc"]]'>
       <thead><tr>{head}</tr></thead>
       <tbody>{_arrays_table(trc["arrays"], include_hor=include_hor)}</tbody>
     </table>
@@ -1147,12 +1237,11 @@ def main(argv=None):
 
     run_meta = make_run_meta(model)
     render_index(model, out_dir, run_meta)
-    render_trcs(model, out_dir, run_meta)
     render_tarean(model, out_dir, run_meta)
     render_kite(model, out_dir, run_meta)
     render_superfamilies(model, out_dir, run_meta)
     n_dash = render_all_trc_dashboards(model, out_dir, run_meta)
-    print(f"rendered: index, trcs, tarean, kite, superfamilies, {n_dash} TRC dashboards")
+    print(f"rendered: index, tarean, kite, superfamilies, {n_dash} TRC dashboards")
 
 
 if __name__ == "__main__":

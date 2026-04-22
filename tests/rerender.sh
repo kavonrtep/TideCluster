@@ -28,7 +28,6 @@ echo "=== rerender report v2 ==="
 REPORT="$WORK/rerender_report_v2"
 [ -s "$REPORT/data/report.json" ]    || { echo "FAIL: report.json missing"; exit 1; }
 [ -s "$REPORT/index.html" ]          || { echo "FAIL: index.html missing"; exit 1; }
-[ -s "$REPORT/trcs.html" ]           || { echo "FAIL: trcs.html missing"; exit 1; }
 [ -s "$REPORT/tarean.html" ]         || { echo "FAIL: tarean.html missing"; exit 1; }
 [ -s "$REPORT/kite.html" ]           || { echo "FAIL: kite.html missing"; exit 1; }
 [ -s "$REPORT/superfamilies.html" ]  || { echo "FAIL: superfamilies.html missing"; exit 1; }
