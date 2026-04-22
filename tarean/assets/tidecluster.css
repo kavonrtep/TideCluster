@@ -327,6 +327,27 @@ table.tc-table img            { max-width: none; }
 }
 .tc-ideogram-svg text   { font-family: var(--font); }
 .tc-mini-svg            { vertical-align: middle; }
+.tc-ideogram-svg rect.tc-tra,
+.tc-mini-svg rect.tc-tra { cursor: pointer; }
+.tc-ideogram-svg rect.tc-tra:hover,
+.tc-mini-svg rect.tc-tra:hover { filter: brightness(1.1); }
+
+/* ======== floating tooltip for TRA rectangles ======== */
+.tc-tooltip {
+  position: absolute;
+  display: none;
+  background: #1f2937;
+  color: #f8fafc;
+  padding: 4px 8px;
+  border-radius: 3px;
+  font: 11px/1.4 var(--font-mono);
+  pointer-events: none;
+  z-index: 1000;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  max-width: 360px;
+  white-space: nowrap;
+}
+.tc-tooltip-visible { display: block; }
 
 /* ======== m1/m2/m3 + HOR legend block ========
    Small explanatory panel shown above the dashboard arrays table. */

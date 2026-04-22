@@ -1030,15 +1030,14 @@ TRC_DIST_BAR_HEIGHT       = 12
 TRC_DIST_MINI_WIDTH       = 180
 TRC_DIST_MINI_HEIGHT      = 12
 
-# Hard-coded fill colours matching the HOR palette so SVG renders
-# correctly both in current and future reports (CSS variables apply
-# to `fill` via var() but only in modern browsers; inline colours are
-# universally safe and avoid a dark-mode styling step for SVG).
+# SVG fill palette — saturated variants of the pastel badge colours so
+# small rectangles (down to ~2 px) stay legible without needing a
+# stroke. The badge CSS keeps its softer palette for text legibility.
 _HOR_FILL = {
-    "HOR strong":   "#8fce8f",
-    "HOR moderate": "#ffc97a",
-    "HOR weak":     "#fff1b8",
-    "No HOR":       "#cccccc",
+    "HOR strong":   "#2e8b2e",  # forest green
+    "HOR moderate": "#e88f00",  # saturated amber
+    "HOR weak":     "#d4a017",  # saturated gold
+    "No HOR":       "#909090",  # medium grey
 }
 
 
@@ -1089,17 +1088,20 @@ def _render_ideogram(majors, by_seqid):
         contig_px = (length / max_len) * bar_w
         parts.append(
             f'<rect x="{label_w}" y="{y}" width="{contig_px:.2f}" '
-            f'height="{bar_h}" fill="#efefef" stroke="#888" stroke-width="0.4"/>'
+            f'height="{bar_h}" fill="#e6e6e6" stroke="none"/>'
         )
         # Arrays — sorted by ascending confidence so stronger ones draw on top.
+        # No stroke: the fill has been darkened so small rectangles stay
+        # prominent without a border muting their colour.
         arrs = sorted(by_seqid[sid], key=lambda a: (a.get("hor_confidence") or 0))
         for arr in arrs:
             x_start = label_w + (arr["start"] / max_len) * bar_w
             w = max(min_rect_w, ((arr["end"] - arr["start"]) / max_len) * bar_w)
             parts.append(
-                f'<rect x="{x_start:.2f}" y="{y}" width="{w:.2f}" '
-                f'height="{bar_h}" fill="{_hor_fill(arr)}" '
-                f'stroke="#555" stroke-width="0.3">'
+                f'<rect class="tc-tra" x="{x_start:.2f}" y="{y}" '
+                f'width="{w:.2f}" height="{bar_h}" '
+                f'fill="{_hor_fill(arr)}" stroke="none" '
+                f'data-title="{esc(_array_title(arr))}">'
                 f'<title>{esc(_array_title(arr))}</title></rect>'
             )
     # Scale bar
@@ -1137,14 +1139,16 @@ def _render_minor_table(minors, by_seqid):
                 f'height:{TRC_DIST_MINI_HEIGHT}px;">']
         mini.append(
             f'<rect x="0" y="4" width="{TRC_DIST_MINI_WIDTH}" height="4" '
-            f'fill="#efefef" stroke="#888" stroke-width="0.3"/>')
+            f'fill="#e6e6e6" stroke="none"/>')
         for arr in sorted(arrs, key=lambda a: (a.get("hor_confidence") or 0)):
             x_start = (arr["start"] / max(length, 1)) * TRC_DIST_MINI_WIDTH
             w = max(1.5, ((arr["end"] - arr["start"]) / max(length, 1))
                     * TRC_DIST_MINI_WIDTH)
             mini.append(
-                f'<rect x="{x_start:.2f}" y="2" width="{w:.2f}" height="8" '
-                f'fill="{_hor_fill(arr)}">'
+                f'<rect class="tc-tra" x="{x_start:.2f}" y="2" '
+                f'width="{w:.2f}" height="8" '
+                f'fill="{_hor_fill(arr)}" stroke="none" '
+                f'data-title="{esc(_array_title(arr))}">'
                 f'<title>{esc(_array_title(arr))}</title></rect>')
         mini.append("</svg>")
         rows.append(
