@@ -25,18 +25,33 @@ link at the top-right of the navigation bar.
 
 ### Glossary
 
-- **TRC (Tandem Repeat Cluster)** — a family of related tandem
-  repeats. Numbered `TRC_1`, `TRC_2`, … in decreasing order of total
-  array length.
+- **Family (TRC, Tandem Repeat Cluster)** — a group of tandem repeat
+  arrays whose monomer sequences are nearly identical. Arrays are
+  assigned to the same family when their monomers align at
+  ≥ 75 % sequence identity over ≥ 80 % of the shorter sequence;
+  similarity is propagated transitively, so if array A is similar to
+  B and B to C at these thresholds, A, B and C are one family. TRCs
+  are numbered `TRC_1`, `TRC_2`, … in decreasing order of total array
+  length.
 - **TRA (Tandem Repeat Array)** — a single genomic instance
   belonging to a family. Each TRA has a seqid, start, end, and
   length.
+- **Superfamily** — a group of families whose consensus sequences
+  share any BLAST-detectable similarity. Because this criterion is
+  looser than family assignment, superfamilies can join families
+  that share only a local region of their consensus, or families
+  whose monomers differ in length — for example when one family's
+  monomer is contained inside the longer monomer of another family.
+  Higher-order repeat relationships are included but are not the
+  only source of superfamily membership.
 - **HOR (Higher-Order Repeat)** — a tandem repeat whose repeating
   unit is itself a block of several basic monomers. Classified per
   TRA on a continuous confidence score; see
   `docs/hor_classification.md` for the formula.
-- **Superfamily** — a group of TRCs whose TAREAN consensus
-  sequences share significant BLAST similarity. A second level of
-  the repeat hierarchy above the family.
 - **Monomer** — the basic repeating unit of a tandem repeat. Its
   length in bp is the monomer size.
+
+> In satellite-rich genomes tandem repeats often form a continuum of
+> related sequences rather than discrete groups; the family and
+> superfamily boundaries reported here are operational summaries at
+> fixed thresholds, not clear-cut biological clades.
