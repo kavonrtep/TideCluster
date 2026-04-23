@@ -122,6 +122,180 @@ def compute_hor(m1, m2, m3, s1, s2, s3):
             "hor_n_harmonics": n_harmonics}
 
 # ----------------------------------------------------------------------
+# Minimal Markdown → HTML converter (stdlib only).
+# ----------------------------------------------------------------------
+# Supported subset:
+#   - ATX headings:      `# ` .. `###### ` at start of line
+#   - Paragraphs:        blank-line separated
+#   - Unordered lists:   lines starting with `- ` or `* `
+#   - Ordered lists:     lines starting with `<n>. `
+#   - Fenced code:       ```` ```lang ```` ... ```` ``` ````
+#   - Bold inline:       `**text**`
+#   - Italic inline:     `*text*`  (not adjacent to * or whitespace)
+#   - Inline code:       `` `text` ``  (contents HTML-escaped)
+#   - Links:             `[text](url)`
+#   - Raw-HTML passthrough: a line beginning with `<` is emitted as-is
+#     and does not participate in paragraph collection.
+#
+# The source markdown files we ship under docs/report_content/ deliberately
+# stay inside this subset. If a future edit needs a feature the parser
+# doesn't cover, extend the parser rather than reach for a dep.
+
+def md_to_html(md_text):
+    """Convert a markdown string to an HTML fragment."""
+    lines = md_text.splitlines()
+    out = []
+    para = []
+    list_mode = None          # None | 'ul' | 'ol'
+    in_code = False
+    code_lang = ""
+    code_buf = []
+
+    def flush_para():
+        if para:
+            out.append(f"<p>{_md_inline(' '.join(para))}</p>")
+            para.clear()
+
+    def close_list():
+        nonlocal list_mode
+        if list_mode:
+            out.append(f"</{list_mode}>")
+            list_mode = None
+
+    for raw in lines:
+        line = raw.rstrip()
+        if in_code:
+            if line.startswith("```"):
+                cls = f' class="language-{code_lang}"' if code_lang else ""
+                out.append(
+                    f"<pre><code{cls}>"
+                    f"{html.escape(chr(10).join(code_buf))}</code></pre>")
+                in_code, code_lang, code_buf = False, "", []
+            else:
+                code_buf.append(raw)
+            continue
+
+        if line.startswith("```"):
+            flush_para(); close_list()
+            in_code = True
+            code_lang = line[3:].strip()
+            continue
+
+        # HTML comments <!-- ... --> are dropped so the per-file editor
+        # hints don't leak into rendered output.
+        if line.lstrip().startswith("<!--") and line.rstrip().endswith("-->"):
+            continue
+
+        if not line.strip():
+            flush_para(); close_list()
+            continue
+
+        m = re.match(r"^(#{1,6})\s+(.*)$", line)
+        if m:
+            flush_para(); close_list()
+            lvl = len(m.group(1))
+            out.append(f"<h{lvl}>{_md_inline(m.group(2))}</h{lvl}>")
+            continue
+
+        m = re.match(r"^\s*[-*]\s+(.*)$", line)
+        if m:
+            flush_para()
+            if list_mode != "ul":
+                close_list()
+                out.append("<ul>")
+                list_mode = "ul"
+            out.append(f"<li>{_md_inline(m.group(1))}</li>")
+            continue
+
+        m = re.match(r"^\s*\d+\.\s+(.*)$", line)
+        if m:
+            flush_para()
+            if list_mode != "ol":
+                close_list()
+                out.append("<ol>")
+                list_mode = "ol"
+            out.append(f"<li>{_md_inline(m.group(1))}</li>")
+            continue
+
+        # Raw-HTML block passthrough.
+        if line.lstrip().startswith("<"):
+            flush_para(); close_list()
+            out.append(line)
+            continue
+
+        para.append(line)
+
+    flush_para()
+    close_list()
+    if in_code:  # unterminated code fence — emit what we have
+        cls = f' class="language-{code_lang}"' if code_lang else ""
+        out.append(f"<pre><code{cls}>{html.escape(chr(10).join(code_buf))}</code></pre>")
+    return "\n".join(out)
+
+
+def _md_inline(text):
+    """Apply inline markdown transforms to `text`. Raw HTML and entities
+    pass through untouched; the content files in docs/report_content/
+    are our own so we can trust them."""
+    # 1. Protect `code` spans so their contents are not mangled.
+    codes = []
+    def _stash(m):
+        codes.append(m.group(1))
+        return f"\x00CODE{len(codes) - 1}\x00"
+    text = re.sub(r"`([^`]+)`", _stash, text)
+    # 2. Links: [text](url)
+    text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)",
+                  lambda m: f'<a href="{m.group(2)}">{m.group(1)}</a>', text)
+    # 3. Bold must be matched before italic because `**x**` would
+    #    otherwise be read as two italic markers.
+    text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
+    # 4. Italic: single * around non-whitespace content, not adjacent
+    #    to another *.
+    text = re.sub(r"(?<!\*)\*(?!\*|\s)([^*]+?)(?<!\s)\*(?!\*)",
+                  r"<em>\1</em>", text)
+    # 5. Restore code spans (escape their contents when emitting).
+    def _restore(m):
+        return f"<code>{html.escape(codes[int(m.group(1))])}</code>"
+    text = re.sub(r"\x00CODE(\d+)\x00", _restore, text)
+    return text
+
+
+_SECTION_CACHE = {}
+
+
+def load_section(name):
+    """Load and convert a report_content markdown file. Cached by name.
+
+    File location is resolved relative to this script so the function
+    works both from the git tree and from the installed conda package,
+    where `tc_rerender_report.py` sits at `$PREFIX/share/tidecluster/`
+    and `docs/report_content/` is shipped alongside it."""
+    if name in _SECTION_CACHE:
+        return _SECTION_CACHE[name]
+    root = Path(__file__).resolve().parent
+    path = root / "docs" / "report_content" / f"{name}.md"
+    if not path.exists():
+        _SECTION_CACHE[name] = ""
+        return ""
+    _SECTION_CACHE[name] = md_to_html(path.read_text())
+    return _SECTION_CACHE[name]
+
+
+def copy_report_content_source(out_dir):
+    """Copy the markdown source of each section into <out_dir>/docs/
+    so users can download or edit the editable source alongside the
+    rendered HTML."""
+    root = Path(__file__).resolve().parent
+    src = root / "docs" / "report_content"
+    if not src.is_dir():
+        return
+    dst = Path(out_dir) / "docs"
+    if dst.exists():
+        shutil.rmtree(dst)
+    shutil.copytree(src, dst)
+
+
+# ----------------------------------------------------------------------
 # Small HTML helpers
 # ----------------------------------------------------------------------
 
@@ -804,14 +978,14 @@ def render_index(model, out_path, run_meta, ctx):
       <div class="tc-card"><div class="tc-card-title">Run settings</div>
         <dl class="tc-kv">{"".join(rows_settings)}</dl></div>
     </section>"""
+    overview_html = load_section("overview")
+    credits_html  = load_section("credits")
     main = f"""
     <h1>TideCluster report — {esc(model["meta"]["prefix"])}</h1>
     {cards}
-    <p class="tc-callout">This is report v2 — the default TideCluster
-    report since 1.9.0. The original v1 report is preserved under
-    <code>{esc(model["meta"]["prefix"])}_report_legacy/</code>; reach it
-    via the <strong>Legacy report&nbsp;&#x2197;</strong> link at the
-    top-right of the navigation bar.</p>
+    <section class="tc-prose">{overview_html}</section>
+    <hr style="margin:28px 0; border:0; border-top:1px solid var(--border);">
+    <section class="tc-prose">{credits_html}</section>
     """
     Path(out_path).write_text(_shell(ctx, "Summary", "index", run_meta, main))
 
@@ -896,6 +1070,7 @@ def render_tarean(model, out_path, run_meta, ctx):
     n_below   = n_total - n_tarean - n_ssr
     body = f"""
     <h1>Tandem repeat clusters (TAREAN)</h1>
+    <section class="tc-prose">{load_section("tarean")}</section>
     <p>{n_total} TRCs total — {n_tarean} analysed by TAREAN,
        {n_ssr} SSR clusters, {n_below} below the TAREAN size threshold.
        Click a TRC to open its per-TRC dashboard.
@@ -976,6 +1151,7 @@ def render_kite(model, out_path, run_meta, ctx):
             "</tr>")
     body = f"""
     <h1>K-mer interval tandem repeat estimation (KITE)</h1>
+    <section class="tc-prose">{load_section("kite")}</section>
     <h3>HOR distribution across all analysed arrays</h3>
     <div class="tc-bar" title="Total arrays: {total}">{bar}</div>
     <p style="font-size:12px;color:var(--fg-muted)">
@@ -1019,10 +1195,11 @@ def render_kite(model, out_path, run_meta, ctx):
 def render_superfamilies(model, out_path, run_meta, ctx):
     out_path = Path(out_path)
     if not model["superfamilies"]:
-        body = ('<h1>TRC Superfamilies</h1>'
-                '<p class="tc-callout">No TRC superfamilies were identified '
-                '(either insufficient TRCs reached the clustering step or none shared '
-                'significant consensus similarity).</p>')
+        body = (f'<h1>TRC Superfamilies</h1>'
+                f'<section class="tc-prose">{load_section("superfamilies")}</section>'
+                f'<p class="tc-callout">No TRC superfamilies were identified '
+                f'(either insufficient TRCs reached the clustering step or none shared '
+                f'significant consensus similarity).</p>')
         out_path.write_text(_shell(ctx, "Superfamilies", "sf", run_meta, body))
         return
     src_prefix = ctx["src_prefix"]
@@ -1039,6 +1216,7 @@ def render_superfamilies(model, out_path, run_meta, ctx):
             f'<h2>Superfamily {sf["id"]} ({len(sf["trcs"])} TRCs)</h2>'
             f'<p>{peers}</p>{img}</section>')
     body = (f'<h1>TRC superfamilies</h1>'
+            f'<section class="tc-prose">{load_section("superfamilies")}</section>'
             f'<p>{len(model["superfamilies"])} superfamilies identified.</p>'
             + "".join(sections))
     out_path.write_text(_shell(ctx, "Superfamilies", "sf", run_meta, body))
@@ -1706,6 +1884,7 @@ def build_report(input_dir, prefix=None, output_dir=None, *, quiet=False):
               f"HOR strong/moderate/weak: {hor_s}/{hor_m}/{hor_w}")
 
     copy_assets(out_dir / "assets", Path(__file__).resolve())
+    copy_report_content_source(out_dir)
     with (out_dir / "data" / "report.json").open("w") as f:
         json.dump(model, f, indent=2, default=str)
     if not quiet:

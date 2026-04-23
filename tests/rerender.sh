@@ -115,6 +115,30 @@ for f in os.listdir(os.path.join(REPORT, "trc")):
     assert has_legacy(os.path.join(REPORT, "trc", f), "../../"), \
         f"dashboard {f} missing Legacy report link"
 print("OK: Legacy report link present and correct depth on every v2 page")
+
+# Report-content sections (from docs/report_content/*.md) are rendered
+# into the right pages.
+def must_contain(path, needle, label):
+    src = open(path).read()
+    assert needle in src, f"{label}: {path} missing substring {needle!r}"
+
+must_contain(os.path.join(WORK, "rerender_index.html"),
+             "About this report",           "overview heading")
+must_contain(os.path.join(WORK, "rerender_index.html"),
+             "Glossary",                    "overview glossary")
+must_contain(os.path.join(WORK, "rerender_index.html"),
+             "Credits and citations",       "credits heading")
+must_contain(os.path.join(REPORT, "tarean.html"),
+             "TAREAN method",               "tarean section")
+must_contain(os.path.join(REPORT, "kite.html"),
+             "KITE method",                 "kite section")
+must_contain(os.path.join(REPORT, "superfamilies.html"),
+             "TRC Superfamilies",           "superfamilies section")
+# Source .md files copied alongside the rendered HTML.
+for name in ("overview", "tarean", "kite", "superfamilies", "credits"):
+    p = os.path.join(REPORT, "docs", f"{name}.md")
+    assert os.path.isfile(p), f"section source {p} not copied"
+print("OK: report-content sections rendered + source .md copied")
 PYEOF
 
 echo

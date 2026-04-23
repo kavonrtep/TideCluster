@@ -6,15 +6,22 @@ A **higher-order repeat** (HOR) is a tandem repeat in which a block of
 several basic monomers has itself been duplicated. The characteristic
 signature on a raw sequence level is that the array shows periodicity
 at the basic monomer length *m* **and** at an integer multiple
-*n · m* corresponding to the HOR period. 
+*n · m* corresponding to the HOR period.
+
+In TideCluster terminology the HOR call is made per **TRA** (Tandem
+Repeat Array, a single genomic instance) within a given **TRC**
+(Tandem Repeat Cluster, the family of related arrays). A family can
+contain arrays with different HOR structures, and the per-TRC report
+therefore shows counts across the four confidence bins rather than a
+single family-level HOR label.
 
 TideCluster's KITE module (`tarean/kite.R`) detects these periods by
 computing the distribution of distances between every pair of
-repetitive *k*-mers in each tandem repeat array (TRA) and extracting
-significant peaks. Two or more peaks that sit at integer multiples of
-a common base are evidence of HOR structure; their relative heights
-and the tightness of the integer-multiple relationship determine how
-strong that evidence is.
+repetitive *k*-mers in each TRA and extracting significant peaks. Two
+or more peaks that sit at integer multiples of a common base are
+evidence of HOR structure; their relative heights and the tightness
+of the integer-multiple relationship determine how strong that
+evidence is.
 
 ## 2. Inputs from KITE
 

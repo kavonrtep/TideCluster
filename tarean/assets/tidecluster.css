@@ -263,6 +263,18 @@ table.tc-table img            { max-width: none; }
   color: var(--fg);
 }
 
+/* ======== prose section (markdown-rendered content) ======== */
+.tc-prose             { max-width: 820px; line-height: 1.55; }
+.tc-prose h2          { margin: 24px 0 8px; font-size: 18px; }
+.tc-prose h3          { margin: 18px 0 6px; font-size: 14px; text-transform: uppercase;
+                        letter-spacing: 0.5px; color: var(--fg-muted); }
+.tc-prose p           { margin: 8px 0; }
+.tc-prose ul, .tc-prose ol { margin: 8px 0 10px 22px; padding: 0; }
+.tc-prose li          { margin: 3px 0; }
+.tc-prose code        { background: var(--code-bg); padding: 1px 5px; border-radius: 3px;
+                        font-family: var(--font-mono); font-size: 12px; }
+.tc-prose pre code    { display: block; padding: 8px 10px; font-size: 12px; }
+
 /* ======== callouts (skipped sections, warnings) ======== */
 
 .tc-callout {
