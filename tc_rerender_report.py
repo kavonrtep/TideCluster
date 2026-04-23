@@ -158,27 +158,36 @@ def hor_count_cell(n, kind):
     return f'<span class="{cls}">{int(n)}</span>'
 
 
-def page_shell(title, active, run_meta, main_html, extra_head=""):
-    """Return a full HTML document string wrapping `main_html`."""
+def page_shell(title, active, run_meta, main_html, *,
+               extra_head="", up="", root_href="index.html",
+               legacy_href=None, assets_href="assets/"):
+    """Return a full HTML document string wrapping `main_html`.
+
+    `up`          — prefix added to sibling-page nav links
+                    (tarean / kite / superfamilies). "" for top-level
+                    pages in <prefix>_report/, "../" for per-TRC
+                    dashboards, "<prefix>_report/" for the root index.
+    `root_href`   — full href for the Summary nav entry; this is the
+                    root <prefix>_index.html and its depth differs at
+                    each page level.
+    `legacy_href` — full href for the legacy-report nav link; computed
+                    by the caller based on page depth.
+    `assets_href` — path to the assets/ directory."""
     nav_items = [
-        ("index.html",          "Summary",       "index"),
-        ("tarean.html",         "TAREAN",        "tarean"),
-        ("kite.html",           "KITE",          "kite"),
-        ("superfamilies.html",  "Superfamilies", "sf"),
+        (root_href,                "Summary",       "index"),
+        (f"{up}tarean.html",       "TAREAN",        "tarean"),
+        (f"{up}kite.html",         "KITE",          "kite"),
+        (f"{up}superfamilies.html","Superfamilies", "sf"),
     ]
     def _nav_link(href, label, key):
         cls = ' class="active"' if key == active else ""
         return f'<a href="{href}"{cls}>{label}</a>'
     nav_html = "".join(_nav_link(*item) for item in nav_items)
-    # Legacy report link — always present on the right of the nav so
-    # users can toggle between v1 and v2 easily. "legacy_href" is
-    # injected by page_shell's per-page rewrites; in report_v2/index.html
-    # it resolves to ../<prefix>_index.html, and in dashboards under
-    # report_v2/trc/ to ../../<prefix>_index.html.
-    legacy_href = f"../{run_meta['prefix']}_index.html"
-    legacy_link = (f'<a href="{legacy_href}" class="tc-nav-ext" '
-                   f'title="Open the original v1 TideCluster report">'
-                   f'Legacy report &#x2197;</a>')
+    legacy_link = ""
+    if legacy_href:
+        legacy_link = (f'<a href="{legacy_href}" class="tc-nav-ext" '
+                       f'title="Open the original v1 TideCluster report">'
+                       f'Legacy report &#x2197;</a>')
     run_strip = (
         f'<strong>{esc(run_meta["prefix"])}</strong>'
         f' · TideCluster {esc(run_meta["version"])}'
@@ -191,8 +200,8 @@ def page_shell(title, active, run_meta, main_html, extra_head=""):
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{esc(title)} — {esc(run_meta["prefix"])}</title>
-<link rel="stylesheet" href="assets/datatables/datatables.min.css">
-<link rel="stylesheet" href="assets/tidecluster.css">
+<link rel="stylesheet" href="{assets_href}datatables/datatables.min.css">
+<link rel="stylesheet" href="{assets_href}tidecluster.css">
 {extra_head}
 </head>
 <body>
@@ -206,9 +215,9 @@ def page_shell(title, active, run_meta, main_html, extra_head=""):
 <main>
 {main_html}
 </main>
-<script src="assets/datatables/jquery-3.7.1.min.js"></script>
-<script src="assets/datatables/datatables.min.js"></script>
-<script src="assets/tidecluster.js"></script>
+<script src="{assets_href}datatables/jquery-3.7.1.min.js"></script>
+<script src="{assets_href}datatables/datatables.min.js"></script>
+<script src="{assets_href}tidecluster.js"></script>
 </body>
 </html>
 """
@@ -740,7 +749,14 @@ def _tarean_asset_path(trc):
     return f"../{model_tarean_root}/{tdir}" if tdir else None  # not used; explicit per site
 
 
-def render_index(model, out_dir, run_meta):
+def _shell(ctx, title, active, run_meta, main_html):
+    return page_shell(title, active, run_meta, main_html,
+                      up=ctx["up"], root_href=ctx["root_href"],
+                      legacy_href=ctx["legacy_href"],
+                      assets_href=ctx["assets_href"])
+
+
+def render_index(model, out_path, run_meta, ctx):
     settings = model.get("settings", {}) or {}
     stats    = model.get("stats", {}) or {}
     rows_settings = []
@@ -770,18 +786,19 @@ def render_index(model, out_dir, run_meta):
             hor_total["none"]   += t["kite"]["n_no_hor"]
     n_tarean    = sum(1 for t in model["trcs"] if t["tarean"])
     n_sf_peers  = sum(1 for t in model["trcs"] if t["superfamily"])
+    up = ctx["up"]
     cards = f"""
     <section class="tc-cards">
       <div class="tc-card"><div class="tc-card-title">Run summary</div>
         <dl class="tc-kv">{stats_html}</dl></div>
       <div class="tc-card"><div class="tc-card-title">Reports</div>
         <dl class="tc-kv">
-          <dt>TRCs total</dt>     <dd><a href="tarean.html">{len(model["trcs"])}</a></dd>
-          <dt>TAREAN-analysed</dt><dd><a href="tarean.html">{n_tarean}</a></dd>
+          <dt>TRCs total</dt>     <dd><a href="{up}tarean.html">{len(model["trcs"])}</a></dd>
+          <dt>TAREAN-analysed</dt><dd><a href="{up}tarean.html">{n_tarean}</a></dd>
           <dt>HOR calls</dt>      <dd>{hor_badge("HOR strong")} {hor_total["strong"]} ·
                                       {hor_badge("HOR moderate")} {hor_total["mod"]} ·
                                       {hor_badge("HOR weak")} {hor_total["weak"]}</dd>
-          <dt>Superfamilies</dt>  <dd><a href="superfamilies.html">{len(model["superfamilies"])}</a>,
+          <dt>Superfamilies</dt>  <dd><a href="{up}superfamilies.html">{len(model["superfamilies"])}</a>,
                                       {n_sf_peers} TRCs grouped</dd>
         </dl></div>
       <div class="tc-card"><div class="tc-card-title">Run settings</div>
@@ -790,12 +807,13 @@ def render_index(model, out_dir, run_meta):
     main = f"""
     <h1>TideCluster report — {esc(model["meta"]["prefix"])}</h1>
     {cards}
-    <p class="tc-callout">This is report v2. The original reports are
-    still available alongside: <a href="../{esc(model["paths"].get("index_html") or "")}">index.html</a>,
-    <a href="../{esc(model["paths"].get("tarean_report_html") or "")}">TAREAN</a>,
-    and KITE page. Nothing was modified.</p>
+    <p class="tc-callout">This is report v2 — the default TideCluster
+    report since 1.9.0. The original v1 report is preserved under
+    <code>{esc(model["meta"]["prefix"])}_report_legacy/</code>; reach it
+    via the <strong>Legacy report&nbsp;&#x2197;</strong> link at the
+    top-right of the navigation bar.</p>
     """
-    (out_dir / "index.html").write_text(page_shell("Summary", "index", run_meta, main))
+    Path(out_path).write_text(_shell(ctx, "Summary", "index", run_meta, main))
 
 
 def _trc_type_label(t):
@@ -829,14 +847,16 @@ def _thumb(src_rel, kind, src_prefix="../", alt=""):
             f'rel="noopener"><img src="{url}" alt="{esc(alt)}"></a>')
 
 
-def _render_tarean_row(t, src_prefix="../"):
+def _render_tarean_row(t, ctx):
+    src_prefix = ctx["src_prefix"]
+    up = ctx["up"]
     ta = t["tarean"] or {}
     kite = t["kite"] or {}
     hor_cell = (f'{hor_count_cell(kite["n_hor_strong"],   "strong")}'
                 f'{hor_count_cell(kite["n_hor_moderate"], "mod")}'
                 f'{hor_count_cell(kite["n_hor_weak"],     "weak")}'
                 f'{hor_count_cell(kite["n_no_hor"],       "none")}') if kite else ""
-    sf_cell = (f'<a href="superfamilies.html#sf-{t["superfamily"]}">SF {t["superfamily"]}</a>'
+    sf_cell = (f'<a href="{up}superfamilies.html#sf-{t["superfamily"]}">SF {t["superfamily"]}</a>'
                if t["superfamily"] else "")
     cons_short = ""
     if ta.get("consensus"):
@@ -847,7 +867,7 @@ def _render_tarean_row(t, src_prefix="../"):
     logo_thumb  = _thumb(ta.get("logo_png"),  "logo",  src_prefix=src_prefix, alt="logo")
     return (
         "<tr>"
-        f'<td data-order="{t["index"]}">{_trc_link(t["id"])}</td>'
+        f'<td data-order="{t["index"]}">{_trc_link(t["id"], prefix=ctx["trc_link_prefix"])}</td>'
         f'<td>{_trc_type_label(t)}</td>'
         f'<td data-order="{t["total_size"]}">{fmt_bp(t["total_size"])}</td>'
         f'<td data-order="{t["n_arrays"]}">{t["n_arrays"]}</td>'
@@ -865,11 +885,11 @@ def _render_tarean_row(t, src_prefix="../"):
         "</tr>")
 
 
-def render_tarean(model, out_dir, run_meta):
+def render_tarean(model, out_path, run_meta, ctx):
     """Merged TAREAN / All-TRCs table. Every TRC from clustering.gff3
     appears here (TAREAN-analysed, below-threshold, SSR). TAREAN-specific
     columns are empty for rows where TAREAN was not performed."""
-    rows = "".join(_render_tarean_row(t) for t in model["trcs"])
+    rows = "".join(_render_tarean_row(t, ctx) for t in model["trcs"])
     n_total   = len(model["trcs"])
     n_tarean  = sum(1 for t in model["trcs"] if t["tarean"])
     n_ssr     = sum(1 for t in model["trcs"] if _trc_type_label(t) == "SSR")
@@ -903,15 +923,15 @@ def render_tarean(model, out_dir, run_meta):
     </table>
     </div>
     """
-    (out_dir / "tarean.html").write_text(page_shell("TAREAN", "tarean", run_meta, body))
+    Path(out_path).write_text(_shell(ctx, "TAREAN", "tarean", run_meta, body))
     # Old (pre-merge) page no longer makes sense; clean it up so the nav
-    # stays consistent when rerender runs over an existing report_v2 dir.
-    old = out_dir / "trcs.html"
+    # stays consistent when rerender runs over an existing report dir.
+    old = Path(out_path).parent / "trcs.html"
     if old.exists():
         old.unlink()
 
 
-def render_kite(model, out_dir, run_meta):
+def render_kite(model, out_path, run_meta, ctx):
     hor_total = {"strong": 0, "mod": 0, "weak": 0, "none": 0}
     for t in model["trcs"]:
         if t["kite"]:
@@ -935,14 +955,14 @@ def render_kite(model, out_dir, run_meta):
             continue
         k = t["kite"]
         profile_thumb = _thumb(k.get("profile_top3_png"), "profile",
-                               src_prefix="../", alt="KITE profile")
+                               src_prefix=ctx["src_prefix"], alt="KITE profile")
         tarean_mon = (t["tarean"] or {}).get("monomer_length")
         kite_mon   = k.get("monomer_primary")
         med_conf   = k.get("median_confidence")
         med_str    = f"{med_conf:.3f}" if med_conf is not None else ""
         rows.append(
             "<tr>"
-            f'<td data-order="{t["index"]}">{_trc_link(t["id"])}</td>'
+            f'<td data-order="{t["index"]}">{_trc_link(t["id"], prefix=ctx["trc_link_prefix"])}</td>'
             f'<td data-order="{kite_mon or 0}">{esc(kite_mon)}</td>'
             f'<td data-order="{tarean_mon or 0}">{esc(tarean_mon)}</td>'
             f'<td data-order="{t["n_arrays"]}">{t["n_arrays"]}</td>'
@@ -993,23 +1013,24 @@ def render_kite(model, out_dir, run_meta):
     </table>
     </div>
     """
-    (out_dir / "kite.html").write_text(page_shell("KITE", "kite", run_meta, body))
+    Path(out_path).write_text(_shell(ctx, "KITE", "kite", run_meta, body))
 
 
-def render_superfamilies(model, out_dir, run_meta):
+def render_superfamilies(model, out_path, run_meta, ctx):
+    out_path = Path(out_path)
     if not model["superfamilies"]:
         body = ('<h1>TRC Superfamilies</h1>'
                 '<p class="tc-callout">No TRC superfamilies were identified '
                 '(either insufficient TRCs reached the clustering step or none shared '
                 'significant consensus similarity).</p>')
-        (out_dir / "superfamilies.html").write_text(
-            page_shell("Superfamilies", "sf", run_meta, body))
+        out_path.write_text(_shell(ctx, "Superfamilies", "sf", run_meta, body))
         return
+    src_prefix = ctx["src_prefix"]
     sections = []
     for sf in model["superfamilies"]:
-        peers = ", ".join(_trc_link(t) for t in sf["trcs"])
-        img = (f'<div class="tc-fig"><a href="../{esc(sf["dotplot"])}">'
-               f'<img src="../{esc(sf["dotplot"])}" width="500" alt="dotplot"></a>'
+        peers = ", ".join(_trc_link(t, prefix=ctx["trc_link_prefix"]) for t in sf["trcs"])
+        img = (f'<div class="tc-fig"><a href="{src_prefix}{esc(sf["dotplot"])}">'
+               f'<img src="{src_prefix}{esc(sf["dotplot"])}" width="500" alt="dotplot"></a>'
                f'<div class="tc-fig-caption">pairwise dotplot of superfamily '
                f'{sf["id"]} consensus sequences</div></div>'
                if sf["dotplot"] else "")
@@ -1020,8 +1041,7 @@ def render_superfamilies(model, out_dir, run_meta):
     body = (f'<h1>TRC superfamilies</h1>'
             f'<p>{len(model["superfamilies"])} superfamilies identified.</p>'
             + "".join(sections))
-    (out_dir / "superfamilies.html").write_text(
-        page_shell("Superfamilies", "sf", run_meta, body))
+    out_path.write_text(_shell(ctx, "Superfamilies", "sf", run_meta, body))
 
 
 # ----------------------------------------------------------------------
@@ -1409,13 +1429,9 @@ def _trc_jumper(ordered_ids, current_id):
             f'{opts}</select>')
 
 
-def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta):
-    # Inside trc/ directory:
-    #   - site-internal links to report_v2 sibling pages need "../"
-    #   - links back into the original output dir need "../../"
-    #   - links to another dashboard in the same dir need no prefix
-    SITE = "../"           # up one to report_v2/
-    SRC  = "../../"        # up two to the original output dir
+def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
+    SITE = ctx["up"]           # prefix for sibling report pages
+    SRC  = ctx["src_prefix"]   # prefix for original-output data files
     prev_id = ordered_ids[idx - 1] if idx > 0 else None
     next_id = ordered_ids[idx + 1] if idx + 1 < len(ordered_ids) else None
     prev_html = (f'<a class="tc-btn" href="{esc(prev_id)}.html">← {esc(prev_id)}</a>'
@@ -1613,28 +1629,15 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta):
     {sf_section}
     {parity_html}
     """
-    shell = page_shell(trc["id"], "trcs", run_meta, body)
-    # Fix nav + asset paths: dashboards live in trc/, one dir deeper than
-    # top-level pages. Body already uses explicit SITE/SRC prefixes so
-    # only the page_shell output needs these rewrites.
-    shell = shell.replace('href="assets/', 'href="../assets/')
-    shell = shell.replace('src="assets/',  'src="../assets/')
-    shell = shell.replace('href="index.html"',         'href="../index.html"')
-    shell = shell.replace('href="trcs.html"',          'href="../trcs.html"')
-    shell = shell.replace('href="tarean.html"',        'href="../tarean.html"')
-    shell = shell.replace('href="kite.html"',          'href="../kite.html"')
-    shell = shell.replace('href="superfamilies.html"', 'href="../superfamilies.html"')
-    # Legacy link: report_v2/trc/TRC_N.html needs ../../<prefix>_index.html
-    shell = shell.replace(f'href="../{run_meta["prefix"]}_index.html"',
-                          f'href="../../{run_meta["prefix"]}_index.html"')
-    (out_dir / "trc" / f"{trc['id']}.html").write_text(shell)
+    (out_dir / f"{trc['id']}.html").write_text(
+        _shell(ctx, trc["id"], "trcs", run_meta, body))
 
 
-def render_all_trc_dashboards(model, out_dir, run_meta):
-    (out_dir / "trc").mkdir(exist_ok=True)
+def render_all_trc_dashboards(model, out_dir, run_meta, ctx):
+    out_dir.mkdir(parents=True, exist_ok=True)
     ordered = [t["id"] for t in model["trcs"]]  # already sorted numerically
     for i, trc in enumerate(model["trcs"]):
-        render_trc_dashboard(trc, model, out_dir, ordered, i, run_meta)
+        render_trc_dashboard(trc, model, out_dir, ordered, i, run_meta, ctx)
     return len(ordered)
 
 
@@ -1658,21 +1661,36 @@ def copy_assets(dest: Path, script_path: Path):
 def build_report(input_dir, prefix=None, output_dir=None, *, quiet=False):
     """Importable entry point for the report-v2 build.
 
-    Called by TideCluster.py at the end of the tarean step so every
-    pipeline run produces a v2 report alongside the v1 artefacts.
-    Returns the output directory as a Path."""
+    Layout (since v1.9.0):
+      <input_dir>/<prefix>_index.html         v2 landing (Summary)
+      <input_dir>/<prefix>_report/            v2 subpages + assets
+      <input_dir>/<prefix>_report_legacy/     v1 HTML moved here by
+                                              TideCluster.py._move_v1_to_legacy
+
+    Returns the subtree output directory as a Path."""
     input_dir = Path(input_dir).resolve()
     if not input_dir.is_dir():
         raise SystemExit(f"input-dir is not a directory: {input_dir}")
     prefix  = prefix or detect_prefix(input_dir)
-    out_dir = Path(output_dir) if output_dir else (input_dir / f"{prefix}_report_v2")
+
+    # One-off cleanup: earlier 1.9.0-dev snapshots wrote to
+    # <prefix>_report_v2/. If a stale one is present, remove it so it
+    # doesn't clutter the output root next to the new <prefix>_report/.
+    stale = input_dir / f"{prefix}_report_v2"
+    if stale.exists():
+        shutil.rmtree(stale)
+        if not quiet:
+            print(f"removed stale {stale.name}/ from the previous 1.9.0-dev layout")
+
+    out_dir = Path(output_dir) if output_dir else (input_dir / f"{prefix}_report")
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "data").mkdir(exist_ok=True)
 
     if not quiet:
-        print(f"input:  {input_dir}")
-        print(f"prefix: {prefix}")
-        print(f"output: {out_dir}")
+        print(f"input:   {input_dir}")
+        print(f"prefix:  {prefix}")
+        print(f"root:    {input_dir}/{prefix}_index.html")
+        print(f"subtree: {out_dir}")
 
     model = build_model(input_dir, prefix)
 
@@ -1687,22 +1705,49 @@ def build_report(input_dir, prefix=None, output_dir=None, *, quiet=False):
               f"superfamilies: {sf_count}  "
               f"HOR strong/moderate/weak: {hor_s}/{hor_m}/{hor_w}")
 
-    script_path = Path(__file__).resolve()
-    copy_assets(out_dir / "assets", script_path)
+    copy_assets(out_dir / "assets", Path(__file__).resolve())
     with (out_dir / "data" / "report.json").open("w") as f:
         json.dump(model, f, indent=2, default=str)
     if not quiet:
         print(f"wrote: {out_dir / 'data' / 'report.json'}")
 
     run_meta = make_run_meta(model)
-    render_index(model, out_dir, run_meta)
-    render_tarean(model, out_dir, run_meta)
-    render_kite(model, out_dir, run_meta)
-    render_superfamilies(model, out_dir, run_meta)
-    n_dash = render_all_trc_dashboards(model, out_dir, run_meta)
+    # Three depth contexts share a schema. See each field in page_shell.
+    # *_href fields are full relative hrefs from the page being rendered;
+    # *_prefix fields are prepended to local refs in the page body.
+    ctx_root = {                  # <input_dir>/<prefix>_index.html
+        "up":              f"{prefix}_report/",
+        "root_href":       f"{prefix}_index.html",
+        "legacy_href":     f"{prefix}_report_legacy/{prefix}_index.html",
+        "assets_href":     f"{prefix}_report/assets/",
+        "src_prefix":      "",
+        "trc_link_prefix": f"{prefix}_report/trc/",
+    }
+    ctx_top = {                   # <out_dir>/{tarean,kite,superfamilies}.html
+        "up":              "",
+        "root_href":       f"../{prefix}_index.html",
+        "legacy_href":     f"../{prefix}_report_legacy/{prefix}_index.html",
+        "assets_href":     "assets/",
+        "src_prefix":      "../",
+        "trc_link_prefix": "trc/",
+    }
+    ctx_dash = {                  # <out_dir>/trc/TRC_N.html
+        "up":              "../",
+        "root_href":       f"../../{prefix}_index.html",
+        "legacy_href":     f"../../{prefix}_report_legacy/{prefix}_index.html",
+        "assets_href":     "../assets/",
+        "src_prefix":      "../../",
+        "trc_link_prefix": "",
+    }
+
+    render_index(model, input_dir / f"{prefix}_index.html", run_meta, ctx_root)
+    render_tarean(model, out_dir / "tarean.html", run_meta, ctx_top)
+    render_kite(model, out_dir / "kite.html", run_meta, ctx_top)
+    render_superfamilies(model, out_dir / "superfamilies.html", run_meta, ctx_top)
+    n_dash = render_all_trc_dashboards(model, out_dir / "trc", run_meta, ctx_dash)
     if not quiet:
-        print(f"rendered: index, tarean, kite, superfamilies, "
-              f"{n_dash} TRC dashboards")
+        print(f"rendered: {prefix}_index.html + tarean / kite / "
+              f"superfamilies + {n_dash} TRC dashboards")
     return out_dir
 
 

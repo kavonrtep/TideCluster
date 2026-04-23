@@ -215,6 +215,7 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
             print("TRC similarity clustering not performed due to lack of TAREAN "
                   "consensus sequences.", file=open(html_file, "w"))
 
+        _move_v1_to_legacy(prefix)
         _build_report_v2(prefix)
         return
 
@@ -247,7 +248,60 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
         F" -p {prefix} -t {cpu}")
     tc.run_cmd(cmd)
 
+    _move_v1_to_legacy(prefix)
     _build_report_v2(prefix)
+
+
+def _move_v1_to_legacy(prefix):
+    """Move the four top-level v1 HTML reports into <prefix>_report_legacy/
+    so the root of the output directory is left clean for the v2 landing
+    page (`<prefix>_index.html`, written by _build_report_v2).
+
+    Embedded `src=`/`href=` references that point into the v1 data
+    directories (<prefix>_tarean/, <prefix>_kite/, dotplots/) get a
+    leading '../' prepended so they still resolve from the legacy dir.
+
+    Idempotent: if a file is already missing (e.g. pipeline ran only
+    partial steps) it is simply skipped. Data directories are not
+    moved — they contain per-TRC v1 HTML that references its own
+    siblings with local paths."""
+    prefix_dir  = os.path.dirname(prefix) or "."
+    prefix_name = os.path.basename(prefix)
+    legacy_dir  = F"{prefix}_report_legacy"
+    os.makedirs(legacy_dir, exist_ok=True)
+
+    def _move_and_rewrite(src, dst, path_prefixes):
+        if not os.path.exists(src):
+            return
+        with open(src) as f:
+            html = f.read()
+        for p in path_prefixes:
+            html = html.replace(F'src="{p}',  F'src="../{p}')
+            html = html.replace(F'href="{p}', F'href="../{p}')
+        with open(dst, "w") as f:
+            f.write(html)
+        os.remove(src)
+
+    # Index: sibling links (e.g. drapa_tarean_report.html) resolve inside
+    # the legacy dir once tarean_report.html is moved there too, so no
+    # ref rewriting is needed for the index itself.
+    _move_and_rewrite(
+        F"{prefix}_index.html",
+        F"{legacy_dir}/{prefix_name}_index.html",
+        [])
+    _move_and_rewrite(
+        F"{prefix}_tarean_report.html",
+        F"{legacy_dir}/{prefix_name}_tarean_report.html",
+        [F"{prefix_name}_tarean/"])
+    _move_and_rewrite(
+        F"{prefix}_kite_report.html",
+        F"{legacy_dir}/{prefix_name}_kite_report.html",
+        [F"{prefix_name}_kite/"])
+    _move_and_rewrite(
+        F"{prefix}_trc_superfamilies.html",
+        F"{legacy_dir}/{prefix_name}_trc_superfamilies.html",
+        ["dotplots/"])
+    print(F"Legacy v1 reports moved to {legacy_dir}/")
 
 
 def _build_report_v2(prefix):
@@ -263,7 +317,8 @@ def _build_report_v2(prefix):
         prefix_name = os.path.basename(prefix)
         print("Building report v2")
         tc_rerender_report.build_report(prefix_dir, prefix=prefix_name, quiet=True)
-        print(F"Report v2 written to {prefix_dir}/{prefix_name}_report_v2/")
+        print(F"Report v2 written: {prefix_dir}/{prefix_name}_index.html"
+              F" + {prefix_dir}/{prefix_name}_report/")
     except Exception as e:
         print(F"WARNING: report v2 generation failed: {e}", file=sys.stderr)
 

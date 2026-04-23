@@ -143,6 +143,21 @@ HOR_status · HOR_confidence · HOR_base_monomer · HOR_hor_period · HOR_n_harm
 
 ### 5.2 Report v2
 
+Report v2 is the default report since 1.9.0. Output layout:
+
+```
+<prefix>_index.html                 # v2 landing (Summary)
+<prefix>_report/                    # v2 subpages
+├── tarean.html  kite.html  superfamilies.html
+├── trc/TRC_*.html                  # per-TRC dashboards
+└── assets/  data/
+<prefix>_report_legacy/             # v1 HTML preserved here
+└── <prefix>_index.html  <prefix>_tarean_report.html  ...
+```
+
+The "Legacy report ↗" link at the top-right of the nav bar on every
+v2 page jumps to the v1 landing inside `<prefix>_report_legacy/`.
+
 - KITE tab: aggregate 4-segment bar chart across all arrays + per-TRC
   table with four tinted count columns and median-confidence column.
 - Merged TAREAN tab: four-count HOR cell per TRC.
