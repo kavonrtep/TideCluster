@@ -52,7 +52,15 @@ option_list <- list(
               help = "pseudocount for PFM (default 0.5)"),
   make_option("--write-pfm",     type = "logical",   default = FALSE,
               help = "batch: also emit one PFM TSV per TRA (default FALSE)",
-              action = "store_true")
+              action = "store_true"),
+  make_option("--phase-correction", type = "character", default = "windowed",
+              help = "phase-correction strategy: 'none' (Option 2 single fold) or 'windowed' (S4, per-window rotation alignment). Default: windowed."),
+  make_option("--target-copies",    type = "integer",   default = 10L,
+              help = "windowed: target monomer copies per window (default 10)"),
+  make_option("--min-window-bp",    type = "integer",   default = 3000L,
+              help = "windowed: minimum window size in bp (default 3000)"),
+  make_option("--max-window-bp",    type = "integer",   default = 15000L,
+              help = "windowed: maximum window size in bp (default 15000)")
 )
 opt <- parse_args(OptionParser(option_list = option_list))
 
@@ -82,7 +90,34 @@ diag_row <- function(res, extras) {
     consensus_len = nchar(res$consensus)
   )
   for (k in names(harm)) row[[paste0("harm_", k)]] <- sprintf("%.4f", harm[k])
+  # Windowed-mode extras. Always present (even when the array fell
+  # back to single-window) so every row has identical columns and the
+  # combined data-frame build does not trip on row-width mismatches.
+  row$n_windows       <- if (!is.null(res$n_windows))      res$n_windows      else 1L
+  row$window_size_bp  <- if (!is.null(res$window_size_bp)) res$window_size_bp else res$length_bp
+  row$ref_window      <- if (!is.null(res$ref_window))     res$ref_window     else 1L
+  sc <- if (!is.null(res$window_align_scores))
+    res$window_align_scores[!is.na(res$window_align_scores)] else numeric(0)
+  row$mean_align_score <- if (length(sc) > 0) sprintf("%.3f", mean(sc)) else ""
+  row$min_align_score  <- if (length(sc) > 0) sprintf("%.3f", min(sc))  else ""
   modifyList(row, extras)
+}
+
+# Dispatch: pick the appropriate consensus function based on CLI flag.
+dispatch_consensus <- function(S, m, opt) {
+  mode <- opt$`phase-correction`
+  if (mode == "windowed") {
+    return(compute_tra_consensus_windowed(
+      S, m,
+      target_copies_per_window = opt$`target-copies`,
+      min_window_bp            = opt$`min-window-bp`,
+      max_window_bp            = opt$`max-window-bp`,
+      pseudo = opt$pseudo))
+  }
+  compute_tra_consensus(S, m,
+                        window_size = opt$`window-size`,
+                        n_windows   = opt$`n-windows`,
+                        pseudo      = opt$pseudo)
 }
 
 # -------- single-array mode -------------------------------------------
@@ -94,10 +129,7 @@ run_single <- function(opt) {
   if (length(ds) == 0) stop("empty FASTA")
   S <- ds[[1]]
   rec_name <- names(ds)[1]
-  res <- compute_tra_consensus(S, opt$m,
-                               window_size = opt$`window-size`,
-                               n_windows   = opt$`n-windows`,
-                               pseudo      = opt$pseudo)
+  res <- dispatch_consensus(S, opt$m, opt)
   dir.create(dirname(opt$out), showWarnings = FALSE, recursive = TRUE)
   writeLines(format_fasta(paste0(rec_name, "  m=", opt$m), res$consensus),
              con = paste0(opt$out, "_consensus.fasta"))
@@ -131,7 +163,12 @@ index_trc_fasta <- function(fa_path) {
   list(halves = halves, parsed = parsed, names = nms)
 }
 
-process_one <- function(row, trc_index_cache, window_size, n_windows, pseudo, write_pfm, pfm_dir) {
+process_one <- function(row, trc_index_cache, window_size, n_windows,
+                        pseudo, write_pfm, pfm_dir,
+                        phase_correction = "none",
+                        target_copies = 50L,
+                        min_window_bp = 10000L,
+                        max_window_bp = 50000L) {
   trc <- row$TRC_ID
   if (!trc %in% names(trc_index_cache)) {
     return(list(ok = FALSE, reason = paste0("no fasta for ", trc), row = row))
@@ -159,10 +196,14 @@ process_one <- function(row, trc_index_cache, window_size, n_windows, pseudo, wr
                 reason = sprintf("bad m=%s (L=%d)", as.character(m), length(S)),
                 row = row))
   }
-  res <- compute_tra_consensus(S, m,
-                               window_size = window_size,
-                               n_windows   = n_windows,
-                               pseudo      = pseudo)
+  res <- dispatch_consensus(S, m, list(
+    `phase-correction` = phase_correction,
+    `window-size`      = window_size,
+    `n-windows`        = n_windows,
+    `target-copies`    = target_copies,
+    `min-window-bp`    = min_window_bp,
+    `max-window-bp`    = max_window_bp,
+    pseudo             = pseudo))
   # per-TRA identifier used in FASTA header + PFM filename
   id <- sprintf("%s__%s__%d-%d", trc, row$seqid, row$start, row$end)
   if (write_pfm) {
@@ -209,7 +250,11 @@ run_batch <- function(opt) {
                             n_windows       = opt$`n-windows`,
                             pseudo          = opt$pseudo,
                             write_pfm       = isTRUE(opt$`write-pfm`),
-                            pfm_dir         = pfm_dir),
+                            pfm_dir         = pfm_dir,
+                            phase_correction = opt$`phase-correction`,
+                            target_copies    = opt$`target-copies`,
+                            min_window_bp    = opt$`min-window-bp`,
+                            max_window_bp    = opt$`max-window-bp`),
     mc.cores = opt$cpu
   )
 

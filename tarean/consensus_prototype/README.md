@@ -6,11 +6,28 @@ on top of KITE's monomer-size estimates. Implements Option 2
 `docs/kite_consensus_review.md`.
 
 **Status:** prototype. **Not** wired into `TideCluster.py` or
-`tarean/kite.R`. Validation summary in
-`tmp/consensus_prototype_drapa/REPORT.md` (expected to be regenerated
-by the run below). The current results do not meet the promotion
-criteria in `docs/kite_consensus_implementation_plan.md` §6; see the
-report for the reasoning and alternative paths.
+`tarean/kite.R`.
+
+## Current state
+
+Two algorithm variants, selectable via `--phase-correction`:
+
+- `none` (Option 2 single fold) — fastest but loses phase on arrays
+  with accumulated indel drift. Drapa benchmark: 31 % of TRAs reach
+  ≥ 95 % BLAST coverage of the source array.
+- `windowed` (S4, **default**) — splits the array into ~10-monomer
+  windows, computes a local count matrix per window, aligns each to
+  the sharpest-periodicity window via FFT cross-correlation, sums the
+  aligned counts. Drapa benchmark: **49 % of TRAs reach ≥ 95 %
+  coverage**, notable lift for No-HOR (0 → 0.94 median) and HOR-strong
+  (0 → 0.37 median). HOR-moderate remains unsolved (median 0),
+  suggesting additional work is needed for that class specifically.
+
+Neither variant yet meets the promotion criteria in
+`docs/kite_consensus_implementation_plan.md` §6. The next step under
+consideration is S5 (cumulative phase from k-mer walk) or S6
+(iterative refinement via banded alignment) for the remaining
+HOR-moderate failures.
 
 ## Usage
 
@@ -50,10 +67,20 @@ Produces under `<out_dir>`:
 
 ### Tunables
 
-- `--window-size` (default 50 000 bp)
-- `--n-windows` (default 16)
-- `--pseudo` (default 0.5) — pseudocount for PFM smoothing
-- `--cpu` (default 4) — parallel workers in batch mode
+Common:
+- `--pseudo` (default 0.5) — pseudocount for PFM smoothing.
+- `--cpu` (default 4) — parallel workers in batch mode.
+
+`--phase-correction none` (Option 2):
+- `--window-size` (default 50 000 bp) — sampling window span.
+- `--n-windows` (default 16) — number of sampling windows per TRA.
+
+`--phase-correction windowed` (S4, default):
+- `--target-copies` (default 10) — target monomer copies per window.
+- `--min-window-bp` (default 3 000) — floor on window size.
+- `--max-window-bp` (default 15 000) — cap on window size (for very
+  long monomers). Smaller windows sharpen per-window phase; too small
+  starves the per-window PFM of statistical power.
 
 ## Tests
 
