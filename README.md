@@ -400,31 +400,33 @@ options:
 
 ## Per-TRA consensus generation
 
-Companion R tools that build one consensus monomer per Tandem Repeat
-Array (TRA), validate it by self-BLAST against the source array, and
-attach a per-TRA quality grade plus diagnostic flags. Distinct from
-the per-TRC consensus already emitted by the TAREAN step.
+Builds one consensus monomer per Tandem Repeat Array (TRA), validates
+it by self-BLAST against the source array, and attaches a per-TRA
+quality grade plus diagnostic flags. Distinct from the per-TRC
+consensus already emitted by the TAREAN step.
 
-The tools live under `tarean/consensus_prototype/`. They are run as a
-post-processing pass on an existing `TideCluster.py run_all` output
-directory; not yet wired into `TideCluster.py` itself.
+Run as a post-processing pass on an existing `TideCluster.py run_all`
+output (not yet wired into `TideCluster.py` itself):
 
-Three steps:
+```bash
+tc_per_tra_consensus.py -p <prefix> [-c CPU]
+```
 
-1. **Array-MSA consensus** (`consensus_msa.R`) — extracts in-phase
-   monomer copies from each genomic array via a k-mer phase anchor and
-   aligns them with MAFFT.
-2. **TideHunter consensus** (`tests/validate_th_single.R`) — uses
-   TideHunter's own per-fragment consensus, picking the best fragment
-   per TRA.
-3. **Consensus selector** (`consensus_ensemble.R`) — chooses the
-   better of the two by self-BLAST coverage, computes per-copy
-   identity dispersion and internal-gap metrics, assigns each TRA a
-   quality grade (A clean / B qualified / C low / D unusable) and
-   independent diagnostic flags (`boundary_overext`, `internal_gap`,
-   `heterogeneous`, `low_pident`).
+Internally combines two complementary methods:
 
-Outputs (one row per TRA):
+1. **Array-MSA consensus** — extracts in-phase monomer copies from
+   each genomic array via a k-mer phase anchor and aligns them with
+   MAFFT.
+2. **TideHunter consensus** — uses TideHunter's own per-fragment
+   consensus, picking the best fragment per TRA.
+
+Then a **consensus selector** chooses the better of the two by
+self-BLAST coverage, computes per-copy identity dispersion and
+internal-gap metrics, and assigns each TRA a quality grade (A clean /
+B qualified / C low / D unusable) and independent diagnostic flags
+(`boundary_overext`, `internal_gap`, `heterogeneous`, `low_pident`).
+
+Outputs land in `<prefix>_per_tra_consensus/`:
 
 - `per_tra_consensus.fasta` — selected consensus per TRA, source
   method noted in the header.
@@ -432,8 +434,8 @@ Outputs (one row per TRA):
   dispersion, internal-gap counts, grade, flags, KITE annotation.
 - `summary.log` — totals and threshold values.
 
-Full vocabulary, output column reference, threshold parameters,
-benchmark numbers, and step-by-step usage are in
+Full vocabulary, output column reference, threshold parameters, and
+manual step-by-step invocation are in
 [`docs/per_tra_consensus.md`](docs/per_tra_consensus.md).
 
 

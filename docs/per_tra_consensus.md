@@ -114,42 +114,62 @@ HOR-rich genomes, etc.).
 
 ## Usage
 
-Inputs: an existing `TideCluster.py run_all` output directory. The
-following files are read:
+Inputs are derived from a TideCluster prefix (the `<prefix>` of an
+existing `TideCluster.py run_all` output). The following are required:
 
-- `prefix_tarean/fasta/<TRC>.fasta`
-- `prefix_kite/monomer_size_top3_estimats.csv`
-- `prefix_tidehunter.gff3`
-- `prefix_clustering.gff3`
+- `<prefix>_tarean/fasta/<TRC>.fasta`
+- `<prefix>_kite/monomer_size_top3_estimats.csv`
+- `<prefix>_tidehunter.gff3`
+- `<prefix>_clustering.gff3`
 
-Three steps (each can be re-run independently because outputs are
-cached):
+### One-shot wrapper
 
 ```bash
-# 1. Array-MSA consensus per TRA + self-BLAST validation.
+tc_per_tra_consensus.py -p <prefix> [-c CPU] [--cov-strict ...]
+```
+
+Runs all four steps in order, writes results to
+`<prefix>_per_tra_consensus/` (override with `-o`). Threshold
+parameters from the table above are exposed as CLI flags. Cached
+intermediate outputs are reused on re-run; pass `-f / --force` to
+rebuild them.
+
+The wrapper expects `Rscript`, `mafft`, `blastn`, and `makeblastdb` on
+`PATH` (all available in the standard TideCluster conda environment).
+
+### Manual invocation
+
+The same four steps can be run by hand if a step needs to be debugged
+in isolation:
+
+```bash
+# 1. Array-MSA consensus per TRA.
 Rscript tarean/consensus_prototype/consensus_msa.R --mode batch \
   --kite-tsv   <prefix>_kite/monomer_size_top3_estimats.csv \
   --tarean-dir <prefix>_tarean/fasta \
   --out-dir    out/msa \
   --cpu 4
+
+# 2. Self-BLAST validation of the array-MSA consensus (also builds the
+#    array DB shared with step 3).
 Rscript tarean/consensus_prototype/tests/validate_drapa_blast.R \
   --consensus-fasta out/msa/per_tra_consensus.fasta \
-  --diagnostics     out/msa/per_tra_diagnostics.tsv \
+  --diagnostics-tsv out/msa/per_tra_diagnostics.tsv \
   --tarean-dir      <prefix>_tarean/fasta \
   --kite-tsv        <prefix>_kite/monomer_size_top3_estimats.csv \
   --out-dir         out/msa/blast_validation \
   --cpu 4
 
-# 2. TideHunter consensus per TRA + self-BLAST validation.
+# 3. TideHunter consensus per TRA + self-BLAST.
 Rscript tarean/consensus_prototype/tests/validate_th_single.R \
   --tidehunter-gff3 <prefix>_tidehunter.gff3 \
   --clustering-gff3 <prefix>_clustering.gff3 \
-  --tarean-dir      <prefix>_tarean/fasta \
-  --kite-tsv        <prefix>_kite/monomer_size_top3_estimats.csv \
+  --blast-db        out/msa/blast_validation/all_arrays \
+  --baseline-tsv    out/msa/blast_validation/per_tra_blast_metrics.tsv \
   --out-dir         out/th \
   --cpu 4
 
-# 3. Consensus selector + quality grades + flags.
+# 4. Consensus selector + quality grades + flags.
 Rscript tarean/consensus_prototype/consensus_ensemble.R \
   --mb-fasta     out/msa/per_tra_consensus.fasta \
   --mb-blast-tsv out/msa/blast_validation/blast.tsv \
@@ -160,29 +180,33 @@ Rscript tarean/consensus_prototype/consensus_ensemble.R \
 ```
 
 Wall time scales with array DNA volume. The two BLAST passes (steps
-1 and 2) dominate; the selector itself is a few seconds because it
+2 and 3) dominate; the selector itself is a few seconds because it
 re-uses the cached BLAST outputs.
 
 ## Outputs
 
-Under `out/selected/`:
+Under `<prefix>_per_tra_consensus/` (or the user-supplied `--out-dir`):
 
 - `per_tra_consensus.fasta` — the selected consensus per TRA, with the
   source method (`M_B` / `TH_single`) annotated in the header.
 - `per_tra_metrics.tsv` — every per-TRA metric column listed above.
 - `summary.log` — totals, threshold values, grade counts, flag counts.
+- `args.json` — resolved arguments and threshold values for the run.
+- `logs/` — per-step Rscript stdout / stderr.
+- `msa/`, `th/`, `selected/` — intermediate outputs (kept by default;
+  pass `--no-keep-intermediate` to delete after success).
 
 ## Limits
 
-- 7 % of TRAs land at grade D, dominated by SSRs (m ≤ 50). MSA-based
-  approaches do not fit those; they are flagged in the existing
-  pipeline as `repeat_type=SSR` and should be routed to a motif-only
-  consensus (the motif is already detected at the clustering step).
-- ~1.5 % of TRAs are well-formed but resistant: heterogeneous HOR
-  arrays where a single consensus cannot tile every variant, or arrays
-  with kb-scale internal gaps that look like a different repeat
-  embedded inside the dominant one. The flags surface these
-  explicitly so downstream tools can decide how to handle them.
+- A subset of grade D TRAs are SSRs (m ≤ 50). MSA-based approaches do
+  not fit those; they are flagged in the existing pipeline as
+  `repeat_type=SSR` and should be routed to a motif-only consensus
+  (the motif is already detected at the clustering step).
+- A small remainder of well-formed arrays remain resistant:
+  heterogeneous HOR arrays where a single consensus cannot tile every
+  variant, or arrays with kb-scale internal gaps that look like a
+  different repeat embedded inside the dominant one. The flags surface
+  these explicitly so downstream tools can decide how to handle them.
 - The selector is read-only relative to its inputs. Iterating on
   thresholds, flag rules, or selection logic does not require
   re-running MSA or BLAST.
