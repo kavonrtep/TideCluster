@@ -102,6 +102,23 @@ EOF
         -c conda-forge -c bioconda \
         --file /opt/tidecluster/conda-deps.txt
 
+    # Verify bioconductor-genomeinfodbdata installed cleanly. Its
+    # post-link.sh fetches a data bundle from bioconductor servers at
+    # install time and occasionally finishes with no data on hosted
+    # runners — leaving R unable to load GenomeInfoDb at runtime
+    # ("there is no package called 'GenomeInfoDbData'"). Force-
+    # reinstall when the load test fails so post-link runs again.
+    echo "=== Verifying GenomeInfoDb loads ==="
+    if ! /opt/conda/bin/conda run -n base \
+            Rscript -e 'suppressMessages(library(GenomeInfoDb))' 2>/dev/null
+    then
+        echo "GenomeInfoDb failed to load; force-reinstalling data package"
+        /opt/conda/bin/mamba install -y -n base --force-reinstall \
+            -c conda-forge -c bioconda bioconductor-genomeinfodbdata
+        /opt/conda/bin/conda run -n base \
+            Rscript -e 'suppressMessages(library(GenomeInfoDb))'
+    fi
+
     # Mirror conda/tidecluster/build.sh: make every CLI executable and
     # symlink it into /opt/conda/bin so users can call e.g.
     # `apptainer exec sif TideCluster.py ...` without absolute paths.
