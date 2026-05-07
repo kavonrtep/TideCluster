@@ -8,6 +8,7 @@ r-optparse
 r-igraph
 bioconductor-biostrings
 bioconductor-rtracklayer
+bioconductor-genomicranges
 r-scales
 r-hwriter
 r-r2html

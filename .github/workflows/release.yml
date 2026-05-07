@@ -1,0 +1,276 @@
+name: release
+
+# Fires only on annotated or lightweight tag pushes matching a version
+# pattern. Mirrors the tag pattern used by conda-release.yml so that one
+# version tag triggers both pipelines independently.
+on:
+  push:
+    tags: ['[0-9]+.[0-9]+.[0-9]+*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. 1.10.0). Must already exist on the repo.'
+        required: true
+
+permissions:
+  contents: write   # create GitHub Release
+  packages: write   # push SIF to GHCR
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # GHCR namespace. GHCR normalises to lowercase; users pull via:
+  #   apptainer pull oras://ghcr.io/kavonrtep/tidecluster/sif:<TAG>
+  GHCR_IMAGE: ghcr.io/kavonrtep/tidecluster/sif
+  APPTAINER_VERSION: 1.3.5
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────
+  # 1. Tag-version sanity check + smoke test on a conda-installed env.
+  # Cheap fail-fast before we burn ~60 min on a SIF build. Parallels the
+  # equivalent step in conda-release.yml.
+  # ─────────────────────────────────────────────────────────────────────
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash -el {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Assert tag matches version.py
+        run: |
+          V=$(python -c "exec(open('version.py').read()); print(__version__)")
+          T="${{ steps.tag.outputs.tag }}"
+          if [ "$V" != "$T" ]; then
+            echo "::error::version.py ($V) does not match tag ($T)"
+            exit 1
+          fi
+          echo "tag matches version.py: $V"
+
+      - name: Set up miniforge / mamba
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-version: latest
+          auto-update-conda: false
+          use-mamba: true
+          activate-environment: tidecluster
+          python-version: "3.11"
+          channels: conda-forge,bioconda,petrnovak
+          channel-priority: strict
+
+      - name: Install runtime dependencies
+        run: mamba install -y --file requirements.txt
+
+      - name: Smoke test
+        run: ./tests.sh smoke
+
+  # ─────────────────────────────────────────────────────────────────────
+  # 2. Build the Singularity image from the canonical TideCluster.def.
+  # The def's %files block bakes the repo into the image and %post
+  # installs runtime deps from conda-forge / bioconda only — no
+  # dependency on the petrnovak anaconda.org channel.
+  # ─────────────────────────────────────────────────────────────────────
+  build-sif:
+    needs: unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      sif: ${{ steps.build.outputs.sif }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "tag=${{ github.event.inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo apt-get autoremove -y
+          df -h
+
+      - uses: eWaterCycle/setup-apptainer@v2
+        with:
+          apptainer-version: ${{ env.APPTAINER_VERSION }}
+
+      - name: Build SIF
+        id: build
+        run: |
+          TAG="${{ steps.tag.outputs.tag }}"
+          SIF="images/tidecluster_${TAG}.sif"
+          mkdir -p images
+          sudo apptainer build --force "$SIF" TideCluster.def
+          sudo chown "$(id -u):$(id -g)" "$SIF"
+          ls -lh "$SIF"
+          echo "sif=$SIF" >> "$GITHUB_OUTPUT"
+
+      - name: Upload SIF for downstream jobs
+        uses: actions/upload-artifact@v4
+        with:
+          name: sif
+          path: ${{ steps.build.outputs.sif }}
+          retention-days: 1
+          compression-level: 0  # SIF is already compressed; saves CI time
+
+  # ─────────────────────────────────────────────────────────────────────
+  # 3. Run the short fixture INSIDE the built SIF. Release gate: the
+  # artefact that ships must pass the test, not a proxy.
+  #
+  # The host's tests/short.sh invokes "$ROOT/TideCluster.py" — that file
+  # has shebang `#!/usr/bin/env python`. Inside the container the env's
+  # python is /opt/conda/bin/python with all dependencies already
+  # installed by %post, so the host script runs against the container's
+  # python interpreter. The wrapper sub-step exercises the per-TRA
+  # consensus path (Rscript + mafft + blastn + makeblastdb).
+  # ─────────────────────────────────────────────────────────────────────
+  test-in-container:
+    needs: build-sif
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h
+
+      - uses: eWaterCycle/setup-apptainer@v2
+        with:
+          apptainer-version: ${{ env.APPTAINER_VERSION }}
+
+      - name: Download SIF
+        uses: actions/download-artifact@v4
+        with:
+          name: sif
+          path: images/
+
+      - name: Run short fixture through the container
+        run: |
+          SIF=$(ls images/tidecluster_*.sif | head -n1)
+          apptainer exec -B "$PWD" "$SIF" bash tests/short.sh
+
+      - name: Upload output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: short_output_${{ github.run_id }}
+          path: tmp/tests/short
+          retention-days: 14
+
+  # ─────────────────────────────────────────────────────────────────────
+  # 4. Push the SIF to GHCR as an ORAS/OCI artefact. Only reached if the
+  # in-container test passed.
+  #
+  # First push for a brand-new package may require a one-time manual
+  # flip of the GHCR package visibility to "public" on
+  # https://github.com/users/<owner>/packages/container/<image>/settings
+  # — GHCR creates packages as private by default.
+  # ─────────────────────────────────────────────────────────────────────
+  push-ghcr:
+    needs: [build-sif, test-in-container]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: eWaterCycle/setup-apptainer@v2
+        with:
+          apptainer-version: ${{ env.APPTAINER_VERSION }}
+
+      - name: Download SIF
+        uses: actions/download-artifact@v4
+        with:
+          name: sif
+          path: images/
+
+      - name: Login to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GITHUB_TOKEN" | apptainer registry login \
+            --username "${GITHUB_ACTOR}" --password-stdin \
+            oras://ghcr.io
+
+      - name: Push SIF to GHCR
+        run: |
+          TAG="${{ needs.build-sif.outputs.tag }}"
+          SIF=$(ls images/tidecluster_*.sif | head -n1)
+          apptainer push "$SIF" "oras://${GHCR_IMAGE}:${TAG}"
+          # Also update :latest so users can pull without knowing the tag.
+          apptainer push "$SIF" "oras://${GHCR_IMAGE}:latest"
+
+  # ─────────────────────────────────────────────────────────────────────
+  # 5. Create the GitHub Release with auto-generated notes plus a
+  # "Container image" section pointing at GHCR. Last step on purpose:
+  # only successful releases get a public landing page.
+  # ─────────────────────────────────────────────────────────────────────
+  create-release:
+    needs: [build-sif, push-ghcr]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compose release notes
+        id: notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.build-sif.outputs.tag }}"
+          AUTO=$(gh api \
+            repos/${{ github.repository }}/releases/generate-notes \
+            -f tag_name="$TAG" -q .body)
+          {
+            echo "## Container image"
+            echo
+            echo "The Singularity / Apptainer image for this release is published to GHCR as an OCI artefact:"
+            echo
+            echo '```bash'
+            echo "apptainer pull oras://${GHCR_IMAGE}:${TAG}"
+            echo "# or:  apptainer pull oras://${GHCR_IMAGE}:latest"
+            echo '```'
+            echo
+            echo "Run a TideCluster command from the container:"
+            echo
+            echo '```bash'
+            echo "apptainer exec tidecluster_${TAG}.sif TideCluster.py run_all -c 40 -pr sample -f genome.fasta"
+            echo '```'
+            echo
+            echo "## Conda package"
+            echo
+            echo '```bash'
+            echo "mamba create -n tidecluster -c conda-forge -c bioconda -c petrnovak tidecluster=${TAG}"
+            echo '```'
+            echo
+            echo "---"
+            echo
+            echo "$AUTO"
+          } > release-notes.md
+
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ needs.build-sif.outputs.tag }}"
+          gh release create "$TAG" \
+            --title "$TAG" \
+            --notes-file release-notes.md \
+            --verify-tag

@@ -1,0 +1,164 @@
+Bootstrap: docker
+From: continuumio/miniconda3
+
+%labels
+    Author Petr Novak
+    Version 1.0
+    Description Singularity container for TideCluster - tandem repeat identification and analysis
+
+%help
+    TideCluster - Tandem Repeat Detection and Clustering Tool
+
+    This container provides the complete TideCluster pipeline for identifying
+    and analyzing tandem repeats in genome assemblies.
+
+    Main command:
+        singularity exec tidecluster.sif TideCluster.py [subcommand] [options]
+
+    Available subcommands:
+        - tidehunter: Run TideHunter for tandem repeat detection
+        - clustering: Cluster similar tandem repeats
+        - annotation: Annotate clusters with RepeatMasker
+        - tarean: Run TAREAN analysis and generate reports
+        - run_all: Run complete pipeline
+
+    Utility scripts:
+        - tc_update_gff3.py: Update GFF3 attributes from conversion table
+        - tc_reannotate.py: Reannotate using TRC library
+        - tc_merge_annotations.py: Merge annotations from multiple sources
+        - tc_per_tra_consensus.py: End-to-end per-TRA consensus generation
+        - tc_comparative_analysis.R: Comparative analysis across samples
+        - tc_summarize_comparative_analysis.R: Generate visualization reports
+
+    Examples:
+        # Run full pipeline
+        singularity exec tidecluster.sif TideCluster.py run_all -c 40 -pr sample -f genome.fasta
+
+        # Run individual steps
+        singularity exec tidecluster.sif TideCluster.py tidehunter -c 40 -pr sample -f genome.fasta
+        singularity exec tidecluster.sif TideCluster.py clustering -c 40 -pr sample -f genome.fasta
+
+        # Per-TRA consensus + quality grading on an existing run
+        singularity exec tidecluster.sif tc_per_tra_consensus.py -p sample -c 10
+
+        # Comparative analysis
+        singularity exec tidecluster.sif tc_comparative_analysis.R -i config.tsv -o output_dir -c 10
+
+    For detailed help on any command:
+        singularity exec tidecluster.sif TideCluster.py [subcommand] --help
+        singularity exec tidecluster.sif tc_update_gff3.py --help
+        singularity exec tidecluster.sif tc_reannotate.py --help
+
+%files
+    # Bake the repo into the image at build time. This decouples the
+    # container release from the conda channel: the SIF reflects the
+    # exact tagged commit, not whatever is currently on anaconda.org.
+    . /opt/tidecluster
+
+%post
+    #!/bin/bash
+    set -e
+
+    # Update system packages (kept minimal; the conda env brings every
+    # runtime tool TideCluster needs).
+    apt-get update
+    apt-get install -y gcc g++ make zlib1g-dev wget
+    apt-get clean
+
+    # Set up conda configuration.
+    mkdir -p /opt/conda/config
+    export CONDARC=/opt/conda/config/.condarc
+    export CONDA_PLUGINS_AUTO_ACCEPT_TOS=yes
+
+    /opt/conda/bin/conda config --add channels conda-forge
+    /opt/conda/bin/conda config --add channels bioconda
+    /opt/conda/bin/conda config --set channel_priority flexible
+
+    # Initialize conda for bash so that `conda activate base` works in
+    # interactive shells inside the container.
+    /opt/conda/bin/conda init bash
+    echo ". /opt/conda/etc/profile.d/conda.sh" >> /etc/profile
+    echo "conda activate base" >> /etc/profile
+
+    # Install runtime dependencies from conda-forge / bioconda only.
+    # NOTE: tidecluster itself is NOT installed from a channel here —
+    # it is the repo we copied into /opt/tidecluster above. This makes
+    # the container build independent of the anaconda.org upload.
+    echo "=== Installing runtime dependencies ==="
+    /opt/conda/bin/conda install -y -n base \
+        -c conda-forge -c bioconda \
+        --file /opt/tidecluster/requirements.txt
+
+    # Mirror conda/tidecluster/build.sh: make every CLI executable and
+    # symlink it into /opt/conda/bin so users can call e.g.
+    # `apptainer exec sif TideCluster.py ...` without absolute paths.
+    echo "=== Symlinking TideCluster CLIs ==="
+    for script in \
+        TideCluster.py \
+        tc_update_gff3.py \
+        tc_reannotate.py \
+        tc_merge_annotations.py \
+        tc_per_tra_consensus.py \
+        tc_utils.py \
+        tc_comparative_analysis.R \
+        tc_summarize_comparative_analysis.R; do
+        chmod +x "/opt/tidecluster/${script}"
+        ln -sf "/opt/tidecluster/${script}" "/opt/conda/bin/${script}"
+    done
+
+    # Clean conda cache to reduce image size.
+    /opt/conda/bin/conda clean -a -y
+
+    # Verify installation
+    echo "=== Verifying TideCluster installation ==="
+    ls -la /opt/conda/bin/TideCluster.py || \
+        echo "TideCluster.py not found in expected location"
+    /opt/conda/bin/conda run -n base TideCluster.py --version
+    echo "=== Installation complete ==="
+
+%environment
+    # Ensure conda is in path
+    export PATH=/opt/conda/bin:$PATH
+    export CONDA_DEFAULT_ENV=base
+    export CONDA_PREFIX=/opt/conda
+
+%runscript
+    # Source conda and execute TideCluster.py
+    . /opt/conda/etc/profile.d/conda.sh
+    conda activate base
+    exec TideCluster.py "$@"
+
+%apprun TideCluster
+    . /opt/conda/etc/profile.d/conda.sh
+    conda activate base
+    exec TideCluster.py "$@"
+
+%apprun tc_update_gff3
+    . /opt/conda/etc/profile.d/conda.sh
+    conda activate base
+    exec tc_update_gff3.py "$@"
+
+%apprun tc_reannotate
+    . /opt/conda/etc/profile.d/conda.sh
+    conda activate base
+    exec tc_reannotate.py "$@"
+
+%apprun tc_merge_annotations
+    . /opt/conda/etc/profile.d/conda.sh
+    conda activate base
+    exec tc_merge_annotations.py "$@"
+
+%apprun tc_per_tra_consensus
+    . /opt/conda/etc/profile.d/conda.sh
+    conda activate base
+    exec tc_per_tra_consensus.py "$@"
+
+%apprun tc_comparative_analysis
+    . /opt/conda/etc/profile.d/conda.sh
+    conda activate base
+    exec tc_comparative_analysis.R "$@"
+
+%apprun tc_summarize_comparative_analysis
+    . /opt/conda/etc/profile.d/conda.sh
+    conda activate base
+    exec tc_summarize_comparative_analysis.R "$@"

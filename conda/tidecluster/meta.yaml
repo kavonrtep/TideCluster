@@ -33,6 +33,7 @@ requirements:
     - r-igraph
     - bioconductor-biostrings
     - bioconductor-rtracklayer
+    - bioconductor-genomicranges
     - r-scales
     - r-hwriter
     - r-r2html
@@ -50,6 +51,7 @@ test:
     - tc_update_gff3.py --help | grep -qi 'usage'
     - tc_reannotate.py --help | grep -qi 'usage'
     - tc_merge_annotations.py --help | grep -qi 'usage'
+    - tc_per_tra_consensus.py --help | grep -qi 'usage'
     - tc_comparative_analysis.R --help | grep -qi 'usage'
     - tc_summarize_comparative_analysis.R --help | grep -qi 'usage'
 

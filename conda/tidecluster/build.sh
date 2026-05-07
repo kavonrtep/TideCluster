@@ -12,6 +12,7 @@ ln -s "${PKG_DIR}/TideCluster.py"                       "${PREFIX}/bin/TideClust
 ln -s "${PKG_DIR}/tc_update_gff3.py"                    "${PREFIX}/bin/tc_update_gff3.py"
 ln -s "${PKG_DIR}/tc_reannotate.py"                     "${PREFIX}/bin/tc_reannotate.py"
 ln -s "${PKG_DIR}/tc_merge_annotations.py"              "${PREFIX}/bin/tc_merge_annotations.py"
+ln -s "${PKG_DIR}/tc_per_tra_consensus.py"              "${PREFIX}/bin/tc_per_tra_consensus.py"
 ln -s "${PKG_DIR}/tc_utils.py"                          "${PREFIX}/bin/tc_utils.py"
 ln -s "${PKG_DIR}/tc_comparative_analysis.R"            "${PREFIX}/bin/tc_comparative_analysis.R"
 ln -s "${PKG_DIR}/tc_summarize_comparative_analysis.R"  "${PREFIX}/bin/tc_summarize_comparative_analysis.R"
