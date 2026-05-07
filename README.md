@@ -398,6 +398,50 @@ options:
 ```
 
 
+## Per-TRA consensus generation
+
+Companion R tools that build one consensus monomer per Tandem Repeat
+Array (TRA), validate it by self-BLAST against the source array, and
+attach a per-TRA quality grade plus diagnostic flags. Distinct from
+the per-TRC consensus already emitted by the TAREAN step.
+
+The tools live under `tarean/consensus_prototype/`. They are run as a
+post-processing pass on an existing `TideCluster.py run_all` output
+directory; not yet wired into `TideCluster.py` itself.
+
+Three steps:
+
+1. **Array-MSA consensus** (`consensus_msa.R`) — extracts in-phase
+   monomer copies from each genomic array via a k-mer phase anchor and
+   aligns them with MAFFT.
+2. **TideHunter consensus** (`tests/validate_th_single.R`) — uses
+   TideHunter's own per-fragment consensus, picking the best fragment
+   per TRA.
+3. **Consensus selector** (`consensus_ensemble.R`) — chooses the
+   better of the two by self-BLAST coverage, computes per-copy
+   identity dispersion and internal-gap metrics, assigns each TRA a
+   quality grade (A clean / B qualified / C low / D unusable) and
+   independent diagnostic flags (`boundary_overext`, `internal_gap`,
+   `heterogeneous`, `low_pident`).
+
+Drapa benchmark (n = 2073 TRAs): grade A 89.8 %, A or B 92.0 %; the
+remaining 7.2 % is dominated by SSRs that should route to a motif-only
+path. The variability metrics reproduce KITE's HOR classification on
+the same arrays from independent evidence.
+
+Outputs (one row per TRA):
+
+- `per_tra_consensus.fasta` — selected consensus per TRA, source
+  method noted in the header.
+- `per_tra_metrics.tsv` — coverage, core-region metrics, identity
+  dispersion, internal-gap counts, grade, flags, KITE annotation.
+- `summary.log` — totals and threshold values.
+
+Full vocabulary, output column reference, threshold parameters,
+benchmark numbers, and step-by-step usage are in
+[`docs/per_tra_consensus.md`](docs/per_tra_consensus.md).
+
+
 ## TRC Comparative Analysis
 
 The `tc_comparative_analysis.R` script performs comparative analysis of Tandem Repeat Clusters (TRCs) across multiple samples, grouping similar TRCs into satellite families based on sequence similarity. This analysis enables identification of conserved tandem repeat families across different samples and provides annotation and length statistics for each family.

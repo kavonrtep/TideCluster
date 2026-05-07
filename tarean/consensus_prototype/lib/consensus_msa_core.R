@@ -150,25 +150,34 @@ consensus_from_msa <- function(aln, gap_cutoff = 0.5, min_base_freq = 0.4) {
 compute_tra_consensus_msa <- function(S, m,
                                       k = 8L,
                                       max_monomers = 150L,
-                                      min_anchor_occurrences = 20L,
+                                      min_anchor_occurrences = 0L,
                                       gap_cutoff = 0.5,
                                       min_base_freq = 0.4,
                                       mafft_args =
                                         "--retree 1 --maxiterate 0 --nuc --thread 1",
                                       mafft_timeout = 300L) {
   L <- length(S); t0 <- Sys.time()
+  # Dynamic anchor threshold: scale with expected copies so short arrays
+  # don't fail automatically. `min_anchor_occurrences <= 0` means auto.
+  expected_copies <- if (m > 0L) L %/% m else 0L
+  if (is.null(min_anchor_occurrences) || is.na(min_anchor_occurrences) ||
+      min_anchor_occurrences <= 0L) {
+    anchor_min_occ <- max(4L, as.integer(floor(0.5 * expected_copies)))
+  } else {
+    anchor_min_occ <- as.integer(min_anchor_occurrences)
+  }
   base_out <- list(consensus = "", method = "msa_failed",
                    length_bp = L, m = m,
                    anchor_kmer = NA_character_, anchor_score = NA_real_,
-                   anchor_count = 0L,
+                   anchor_count = 0L, anchor_min_occ = anchor_min_occ,
+                   expected_copies = expected_copies,
                    n_monomers_extracted = 0L, n_monomers_aligned = 0L,
                    aln_length = NA_integer_, consensus_length = 0L,
                    cons_mean_entropy = NA_real_,
                    n_cols_kept = 0L, n_cols_dropped = 0L, n_N = 0L,
                    wall_sec = NA_real_, reason = NA_character_)
 
-  anchor <- find_anchor_kmer(S, m, k = k,
-                             min_occurrences = min_anchor_occurrences)
+  anchor <- find_anchor_kmer(S, m, k = k, min_occurrences = anchor_min_occ)
   if (is.null(anchor)) {
     out <- base_out; out$reason <- "no_anchor"
     out$wall_sec <- as.numeric(Sys.time() - t0, units = "secs"); return(out)
@@ -204,6 +213,8 @@ compute_tra_consensus_msa <- function(S, m,
     anchor_kmer          = anchor$kmer,
     anchor_score         = anchor$score,
     anchor_count         = length(anchor$positions),
+    anchor_min_occ       = anchor_min_occ,
+    expected_copies      = expected_copies,
     n_monomers_extracted = length(mons),
     n_monomers_aligned   = length(sampled),
     aln_length           = cons$aln_length,
