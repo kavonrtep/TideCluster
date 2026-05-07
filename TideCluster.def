@@ -69,14 +69,20 @@ From: condaforge/miniforge3:latest
     apt-get install -y gcc g++ make zlib1g-dev wget
     apt-get clean
 
-    # Set up conda configuration.
+    # Set up conda configuration. Write .condarc directly via heredoc
+    # rather than relying on `conda config --add`: in miniforge3 with
+    # CONDARC pointed at a non-default path, mamba aborts with "file
+    # specified but does not exist" unless the file is materialised
+    # before the first conda invocation.
     mkdir -p /opt/conda/config
+    cat > /opt/conda/config/.condarc <<'EOF'
+channels:
+  - conda-forge
+  - bioconda
+channel_priority: flexible
+EOF
     export CONDARC=/opt/conda/config/.condarc
     export CONDA_PLUGINS_AUTO_ACCEPT_TOS=yes
-
-    /opt/conda/bin/conda config --add channels conda-forge
-    /opt/conda/bin/conda config --add channels bioconda
-    /opt/conda/bin/conda config --set channel_priority flexible
 
     # Initialize conda for bash so that `conda activate base` works in
     # interactive shells inside the container.
