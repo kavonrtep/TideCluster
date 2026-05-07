@@ -87,7 +87,7 @@ From: continuumio/miniconda3
     echo "=== Installing runtime dependencies ==="
     /opt/conda/bin/conda install -y -n base \
         -c conda-forge -c bioconda \
-        --file /opt/tidecluster/requirements.txt
+        --file /opt/tidecluster/conda-deps.txt
 
     # Mirror conda/tidecluster/build.sh: make every CLI executable and
     # symlink it into /opt/conda/bin so users can call e.g.

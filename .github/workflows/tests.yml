@@ -29,7 +29,10 @@ jobs:
           channel-priority: strict
 
       - name: Install runtime dependencies
-        run: mamba install -y --file requirements.txt
+        # conda-deps.txt uses conda-format pins (e.g. `pkg=1.2.3`); the
+        # filename is intentionally not requirements.txt so Dependabot
+        # does not try to parse it as a pip requirements file.
+        run: mamba install -y --file conda-deps.txt
 
       - name: Show environment
         run: |

@@ -1,0 +1,25 @@
+# Conda runtime dependencies, conda-format pins (single `=` not `==`).
+# Consumed by `mamba install --file` in CI and by the Singularity
+# container's %post block. Filename is intentionally not
+# `requirements.txt` so GitHub Dependabot does not mistake it for a
+# pip requirements file (it cannot parse conda-format pins).
+TideHunter=1.4.3
+blast
+mmseqs2
+python>=3.6
+networkx
+repeatmasker=4.1.2.p1
+r-optparse
+r-igraph
+bioconductor-biostrings
+bioconductor-rtracklayer
+bioconductor-genomicranges
+r-scales
+r-hwriter
+r-r2html
+r-plyr
+r-dplyr
+r-jsonlite
+r-reshape2
+mafft
+bedtools

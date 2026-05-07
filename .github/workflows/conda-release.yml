@@ -41,7 +41,9 @@ jobs:
           # which setuptools 81.0.0 removed. Pin setuptools<81 (this is
           # the upstream-recommended workaround). Playbook §7 pitfall #4.
           mamba install -y conda-build boa anaconda-client "setuptools<81"
-          mamba install -y --file requirements.txt
+          # conda-deps.txt uses conda-format pins; not requirements.txt
+          # so Dependabot does not parse it as pip.
+          mamba install -y --file conda-deps.txt
 
       - name: Long test (release gate)
         run: ./tests.sh long
