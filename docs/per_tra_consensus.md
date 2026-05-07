@@ -107,36 +107,10 @@ All thresholds are CLI parameters, exposed by `consensus_ensemble.R`.
 | `--pident-sd-cutoff` | 1.5 | `heterogeneous` trigger |
 | `--pident-p05-cutoff` | 92.0 | `low_pident` trigger |
 
-Defaults are calibrated on the Drapa benchmark; re-tune per genome
-if needed.
-
-## Benchmark (Drapa, n = 2073 TRAs)
-
-| grade | n | % |
-|---|---:|---:|
-| A | 1862 | 89.8 |
-| B | 46 | 2.2 |
-| C | 16 | 0.8 |
-| D | 149 | 7.2 |
-
-Independent flag counts (can co-occur):
-
-| flag | n |
-|---|---:|
-| `heterogeneous` | 522 |
-| `low_pident` | 273 |
-| `internal_gap` | 60 |
-| `boundary_overext` | 55 |
-
-`pident_sd` and `perfect_hit_frac` reproduce KITE's HOR classification
-on the same arrays from independent evidence:
-
-| HOR_status | n | median `pident_sd` | median `perfect_hit_frac` | median `pident_p05` |
-|---|---:|---:|---:|---:|
-| No HOR | 1018 | 0.52 | 0.50 | 98.5 |
-| HOR weak | 330 | 0.51 | 0.51 | 98.7 |
-| HOR moderate | 370 | 1.37 | 0.00 | 94.6 |
-| HOR strong | 209 | 1.86 | 0.00 | 92.8 |
+Defaults are conservative starting points; re-tune per genome if
+needed (lower `cov_strict` for permissive grading, raise
+`pident_sd_cutoff` to suppress the heterogeneous flag in
+HOR-rich genomes, etc.).
 
 ## Usage
 
@@ -185,9 +159,9 @@ Rscript tarean/consensus_prototype/consensus_ensemble.R \
   --out-dir      out/selected
 ```
 
-Wall time on the Drapa benchmark (2073 TRAs, ~ 60 Mb of array DNA,
-4 CPUs): array-MSA batch 3 min, validation 9 min; TideHunter consensus
-+ validation 18 min; selector < 1 min.
+Wall time scales with array DNA volume. The two BLAST passes (steps
+1 and 2) dominate; the selector itself is a few seconds because it
+re-uses the cached BLAST outputs.
 
 ## Outputs
 

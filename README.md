@@ -424,11 +424,6 @@ Three steps:
    independent diagnostic flags (`boundary_overext`, `internal_gap`,
    `heterogeneous`, `low_pident`).
 
-Drapa benchmark (n = 2073 TRAs): grade A 89.8 %, A or B 92.0 %; the
-remaining 7.2 % is dominated by SSRs that should route to a motif-only
-path. The variability metrics reproduce KITE's HOR classification on
-the same arrays from independent evidence.
-
 Outputs (one row per TRA):
 
 - `per_tra_consensus.fasta` — selected consensus per TRA, source
