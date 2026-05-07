@@ -26,4 +26,24 @@ echo "=== run_all on CEN6 part ==="
 [ -s "$OUT/short_index.html" ]      || { echo "FAIL: no index.html"; exit 1; }
 
 echo
-echo "short PASSED (outputs in $OUT)"
+echo "=== per-TRA consensus wrapper ==="
+"$ROOT/tc_per_tra_consensus.py" -p short -c "$NCPU"
+
+PTC="$OUT/short_per_tra_consensus"
+[ -s "$PTC/per_tra_consensus.fasta" ] || { echo "FAIL: per_tra_consensus.fasta missing/empty"; exit 1; }
+[ -s "$PTC/per_tra_metrics.tsv" ]     || { echo "FAIL: per_tra_metrics.tsv missing/empty"; exit 1; }
+[ -s "$PTC/summary.log" ]             || { echo "FAIL: summary.log missing"; exit 1; }
+[ -s "$PTC/args.json" ]               || { echo "FAIL: args.json missing"; exit 1; }
+
+# Header has the canonical columns.
+HDR=$(head -1 "$PTC/per_tra_metrics.tsv")
+for col in id source coverage_frac core_coverage quality_grade flags; do
+  echo "$HDR" | grep -qw "$col" || { echo "FAIL: column $col missing from per_tra_metrics.tsv"; exit 1; }
+done
+
+# At least one TRA emerges.
+ROWS=$(($(wc -l < "$PTC/per_tra_metrics.tsv") - 1))
+[ "$ROWS" -ge 1 ] || { echo "FAIL: per_tra_metrics.tsv has zero data rows"; exit 1; }
+
+echo
+echo "short PASSED (outputs in $OUT, per-TRA rows: $ROWS)"

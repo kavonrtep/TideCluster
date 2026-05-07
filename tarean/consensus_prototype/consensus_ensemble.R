@@ -281,7 +281,8 @@ message(sprintf("wrote %d records to %s (%d missing)",
 
 # ---- summary -------------------------------------------------------
 
-n_total <- 2073
+# TRA universe = number of TRA rows in the KITE table.
+n_total <- nrow(kite)
 sumlines <- character()
 sumlines <- c(sumlines,
   sprintf("total TRAs:            %d", n_total),

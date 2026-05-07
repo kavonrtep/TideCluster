@@ -21,6 +21,7 @@ echo "=== CLI --version / --help ==="
 "$ROOT/tc_merge_annotations.py" --help > /dev/null
 "$ROOT/tc_comparative_analysis.R" --help > /dev/null
 "$ROOT/tc_summarize_comparative_analysis.R" --help > /dev/null
+"$ROOT/tc_per_tra_consensus.py" --help > /dev/null
 
 echo
 echo "=== tidehunter on smoke fasta ==="
