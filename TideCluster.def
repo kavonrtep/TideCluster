@@ -1,5 +1,9 @@
 Bootstrap: docker
-From: continuumio/miniconda3
+# miniforge3 ships mamba (libmamba solver) preinstalled. The classic
+# conda solver in continuumio/miniconda3 takes 30–60 min on hosted
+# runners just to resolve the bioconda dep tree (repeatmasker plus the
+# bioconductor stack); mamba does the same solve in ~5 min.
+From: condaforge/miniforge3:latest
 
 %labels
     Author Petr Novak
@@ -84,8 +88,11 @@ From: continuumio/miniconda3
     # NOTE: tidecluster itself is NOT installed from a channel here —
     # it is the repo we copied into /opt/tidecluster above. This makes
     # the container build independent of the anaconda.org upload.
+    #
+    # Use mamba (libmamba solver) instead of classic conda — see comment
+    # at the top of this def for why.
     echo "=== Installing runtime dependencies ==="
-    /opt/conda/bin/conda install -y -n base \
+    /opt/conda/bin/mamba install -y -n base \
         -c conda-forge -c bioconda \
         --file /opt/tidecluster/conda-deps.txt
 
