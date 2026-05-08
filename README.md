@@ -90,27 +90,79 @@ higher-order repeats.
 
 ## Installation
 
-TideCluster is available on Anaconda repository. To install TideCluster run we 
-recommend to install it using [Mamba](https://github.com/mamba-org/mamba) an extremely 
-fast replacement for the Conda package manager
+TideCluster ships in two forms — a conda package on `anaconda.org/petrnovak`
+and a Singularity / Apptainer container on GitHub Container Registry. Both
+are produced from the same release tag. Pick whichever fits your
+environment.
 
-In case you do not have Mamba installed, you can install it using conda to your base 
-environment:
+### Conda / Mamba
+
+The recommended installer is [Mamba](https://github.com/mamba-org/mamba)
+(faster than classic conda). If you do not already have Mamba, install
+[Miniforge](https://github.com/conda-forge/miniforge) — it ships with
+Mamba preconfigured for the conda-forge channel:
 
 ```bash
-conda install -n base -c conda-forge mamba
+# https://github.com/conda-forge/miniforge#install
+curl -L -O https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh
+bash Miniforge3-$(uname)-$(uname -m).sh
 ```
 
-Then install TideCluster using Mamba:
-    
+Then create a TideCluster environment:
+
 ```bash
 mamba create -n tidecluster -c conda-forge -c bioconda -c petrnovak tidecluster
+mamba activate tidecluster
+TideCluster.py --version
 ```
 
+To pin a specific release, append `=<version>` (e.g.
+`tidecluster=1.9.3`).
 
-If you are getting `Illegal instruction` error message from TideHunter, try to compile 
-TideHunter from source and replace TideHunter conda binary with newly compiled binary. In 
-activated TideCluster environment run:
+### Singularity / Apptainer
+
+Pre-built SIF images are published as OCI artefacts on GHCR:
+
+```bash
+apptainer pull oras://ghcr.io/kavonrtep/tidecluster/sif:latest
+# or pin a release:
+# apptainer pull oras://ghcr.io/kavonrtep/tidecluster/sif:1.9.3
+
+apptainer exec tidecluster_latest.sif TideCluster.py --version
+```
+
+Bind the directory containing your inputs/outputs with `-B`:
+
+```bash
+apptainer exec -B "$PWD" tidecluster_latest.sif \
+    TideCluster.py run_all -c 40 -pr sample -f genome.fasta
+```
+
+The container bundles every CLI listed in [Usage](#usage), including
+the standalone wrappers (`tc_reannotate.py`, `tc_per_tra_consensus.py`,
+`tc_comparative_analysis.R`, etc.).
+
+### Building the container locally
+
+If you prefer to build the SIF yourself from the checked-out source
+tree (e.g. on an offline cluster):
+
+```bash
+git clone https://github.com/kavonrtep/TideCluster.git
+cd TideCluster
+sudo apptainer build TideCluster.sif TideCluster.def
+```
+
+The recipe (`TideCluster.def`) installs the runtime dependencies from
+`conda-forge` + `bioconda` only and bakes the cloned source tree into
+the image. Build time is ~15 min on a typical workstation.
+
+### TideHunter "Illegal instruction"
+
+On older CPUs without AVX, the bioconda TideHunter binary may abort
+with `Illegal instruction`. Compile from source and replace the conda
+binary inside an activated TideCluster environment:
+
 ```bash
 wget https://github.com/yangao07/TideHunter/releases/download/v1.4.3/TideHunter-v1.4.3.tar.gz
 tar -zxvf TideHunter-v1.4.3.tar.gz && cd TideHunter-v1.4.3
