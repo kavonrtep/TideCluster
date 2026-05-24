@@ -2019,3 +2019,146 @@ def prepare_fasta_input(fasta_path):
             os.remove(temp_fasta)
 
     return temp_fasta, cleanup
+
+
+# ----------------------------------------------------------------------
+# kitehor IO helpers (replacement for tarean/kite.R)
+# ----------------------------------------------------------------------
+
+def build_kite_multifasta(fasta_dir, out_fa):
+    """Concatenate every TRC_*.fasta in `fasta_dir` into one multi-FASTA
+    suitable for `kitehor analyze`.
+
+    The per-TRC fastas under `{prefix}_tarean/fasta/` store sequences as
+    dimers (sequence concatenated with itself). kitehor expects one TR
+    array per record, so each sequence is halved back to its single-array
+    length. Headers are rewritten to `<TRC>:<original_header>` so the
+    TRC ID survives kitehor's per-record output and `tc_rerender_report`
+    can split it back."""
+    n_records = 0
+    with open(out_fa, "w") as fh_out:
+        for path in sorted(glob.glob(os.path.join(fasta_dir, "TRC_*.fasta"))):
+            trc = os.path.basename(path)[:-len(".fasta")]
+            with open(path) as fh:
+                for hdr, seq in read_single_fasta_as_generator(fh):
+                    half = seq[:len(seq) // 2] if len(seq) >= 2 else seq
+                    if not half:
+                        continue
+                    fh_out.write(f">{trc}:{hdr}\n{half}\n")
+                    n_records += 1
+    return n_records
+
+
+# Map kitehor's finer-grained verdict + confidence onto the legacy
+# 4-bin status string that the report consumes. Thresholds match
+# HOR_BIN_WEAK / MODERATE / STRONG from the removed tarean/kite.R so
+# colours, badges, and per-TRC roll-ups stay comparable across versions.
+_KITE_HOR_BIN_WEAK     = 0.10
+_KITE_HOR_BIN_MODERATE = 0.20
+_KITE_HOR_BIN_STRONG   = 0.40
+
+
+def _kitehor_status(verdict, confidence):
+    if verdict != "hor":
+        return "No HOR"
+    try:
+        c = float(confidence)
+    except (TypeError, ValueError):
+        return "No HOR"
+    if c < _KITE_HOR_BIN_WEAK:     return "No HOR"
+    if c < _KITE_HOR_BIN_MODERATE: return "HOR weak"
+    if c < _KITE_HOR_BIN_STRONG:   return "HOR moderate"
+    return "HOR strong"
+
+
+def build_monomer_size_csv(kite_tsv, summary_tsv, out_csv):
+    """Join kitehor's `<prefix>.kite.tsv` (top-3 monomer-size estimates
+    per array) and `<prefix>.summary.tsv` (structural verdict columns)
+    into the legacy-named `monomer_size_top3_estimats.csv` consumed by
+    tc_rerender_report.py and tc_per_tra_consensus.py.
+
+    Column casing follows kitehor (lowercase `hor_*`). The TRC_ID /
+    seqid / start / end columns are parsed back from the record_id
+    that build_kite_multifasta() encoded."""
+    import csv
+
+    summary_by_id = {}
+    with open(summary_tsv, newline="") as fh:
+        reader = csv.DictReader(fh, delimiter="\t")
+        for row in reader:
+            summary_by_id[row["record_id"]] = row
+
+    # Columns we lift verbatim from .summary.tsv into the joined CSV.
+    summary_cols_out = [
+        "combined_class",
+        "subrepeat_flag",
+        "subrepeat_period_bp",
+        "ssr_flag",
+        "ssr_dominant_motif",
+        "founder_density",
+        "phase_contrast",
+    ]
+
+    out_header = [
+        "TRC_ID", "seqid", "start", "end",
+        "monomer_size", "score", "array_length",
+        "monomer_size_2", "score_2",
+        "monomer_size_3", "score_3",
+        "hor_status", "hor_confidence",
+        "hor_founder", "hor_tile", "hor_multiplicity",
+    ] + summary_cols_out
+
+    def _trc_sort_key(row):
+        try:
+            return (0, int(row["TRC_ID"].split("_")[1]))
+        except (IndexError, ValueError):
+            return (1, row["TRC_ID"])
+
+    out_rows = []
+    with open(kite_tsv, newline="") as fh:
+        reader = csv.DictReader(fh, delimiter="\t")
+        for kr in reader:
+            record_id = kr["case_id"]
+            # record_id == "<TRC>:<seqid>_<start>_<end>"
+            if ":" not in record_id:
+                continue
+            trc, rest = record_id.split(":", 1)
+            parts = rest.rsplit("_", 2)
+            if len(parts) != 3:
+                continue
+            seqid, start, end = parts
+            sm = summary_by_id.get(record_id, {})
+            verdict = sm.get("hor_verdict", "")
+            confidence = sm.get("hor_confidence", "")
+            row = {
+                "TRC_ID":           trc,
+                "seqid":            seqid,
+                "start":            start,
+                "end":              end,
+                "monomer_size":     kr.get("monomer_size", ""),
+                "score":            kr.get("score", ""),
+                "array_length":     kr.get("array_length", ""),
+                "monomer_size_2":   kr.get("monomer_size_2", ""),
+                "score_2":          kr.get("score_2", ""),
+                "monomer_size_3":   kr.get("monomer_size_3", ""),
+                "score_3":          kr.get("score_3", ""),
+                "hor_status":       _kitehor_status(verdict, confidence),
+                "hor_confidence":   confidence,
+                "hor_founder":      sm.get("hor_founder", ""),
+                "hor_tile":         sm.get("hor_tile", ""),
+                "hor_multiplicity": sm.get("hor_multiplicity", ""),
+            }
+            for col in summary_cols_out:
+                row[col] = sm.get(col, "")
+            out_rows.append(row)
+
+    out_rows.sort(key=_trc_sort_key)
+
+    with open(out_csv, "w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=out_header,
+                                delimiter="\t", lineterminator="\n",
+                                extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(out_rows)
+
+    return len(out_rows)

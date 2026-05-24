@@ -126,11 +126,35 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
             for i in omitted_clusters:
                 f.write(F"{i[0]}\t{i[1]}\t{i[2]}\n")
 
-    # RUN kite
-    cmd = (F"{script_path}/tarean/kite.R -d {prefix}_tarean/fasta"
-           F" -p {prefix} -c {cpu}")
-    print("Making tandem repeat array profiles.")
-    tc.run_cmd(cmd)
+    # RUN kitehor (Rust HOR / SSR / subrepeat detector) + R heatmap renderer.
+    # Single `analyze --periodogram` call: kitehor emits the 9 per-stage
+    # TSVs plus the per-array H[d]/bg periodogram bundle. The R helper
+    # turns the bundle into per-TRC heatmap PNGs the v2 report embeds.
+    # See docs/kitehor_integration_plan.md for the full mapping.
+    kite_dir = F"{prefix}_kite"
+    os.makedirs(kite_dir, exist_ok=True)
+    multi_fa = F"{kite_dir}/_kite_input.fasta"
+    n_kite_records = tc.build_kite_multifasta(
+        F"{prefix}_tarean/fasta", multi_fa)
+    if n_kite_records == 0:
+        print("No arrays passed to kitehor; skipping KITE step.")
+    else:
+        print(F"Running kitehor analyze on {n_kite_records} array(s).")
+        tc.run_cmd(F"kitehor analyze {multi_fa}"
+                   F" -o {kite_dir}/kitehor"
+                   F" --periodogram {kite_dir}/kitehor.periodogram"
+                   F" --threads {cpu}")
+        tc.build_monomer_size_csv(
+            kite_tsv=F"{kite_dir}/kitehor.kite.tsv",
+            summary_tsv=F"{kite_dir}/kitehor.summary.tsv",
+            out_csv=F"{kite_dir}/monomer_size_top3_estimats.csv")
+        print("Rendering per-TRC profile heatmaps.")
+        tc.run_cmd(F"{script_path}/tarean/kite_heatmaps.R"
+                   F" --periodogram {kite_dir}/kitehor.periodogram"
+                   F" --top3-csv {kite_dir}/monomer_size_top3_estimats.csv"
+                   F" --out-dir {kite_dir}/profile_plots")
+    if os.path.exists(multi_fa):
+        os.remove(multi_fa)
 
 
     # copy index.html as prefix_index.html

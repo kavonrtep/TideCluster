@@ -673,21 +673,24 @@ def load_tarean_summary(paths):
 def load_kite_top3(paths):
     """Per-TRA KITE records keyed by (trc_id, seqid, start, end).
 
-    Both schemas are accepted:
-      - New (post-1.9.0): reads HOR_status / HOR_confidence / HOR_base_monomer
-        / HOR_hor_period / HOR_n_harmonics directly.
-      - Legacy (pre-1.9.0, incl. HOR_multiple column): the HOR columns are
-        recomputed from (m1..m3, s1..s3) using compute_hor(). This lets
-        rerender produce up-to-date HOR calls on old output directories
-        without re-running the KITE R script."""
+    Three CSV schemas are accepted:
+      - 1.10+ (kitehor-derived): lowercase hor_status / hor_confidence /
+        hor_founder / hor_tile / hor_multiplicity + combined_class /
+        subrepeat_flag / ssr_flag / founder_density / phase_contrast.
+      - 1.9.x (legacy R kite.R): capitalised HOR_status / HOR_confidence /
+        HOR_base_monomer / HOR_hor_period / HOR_n_harmonics.
+      - pre-1.9.0: no HOR columns; recomputed from (m1..m3, s1..s3) via
+        compute_hor() so rerender can produce up-to-date HOR calls on
+        archival output directories."""
     p = paths["kite_top3_csv"]
     if not p:
         return {}
     out = {}
-    # Peek at headers to decide legacy vs new.
+    # Peek at headers to decide schema.
     with open(p, newline="") as f:
         header = next(csv.reader(f, delimiter="\t"))
-    is_new = "HOR_confidence" in header
+    is_kitehor = "hor_status" in header
+    is_legacy  = "HOR_status" in header
     for row in _read_rows(p, "\t"):
         trc = (row.get("TRC_ID") or "").strip()
         sid = (row.get("seqid") or "").strip()
@@ -707,7 +710,25 @@ def load_kite_top3(paths):
         m2 = ni(row.get("monomer_size_2")); s2 = num(row.get("score_2"))
         m3 = ni(row.get("monomer_size_3")); s3 = num(row.get("score_3"))
 
-        if is_new:
+        if is_kitehor:
+            hor = {
+                "hor_status":       (row.get("hor_status") or "").strip() or "No HOR",
+                "hor_confidence":   num(row.get("hor_confidence")) or 0.0,
+                # Map kitehor's hor_founder / hor_tile / hor_multiplicity to
+                # the names the downstream model already publishes.
+                "hor_base_monomer": ni(row.get("hor_founder")),
+                "hor_hor_period":   ni(row.get("hor_tile")),
+                "hor_n_harmonics":  ni(row.get("hor_multiplicity")) or 0,
+                # New structural fields surfaced by kitehor.
+                "combined_class":   (row.get("combined_class") or "").strip() or None,
+                "subrepeat_flag":   (row.get("subrepeat_flag") or "").strip() or None,
+                "subrepeat_period_bp": ni(row.get("subrepeat_period_bp")),
+                "ssr_flag":         (row.get("ssr_flag") or "").strip() or None,
+                "ssr_dominant_motif": (row.get("ssr_dominant_motif") or "").strip() or None,
+                "founder_density":  num(row.get("founder_density")),
+                "phase_contrast":   num(row.get("phase_contrast")),
+            }
+        elif is_legacy:
             hor = {
                 "hor_status":       (row.get("HOR_status") or "").strip() or "No HOR",
                 "hor_confidence":   num(row.get("HOR_confidence")) or 0.0,
@@ -816,6 +837,9 @@ def build_model(input_dir: Path, prefix: str):
                        "hor_strong": 0}
         confidences = []
         m1_values = []
+        combined_class_counter = Counter()
+        n_subrepeat = 0
+        n_ssr = 0
         for arr in arrays:
             key = (trc_id, arr["seqid"], arr["start"], arr["end"])
             k = kite_by_array.get(key)
@@ -830,6 +854,12 @@ def build_model(input_dir: Path, prefix: str):
                 if c is not None: confidences.append(c)
                 if k.get("m1") is not None:
                     m1_values.append(k["m1"])
+                cc = k.get("combined_class")
+                if cc: combined_class_counter[cc] += 1
+                if (k.get("subrepeat_flag") or "").lower() in {"yes", "y", "true"}:
+                    n_subrepeat += 1
+                if (k.get("ssr_flag") or "").lower() in {"yes", "y", "true"}:
+                    n_ssr += 1
         # TRC-level aggregates
         repeat_type = next((a["repeat_type"] for a in arrays if a.get("repeat_type")), None)
         annotation  = next((a["annotation"]  for a in arrays if a.get("annotation")),  None)
@@ -844,6 +874,8 @@ def build_model(input_dir: Path, prefix: str):
             # "monomer_primary" = most-frequent m1 across the TRC's arrays
             # (matches original kite_report.R's monomer_size column).
             monomer_primary = Counter(m1_values).most_common(1)[0][0]
+            dominant_class = (combined_class_counter.most_common(1)[0][0]
+                              if combined_class_counter else None)
             kite_block = {
                 "monomer_primary":  int(monomer_primary),
                 "n_no_hor":         kite_counts["no_hor"],
@@ -854,6 +886,11 @@ def build_model(input_dir: Path, prefix: str):
                                       if confidences else None),
                 "profile_png":      f"{kite_dir_rel}/profile_plots/profile_{trc_id}.png",
                 "profile_top3_png": f"{kite_dir_rel}/profile_plots/profile_top3_{trc_id}.png",
+                # New kitehor-derived per-TRC aggregates (None on legacy data).
+                "combined_class":   dominant_class,
+                "combined_class_counts": dict(combined_class_counter) or None,
+                "n_subrepeat":      n_subrepeat,
+                "n_ssr":            n_ssr,
             }
         tarean_block = None
         if has_tarean:

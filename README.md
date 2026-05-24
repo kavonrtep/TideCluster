@@ -48,7 +48,17 @@ size estimates for the entire TRC, KITE also estimates monomer sizes for each ar
 evaluating the distances between all repetitive k-mers across the tandem repeat array,
 with each tandem array analyzed individually. This method facilitates the detection of
 higher-order repeats and captures the variability in monomer size across different tandem
-repeat arrays. The KITE analysis includes:
+repeat arrays.
+
+Starting in TideCluster 1.10.0, the KITE step is powered by
+[kitehor](https://github.com/kavonrtep/kitehor) — a sequence-agnostic
+Rust reimplementation of the same k-mer-interval principle that adds
+structural classification per array: an HOR verdict + multiplicity,
+SSR scan, nested-TR / sub-repeat detection, and a single
+`combined_class` summarising the call. kitehor is installed
+transitively from the `petrnovak` conda channel.
+
+The KITE analysis includes:
 
 - Monomer size estimate for the entire TRC : This estimate may differ from the TAREAN
 estimate due to the different methodologies employed.
@@ -56,6 +66,10 @@ estimate due to the different methodologies employed.
    - Primary estimate : The estimate with the highest score.
    - Alternative estimates : Estimates with lower scores, these estimates help in identifying
 higher-order repeats.
+- Per-array structural verdict from kitehor: HOR vs. plain TR vs. SSR
+  vs. nested-TR, with HOR multiplicity, founder/tile periods, and a
+  `combined_class` label. Surfaced in the report's KITE page and in
+  the per-array columns of `monomer_size_top3_estimats.csv`.
 
 | ![./workflow_scheme.svg](./workflow_scheme.svg) |
 |:-----------------------------------------------:|
