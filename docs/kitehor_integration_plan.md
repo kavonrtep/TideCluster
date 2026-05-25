@@ -309,3 +309,42 @@ substantively different categories on the canonical
 (The kitehor 0.9.2 glibc issue and the `--dump-profile` two-call
 pattern are both resolved by upgrading to kitehor 0.9.3 + the new
 `analyze --periodogram` flag.)
+
+## Addendum: kitehor 0.10.0 (shipped in TideCluster 1.10.0)
+
+The integration was first built against kitehor 0.9.3 (8-class
+schema). The 1.10.0 release pins **kitehor 0.10.0**, which is a
+breaking change to the classifier and the `summary.tsv` schema. The
+`analyze --periodogram` invocation is unchanged; only the joined CSV
+and the report consumers were updated.
+
+**Categories (7, was 8).** `tr_with_nested_tr` is removed (those
+arrays now fall to `tr`, `tr_with_subrepeat`, or `unresolved`);
+`hor_with_ssr` is added. Final set: `hor`, `hor_with_ssr`, `tr`,
+`tr_with_ssr`, `tr_with_subrepeat`, `pure_ssr`, `unresolved`. Decision
+rules (per `kavonrtep/kitehor` `docs/rule_proto.md`): `pure_ssr` when
+`ssr_dominant_motif_coverage_pct ≥ 80`; `tr_with_subrepeat` when
+`tv_decision = localized_subrepeat`; `hor_with_ssr` / `hor` from
+`hor_verdict=hor` (± `ssr_flag`); `tr_with_ssr` / `tr` from
+`hor_verdict=simple_tr` (± `ssr_flag`); else `unresolved`.
+
+**`summary.tsv` (still 32 cols, reshuffled).** Dropped: `length_bp`,
+all `subrepeat_*`, `density_hint`, `founder_density`, `phase_contrast`,
+`density_n_windows`. Added 10 `tandem_validate` columns: `tv_decision`,
+`tv_host_period`, `tv_best_candidate_period`, `tv_best_candidate_kind`,
+`tv_density`, `tv_spatial_contrast`, `tv_phase_contrast`,
+`tv_n_windows_total`, `tv_n_windows_present`, `tv_reason`. The
+subrepeat signal is now: host monomer = `tv_host_period`, subrepeat
+period = `tv_best_candidate_period`. `length_bp` is recovered by
+joining on `record_id` against `.kite.tsv` (`array_length`).
+
+**`analyze` outputs (6 TSVs, was 9).** `.tandem_validate.tsv` replaces
+`.subrepeat.tsv` + `.hor_within_tile.tsv`; `.windows.tsv` is gone.
+Removed subcommands: `subrepeat-scan`, `hor-validate`.
+
+**TideCluster code touched:** `tc_utils.build_monomer_size_csv`
+(lift `tv_*` instead of `subrepeat_*`/`founder_density`/`phase_contrast`),
+`tc_rerender_report.py` (class set + palette + `structure_cell` +
+`load_kite_top3`), `tarean/assets/tidecluster.css` (add
+`hor_with_ssr`). The 0.9.x `subrepeat_*` / `tr_with_nested_tr` paths
+are kept as legacy fallbacks so old output dirs still rerender.

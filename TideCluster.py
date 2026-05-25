@@ -147,7 +147,8 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
         tc.build_monomer_size_csv(
             kite_tsv=F"{kite_dir}/kitehor.kite.tsv",
             summary_tsv=F"{kite_dir}/kitehor.summary.tsv",
-            out_csv=F"{kite_dir}/monomer_size_top3_estimats.csv")
+            out_csv=F"{kite_dir}/monomer_size_top3_estimats.csv",
+            peaks_tsv=F"{kite_dir}/kitehor.kite.peaks.tsv")
         print("Rendering per-TRC profile heatmaps.")
         tc.run_cmd(F"{script_path}/tarean/kite_heatmaps.R"
                    F" --periodogram {kite_dir}/kitehor.periodogram"

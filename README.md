@@ -51,12 +51,14 @@ higher-order repeats and captures the variability in monomer size across differe
 repeat arrays.
 
 Starting in TideCluster 1.10.0, the KITE step is powered by
-[kitehor](https://github.com/kavonrtep/kitehor) — a sequence-agnostic
-Rust reimplementation of the same k-mer-interval principle that adds
-structural classification per array: an HOR verdict + multiplicity,
-SSR scan, nested-TR / sub-repeat detection, and a single
-`combined_class` summarising the call. kitehor is installed
-transitively from the `petrnovak` conda channel.
+[kitehor](https://github.com/kavonrtep/kitehor) `0.10.0` — a
+sequence-agnostic Rust reimplementation of the same k-mer-interval
+principle that adds structural classification per array: an HOR
+verdict + multiplicity, an SSR scan, the `tandem_validate` subrepeat
+detector, and a single `combined_class` summarising the call (one of
+`hor`, `hor_with_ssr`, `tr`, `tr_with_ssr`, `tr_with_subrepeat`,
+`pure_ssr`, `unresolved`). kitehor is installed transitively from the
+`petrnovak` conda channel.
 
 The KITE analysis includes:
 
@@ -67,9 +69,10 @@ estimate due to the different methodologies employed.
    - Alternative estimates : Estimates with lower scores, these estimates help in identifying
 higher-order repeats.
 - Per-array structural verdict from kitehor: HOR vs. plain TR vs. SSR
-  vs. nested-TR, with HOR multiplicity, founder/tile periods, and a
-  `combined_class` label. Surfaced in the report's KITE page and in
-  the per-array columns of `monomer_size_top3_estimats.csv`.
+  vs. TR-with-subrepeat, with HOR multiplicity, founder/tile periods,
+  the `tandem_validate` host/subrepeat periods, and a `combined_class`
+  label. Surfaced in the report's KITE page, the per-TRC dashboards,
+  and the per-array columns of `monomer_size_top3_estimats.csv`.
 
 | ![./workflow_scheme.svg](./workflow_scheme.svg) |
 |:-----------------------------------------------:|

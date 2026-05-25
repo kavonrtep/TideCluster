@@ -27,6 +27,16 @@
   --hor-cnt-weak-bg:   #fff8dc;
   --hor-cnt-none-bg:   #fafafa;
 
+  /* kitehor combined_class badge palette (light) */
+  --class-hor-bg:    #8fce8f;  --class-hor-fg:    #0e3d0e;
+  --class-horssr-bg: #7fc6a8;  --class-horssr-fg: #0e3d2a;
+  --class-tr-bg:     #e6e6e6;  --class-tr-fg:     #4a4a4a;
+  --class-nested-bg: #cfe0f7;  --class-nested-fg: #163a6b;
+  --class-subrep-bg: #c5ece4;  --class-subrep-fg: #114a42;
+  --class-trssr-bg:  #ffd9a6;  --class-trssr-fg:  #6b3f00;
+  --class-ssr-bg:    #e6d3f7;  --class-ssr-fg:    #4a2078;
+  --class-unres-bg:  #f6ccc6;  --class-unres-fg:  #7a201a;
+
   --font:      -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
                "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
@@ -56,6 +66,16 @@
     --hor-cnt-mod-bg:    #5a360033;
     --hor-cnt-weak-bg:   #6b550033;
     --hor-cnt-none-bg:   #1e293b;
+
+    /* kitehor combined_class badge palette (dark) */
+    --class-hor-bg:    #0e3d0e;  --class-hor-fg:    #8fce8f;
+    --class-horssr-bg: #0e3d2a;  --class-horssr-fg: #7fc6a8;
+    --class-tr-bg:     #2a3344;  --class-tr-fg:     #c0c8d4;
+    --class-nested-bg: #163a6b;  --class-nested-fg: #cfe0f7;
+    --class-subrep-bg: #114a42;  --class-subrep-fg: #c5ece4;
+    --class-trssr-bg:  #6b3f00;  --class-trssr-fg:  #ffd9a6;
+    --class-ssr-bg:    #4a2078;  --class-ssr-fg:    #e6d3f7;
+    --class-unres-bg:  #7a201a;  --class-unres-fg:  #f6ccc6;
   }
 }
 
@@ -209,6 +229,50 @@ table.tc-table img            { max-width: none; }
 .hor-cnt-weak   { background: var(--hor-cnt-weak-bg);   display: block; text-align: center; padding: 2px 8px; }
 .hor-cnt-none   { background: var(--hor-cnt-none-bg);   display: block; text-align: center; padding: 2px 8px; }
 
+/* ======== kitehor combined_class badges + count pills ======== */
+
+.class-badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 3px;
+  font-weight: 600;
+  text-align: center;
+  font-family: var(--font);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.class-hor    { background: var(--class-hor-bg);    color: var(--class-hor-fg); }
+.class-horssr { background: var(--class-horssr-bg); color: var(--class-horssr-fg); }
+.class-tr     { background: var(--class-tr-bg);     color: var(--class-tr-fg); }
+.class-nested { background: var(--class-nested-bg); color: var(--class-nested-fg); }
+.class-subrep { background: var(--class-subrep-bg); color: var(--class-subrep-fg); }
+.class-trssr  { background: var(--class-trssr-bg);  color: var(--class-trssr-fg); }
+.class-ssr    { background: var(--class-ssr-bg);    color: var(--class-ssr-fg); }
+.class-unres  { background: var(--class-unres-bg);  color: var(--class-unres-fg); }
+
+/* compact count pills used in "class mix" roll-up cells */
+.class-cnt {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 6px;
+  margin: 1px 2px 1px 0;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+.class-cnt.class-hor    { background: var(--class-hor-bg);    color: var(--class-hor-fg); }
+.class-cnt.class-horssr { background: var(--class-horssr-bg); color: var(--class-horssr-fg); }
+.class-cnt.class-tr     { background: var(--class-tr-bg);     color: var(--class-tr-fg); }
+.class-cnt.class-nested { background: var(--class-nested-bg); color: var(--class-nested-fg); }
+.class-cnt.class-subrep { background: var(--class-subrep-bg); color: var(--class-subrep-fg); }
+.class-cnt.class-trssr  { background: var(--class-trssr-bg);  color: var(--class-trssr-fg); }
+.class-cnt.class-ssr    { background: var(--class-ssr-bg);    color: var(--class-ssr-fg); }
+.class-cnt.class-unres  { background: var(--class-unres-bg);  color: var(--class-unres-fg); }
+
+/* dimmed score in the monomer-estimates cell */
+.tc-score { color: var(--fg-muted); font-size: 11px; margin-left: 1px; }
+
 /* ======== consensus block ======== */
 
 .tc-consensus {
@@ -309,6 +373,14 @@ table.tc-table img            { max-width: none; }
 .tc-bar-seg.hor-mod    { background: var(--hor-mod-bg);    color: var(--hor-mod-fg); }
 .tc-bar-seg.hor-weak   { background: var(--hor-weak-bg);   color: var(--hor-weak-fg); }
 .tc-bar-seg.hor-none   { background: var(--hor-none-bg);   color: var(--hor-none-fg); }
+.tc-bar-seg.class-bar-hor    { background: var(--class-hor-bg);    color: var(--class-hor-fg); }
+.tc-bar-seg.class-bar-horssr { background: var(--class-horssr-bg); color: var(--class-horssr-fg); }
+.tc-bar-seg.class-bar-tr     { background: var(--class-tr-bg);     color: var(--class-tr-fg); }
+.tc-bar-seg.class-bar-nested { background: var(--class-nested-bg); color: var(--class-nested-fg); }
+.tc-bar-seg.class-bar-subrep { background: var(--class-subrep-bg); color: var(--class-subrep-fg); }
+.tc-bar-seg.class-bar-trssr  { background: var(--class-trssr-bg);  color: var(--class-trssr-fg); }
+.tc-bar-seg.class-bar-ssr    { background: var(--class-ssr-bg);    color: var(--class-ssr-fg); }
+.tc-bar-seg.class-bar-unres  { background: var(--class-unres-bg);  color: var(--class-unres-fg); }
 
 /* ======== figure captions / image wrappers ======== */
 

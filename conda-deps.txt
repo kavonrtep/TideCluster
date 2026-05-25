@@ -25,4 +25,4 @@ r-reshape2
 mafft
 bedtools
 # Requires `-c petrnovak` in addition to conda-forge + bioconda.
-kitehor=0.9.3
+kitehor=0.10.0

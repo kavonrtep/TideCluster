@@ -2071,11 +2071,17 @@ def _kitehor_status(verdict, confidence):
     return "HOR strong"
 
 
-def build_monomer_size_csv(kite_tsv, summary_tsv, out_csv):
+def build_monomer_size_csv(kite_tsv, summary_tsv, out_csv, peaks_tsv=None):
     """Join kitehor's `<prefix>.kite.tsv` (top-3 monomer-size estimates
     per array) and `<prefix>.summary.tsv` (structural verdict columns)
     into the legacy-named `monomer_size_top3_estimats.csv` consumed by
     tc_rerender_report.py and tc_per_tra_consensus.py.
+
+    When `peaks_tsv` (`<prefix>.kite.peaks.tsv`) is given the join is
+    extended to the top-5 kept periodogram peaks per array
+    (`monomer_size_4/5`, `score_4/5`); kite.tsv itself only carries the
+    top-3. The report's "Monomer size estimates (Score)" column shows
+    these five ranked candidates.
 
     Column casing follows kitehor (lowercase `hor_*`). The TRC_ID /
     seqid / start / end columns are parsed back from the record_id
@@ -2088,15 +2094,42 @@ def build_monomer_size_csv(kite_tsv, summary_tsv, out_csv):
         for row in reader:
             summary_by_id[row["record_id"]] = row
 
+    # Ranks 4-5 per array, lifted from the full peak list (kite.tsv stops
+    # at rank 3). Keyed by case_id; peaks.tsv is already score-ranked.
+    peaks_by_id = {}
+    if peaks_tsv and os.path.exists(peaks_tsv):
+        with open(peaks_tsv, newline="") as fh:
+            for pr in csv.DictReader(fh, delimiter="\t"):
+                try:
+                    rank = int(pr.get("rank", ""))
+                except (TypeError, ValueError):
+                    continue
+                if rank in (4, 5):
+                    peaks_by_id.setdefault(pr["case_id"], {})[rank] = (
+                        pr.get("period", ""), pr.get("score", ""))
+
     # Columns we lift verbatim from .summary.tsv into the joined CSV.
+    # kitehor 0.10.0 replaced the subrepeat-scan / hor-within-tile stages
+    # with the unified `tandem_validate` detector, so the structural
+    # subrepeat signal now lives in the tv_* columns (tv_host_period =
+    # host monomer, tv_best_candidate_period = subrepeat period).
     summary_cols_out = [
         "combined_class",
-        "subrepeat_flag",
-        "subrepeat_period_bp",
+        "tv_decision",
+        "tv_host_period",
+        "tv_best_candidate_period",
+        "tv_best_candidate_kind",
+        "tv_density",
+        "tv_spatial_contrast",
+        "tv_phase_contrast",
+        "tv_n_windows_total",
+        "tv_n_windows_present",
+        "tv_reason",
         "ssr_flag",
         "ssr_dominant_motif",
-        "founder_density",
-        "phase_contrast",
+        "ssr_total_coverage_pct",
+        "ssr_top_motifs",
+        "consensus_period_bp",
     ]
 
     out_header = [
@@ -2104,6 +2137,8 @@ def build_monomer_size_csv(kite_tsv, summary_tsv, out_csv):
         "monomer_size", "score", "array_length",
         "monomer_size_2", "score_2",
         "monomer_size_3", "score_3",
+        "monomer_size_4", "score_4",
+        "monomer_size_5", "score_5",
         "hor_status", "hor_confidence",
         "hor_founder", "hor_tile", "hor_multiplicity",
     ] + summary_cols_out
@@ -2130,6 +2165,9 @@ def build_monomer_size_csv(kite_tsv, summary_tsv, out_csv):
             sm = summary_by_id.get(record_id, {})
             verdict = sm.get("hor_verdict", "")
             confidence = sm.get("hor_confidence", "")
+            pk = peaks_by_id.get(record_id, {})
+            ms4, sc4 = pk.get(4, ("", ""))
+            ms5, sc5 = pk.get(5, ("", ""))
             row = {
                 "TRC_ID":           trc,
                 "seqid":            seqid,
@@ -2142,6 +2180,10 @@ def build_monomer_size_csv(kite_tsv, summary_tsv, out_csv):
                 "score_2":          kr.get("score_2", ""),
                 "monomer_size_3":   kr.get("monomer_size_3", ""),
                 "score_3":          kr.get("score_3", ""),
+                "monomer_size_4":   ms4,
+                "score_4":          sc4,
+                "monomer_size_5":   ms5,
+                "score_5":          sc5,
                 "hor_status":       _kitehor_status(verdict, confidence),
                 "hor_confidence":   confidence,
                 "hor_founder":      sm.get("hor_founder", ""),

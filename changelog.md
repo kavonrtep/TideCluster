@@ -1,29 +1,42 @@
 ## 1.10.0 (unreleased)
 - KITE step now runs [kitehor](https://github.com/kavonrtep/kitehor)
-  (Rust) instead of the R `tarean/kite.R` script. Same k-mer interval
-  principle, plus an HOR verdict + multiplicity, SSR scan, nested-TR
-  / subrepeat scan, and a unified `combined_class` per array
-  (`hor`, `hor_with_ssr`, `tr`, `tr_with_ssr`, `tr_with_nested_tr`,
-  `tr_with_subrepeat`, `pure_ssr`, `unresolved`). The full set of
-  kitehor's 9 per-stage TSVs plus a single `kitehor.periodogram`
-  bundle is written under `<prefix>_kite/`.
+  `0.10.0` (Rust) instead of the R `tarean/kite.R` script. Same k-mer
+  interval principle, plus an HOR verdict + multiplicity, SSR scan,
+  the unified `tandem_validate` subrepeat detector, and a single
+  `combined_class` per array — one of `hor`, `hor_with_ssr`, `tr`,
+  `tr_with_ssr`, `tr_with_subrepeat`, `pure_ssr`, `unresolved`.
+  kitehor's 6 per-stage TSVs plus a single `kitehor.periodogram`
+  bundle are written under `<prefix>_kite/`.
+- Report (v2): the per-array table on each TRC page now shows the
+  kitehor `combined_class` (friendly-named, colour-coded), the top-5
+  monomer-size estimates with scores, and a per-class "Structure"
+  cell (HOR base/unit/multiplicity, host monomer + subrepeat period,
+  or SSR coverage + top motifs). The KITE overview, the per-TRC
+  classification card, the merged TRC table, and the genome-distribution
+  ideograms are all driven by `combined_class` instead of the old
+  HOR strong/moderate/weak/none confidence bins.
 - `monomer_size_top3_estimats.csv` schema (consumed by
   `tc_per_tra_consensus.py` and `tc_rerender_report.py`):
-  - HOR columns renamed to lowercase to match kitehor's native names:
-    `HOR_status → hor_status`, `HOR_confidence → hor_confidence`,
-    `HOR_base_monomer → hor_founder`, `HOR_hor_period → hor_tile`,
-    `HOR_n_harmonics → hor_multiplicity`.
-  - New columns: `combined_class`, `subrepeat_flag`,
-    `subrepeat_period_bp`, `ssr_flag`, `ssr_dominant_motif`,
-    `founder_density`, `phase_contrast`.
-  - Rerender supports the legacy capitalised schema for archival
-    output directories from earlier versions.
+  - HOR columns use kitehor's lowercase names (`hor_status`,
+    `hor_confidence`, `hor_founder`, `hor_tile`, `hor_multiplicity`).
+  - Top-5 monomer-size peaks (`monomer_size`..`monomer_size_5` +
+    matching `score*`), joined from `kitehor.kite.peaks.tsv`.
+  - Structural columns: `combined_class`, the `tandem_validate`
+    `tv_*` columns (`tv_decision`, `tv_host_period`,
+    `tv_best_candidate_period`, `tv_best_candidate_kind`, `tv_density`,
+    `tv_spatial_contrast`, `tv_phase_contrast`, `tv_n_windows_total`,
+    `tv_n_windows_present`, `tv_reason`), and the SSR columns
+    (`ssr_flag`, `ssr_dominant_motif`, `ssr_total_coverage_pct`,
+    `ssr_top_motifs`, `consensus_period_bp`).
+  - Rerender still reads the kitehor 0.9.x columns (`subrepeat_*`,
+    `tr_with_nested_tr`) and the legacy capitalised `HOR_*` schema, so
+    archival output directories from earlier versions still render.
 - Per-TRC heatmap PNGs (`profile_plots/profile_*.png`,
   `profile_plots/profile_top3_*.png`) now rendered by
   `tarean/kite_heatmaps.R` (base R only) from kitehor's
   `--periodogram` bundle. `peaks_list.RDS` is no longer emitted; the
   per-array spectra live in `<prefix>_kite/kitehor.periodogram`.
-- New conda runtime dependency: `kitehor=0.9.3` (requires
+- New conda runtime dependency: `kitehor=0.10.0` (requires
   `-c petrnovak`). No new Python plotting deps.
 - Removed: `tarean/kite.R` (736 lines).
 

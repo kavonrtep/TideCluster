@@ -332,6 +332,219 @@ def hor_count_cell(n, kind):
     return f'<span class="{cls}">{int(n)}</span>'
 
 
+# ----------------------------------------------------------------------
+# kitehor combined_class -> user-facing label / CSS / structure summary
+# ----------------------------------------------------------------------
+# Canonical display order for kitehor >=0.10.0 (7 classes). Used by
+# every roll-up table, the class-distribution bar, and the legends.
+CANONICAL_CLASS_ORDER = [
+    "hor",
+    "hor_with_ssr",
+    "tr",
+    "tr_with_ssr",
+    "tr_with_subrepeat",
+    "pure_ssr",
+    "unresolved",
+]
+COMBINED_CLASS_LABELS = {
+    "hor":               "HOR",
+    "hor_with_ssr":      "HOR (SSR-rich)",
+    "tr":                "Simple TR",
+    "tr_with_ssr":       "TR with SSR",
+    "tr_with_subrepeat": "TR with subrepeats",
+    "pure_ssr":          "SSR",
+    "unresolved":        "Unresolved TR",
+    # Legacy (kitehor 0.9.x) — kept so reports rerendered from old output
+    # dirs still resolve a label/colour; not part of CANONICAL_CLASS_ORDER.
+    "tr_with_nested_tr": "TR with nested TR",
+}
+COMBINED_CLASS_CSS = {
+    "hor":               "hor",
+    "hor_with_ssr":      "horssr",
+    "tr":                "tr",
+    "tr_with_ssr":       "trssr",
+    "tr_with_subrepeat": "subrep",
+    "pure_ssr":          "ssr",
+    "unresolved":        "unres",
+    "tr_with_nested_tr": "nested",   # legacy 0.9.x
+}
+
+
+def class_label(raw):
+    """Friendly label for a kitehor combined_class value."""
+    if not raw:
+        return "—"
+    return COMBINED_CLASS_LABELS.get(raw, raw.replace("_", " "))
+
+
+def class_badge(raw):
+    """Colored pill for a combined_class value (empty string when unknown)."""
+    if not raw:
+        return ""
+    css = COMBINED_CLASS_CSS.get(raw, "unres")
+    return f'<span class="class-badge class-{css}">{esc(class_label(raw))}</span>'
+
+
+def class_count_badge(raw, n):
+    """Small count pill colored by class (for roll-up "class mix" cells)."""
+    css = COMBINED_CLASS_CSS.get(raw, "unres")
+    return (f'<span class="class-cnt class-{css}" '
+            f'title="{esc(class_label(raw))}">{int(n)}</span>')
+
+
+def class_mix_cell(counts):
+    """Per-class count pills in canonical display order; '—' when empty.
+    Any class outside the canonical set (e.g. legacy tr_with_nested_tr on
+    a rerendered 0.9.x dir) is appended after the canonical ones."""
+    if not counts:
+        return "—"
+    bits = [class_count_badge(raw, counts[raw])
+            for raw in CANONICAL_CLASS_ORDER if counts.get(raw)]
+    bits += [class_count_badge(raw, n) for raw, n in counts.items()
+             if raw not in CANONICAL_CLASS_ORDER and n]
+    return " ".join(bits) or "—"
+
+
+def class_totals(model):
+    """Counter of combined_class -> total arrays across all TRCs."""
+    total = Counter()
+    for t in model["trcs"]:
+        k = t.get("kite") or {}
+        for raw, n in (k.get("combined_class_counts") or {}).items():
+            total[raw] += n
+    return total
+
+
+def class_legend_inline():
+    """One-line legend of the class badges, canonical display order."""
+    return " ".join(class_badge(raw) for raw in CANONICAL_CLASS_ORDER)
+
+
+def _sc(s):
+    """Compact score for the monomer-estimates cell: 0.31 -> '.31'."""
+    try:
+        txt = f"{float(s):.2f}"
+    except (TypeError, ValueError):
+        return ""
+    return txt[1:] if txt.startswith("0.") else txt
+
+
+def monomer_estimates_cell(a):
+    """Top-5 KITE peaks as 'period(score)', ranked, for the array table."""
+    bits = []
+    for mk, sk in (("m1", "s1"), ("m2", "s2"), ("m3", "s3"),
+                   ("m4", "s4"), ("m5", "s5")):
+        m = a.get(mk)
+        if m is None:
+            continue
+        s = a.get(sk)
+        sc = _sc(s)
+        bits.append(f'{esc(m)}<span class="tc-score">({sc})</span>' if sc
+                    else f'{esc(m)}')
+    return " ".join(bits)
+
+
+def _fmt_motifs(top_motifs):
+    """`AG:45.3%;AGAT:2.8%` -> `AG 45.3%, AGAT 2.8%` (escaped)."""
+    if not top_motifs:
+        return ""
+    parts = []
+    for item in re.split(r"[;,]", top_motifs):
+        item = item.strip()
+        if not item:
+            continue
+        if ":" in item:
+            mot, pct = item.split(":", 1)
+            parts.append(f"{esc(mot.strip())} {esc(pct.strip())}")
+        else:
+            parts.append(esc(item))
+    return ", ".join(parts)
+
+
+def _bp(x):
+    """Render a bp value as an integer (kitehor emits some as floats)."""
+    if x is None:
+        return None
+    try:
+        return int(round(float(x)))
+    except (TypeError, ValueError):
+        return None
+
+
+def structure_cell(a):
+    """Adaptive 'Structure' cell: render only the fields meaningful for
+    this array's combined_class.
+
+    kitehor >=0.10.0: HOR base/tile/multiplicity from hor_*; subrepeat
+    host/period from the tandem_validate tv_* columns; SSR coverage +
+    motif list from ssr_*. The tr_with_nested_tr branch is legacy
+    (0.9.x) and uses the old subrepeat_* columns."""
+    cc = a.get("combined_class")
+    base = a.get("hor_base_monomer")
+    tile = a.get("hor_hor_period")
+    mult = a.get("hor_multiplicity")
+    ssr_tot = a.get("ssr_total_coverage_pct")
+    motifs = _fmt_motifs(a.get("ssr_top_motifs"))
+    cons = a.get("consensus_period_bp")
+    tv_host = _bp(a.get("tv_host_period"))
+    tv_sub = _bp(a.get("tv_best_candidate_period"))
+
+    def _ssr_seg(decimals=0):
+        if ssr_tot is None:
+            return None
+        s = f"SSR {ssr_tot:.{decimals}f}%"
+        if motifs:
+            s += f": {motifs}"
+        return s
+
+    def _hor_segs():
+        bits = []
+        if base: bits.append(f"base {esc(base)}")
+        if tile: bits.append(f"HOR {esc(tile)}")
+        if mult: bits.append(f"&times;{esc(mult)}")
+        return bits
+
+    if cc == "hor":
+        return " &middot; ".join(_hor_segs())
+    if cc == "hor_with_ssr":
+        bits = _hor_segs()
+        seg = _ssr_seg()
+        if seg: bits.append(seg)
+        return " &middot; ".join(bits)
+    if cc == "tr":
+        return f"base monomer {esc(base)} bp" if base else ""
+    if cc == "tr_with_ssr":
+        bits = []
+        if base: bits.append(f"base {esc(base)}")
+        seg = _ssr_seg()
+        if seg: bits.append(seg)
+        return " &middot; ".join(bits)
+    if cc == "tr_with_subrepeat":
+        # tandem_validate: tv_host_period is the host monomer,
+        # tv_best_candidate_period the localized subrepeat.
+        mono = tv_host or base or tile
+        bits = []
+        if mono: bits.append(f"monomer {esc(mono)}")
+        if tv_sub: bits.append(f"subrepeat {esc(tv_sub)}")
+        return " &middot; ".join(bits)
+    if cc == "pure_ssr":
+        return _ssr_seg(decimals=1) or motifs
+    if cc == "unresolved":
+        return f"period ~{esc(cons)} bp (unresolved)" if cons else "unresolved"
+    # Legacy 0.9.x nested-TR (subrepeat_* columns; None on 0.10.0 data).
+    if cc == "tr_with_nested_tr":
+        sub = a.get("subrepeat_period_bp")
+        subcov = a.get("subrepeat_coverage_pct")
+        bits = []
+        if base: bits.append(f"base {esc(base)}")
+        if sub:
+            cov = f" ({subcov:.0f}%)" if subcov is not None else ""
+            bits.append(f"sub-TR {esc(sub)}{cov}")
+        return " &middot; ".join(bits)
+    # No combined_class (legacy/below-threshold): base monomer if any.
+    return f"base monomer {esc(base)} bp" if base else ""
+
+
 def page_shell(title, active, run_meta, main_html, *,
                extra_head="", up="", root_href="index.html",
                legacy_href=None, assets_href="assets/"):
@@ -674,9 +887,11 @@ def load_kite_top3(paths):
     """Per-TRA KITE records keyed by (trc_id, seqid, start, end).
 
     Three CSV schemas are accepted:
-      - 1.10+ (kitehor-derived): lowercase hor_status / hor_confidence /
+      - 1.10+ (kitehor >=0.10.0): lowercase hor_status / hor_confidence /
         hor_founder / hor_tile / hor_multiplicity + combined_class /
-        subrepeat_flag / ssr_flag / founder_density / phase_contrast.
+        tv_* (tandem_validate) / ssr_* columns. (The kitehor 0.9.x
+        subrepeat_*/founder_density columns are still read when present
+        so older output dirs rerender.)
       - 1.9.x (legacy R kite.R): capitalised HOR_status / HOR_confidence /
         HOR_base_monomer / HOR_hor_period / HOR_n_harmonics.
       - pre-1.9.0: no HOR columns; recomputed from (m1..m3, s1..s3) via
@@ -709,6 +924,8 @@ def load_kite_top3(paths):
         m1 = ni(row.get("monomer_size"));   s1 = num(row.get("score"))
         m2 = ni(row.get("monomer_size_2")); s2 = num(row.get("score_2"))
         m3 = ni(row.get("monomer_size_3")); s3 = num(row.get("score_3"))
+        m4 = ni(row.get("monomer_size_4")); s4 = num(row.get("score_4"))
+        m5 = ni(row.get("monomer_size_5")); s5 = num(row.get("score_5"))
 
         if is_kitehor:
             hor = {
@@ -719,14 +936,29 @@ def load_kite_top3(paths):
                 "hor_base_monomer": ni(row.get("hor_founder")),
                 "hor_hor_period":   ni(row.get("hor_tile")),
                 "hor_n_harmonics":  ni(row.get("hor_multiplicity")) or 0,
-                # New structural fields surfaced by kitehor.
+                "hor_multiplicity": ni(row.get("hor_multiplicity")),
+                # Structural fields surfaced by kitehor. The tv_* columns
+                # (kitehor >=0.10.0 tandem_validate) hold the subrepeat
+                # signal: tv_host_period = host monomer, tv_best_candidate_
+                # period = subrepeat. The subrepeat_* keys are kept so
+                # reports rerendered from 0.9.x output dirs still resolve
+                # (they are None on 0.10.0 data).
                 "combined_class":   (row.get("combined_class") or "").strip() or None,
-                "subrepeat_flag":   (row.get("subrepeat_flag") or "").strip() or None,
-                "subrepeat_period_bp": ni(row.get("subrepeat_period_bp")),
+                "tv_decision":      (row.get("tv_decision") or "").strip() or None,
+                "tv_host_period":   num(row.get("tv_host_period")),
+                "tv_best_candidate_period": num(row.get("tv_best_candidate_period")),
+                "tv_best_candidate_kind": (row.get("tv_best_candidate_kind") or "").strip() or None,
+                "tv_density":       num(row.get("tv_density")),
+                "tv_n_windows_total":   ni(row.get("tv_n_windows_total")),
+                "tv_n_windows_present": ni(row.get("tv_n_windows_present")),
                 "ssr_flag":         (row.get("ssr_flag") or "").strip() or None,
                 "ssr_dominant_motif": (row.get("ssr_dominant_motif") or "").strip() or None,
-                "founder_density":  num(row.get("founder_density")),
-                "phase_contrast":   num(row.get("phase_contrast")),
+                "ssr_total_coverage_pct": num(row.get("ssr_total_coverage_pct")),
+                "ssr_top_motifs":   (row.get("ssr_top_motifs") or "").strip() or None,
+                "consensus_period_bp": ni(row.get("consensus_period_bp")),
+                # Legacy 0.9.x subrepeat columns (None on 0.10.0 data).
+                "subrepeat_period_bp": ni(row.get("subrepeat_period_bp")),
+                "subrepeat_coverage_pct": num(row.get("subrepeat_coverage_pct")),
             }
         elif is_legacy:
             hor = {
@@ -741,6 +973,7 @@ def load_kite_top3(paths):
 
         out[(trc, sid, start, end)] = {
             "m1": m1, "s1": s1, "m2": m2, "s2": s2, "m3": m3, "s3": s3,
+            "m4": m4, "s4": s4, "m5": m5, "s5": s5,
             "array_length": ni(row.get("array_length")),
             **hor,
         }
@@ -856,9 +1089,13 @@ def build_model(input_dir: Path, prefix: str):
                     m1_values.append(k["m1"])
                 cc = k.get("combined_class")
                 if cc: combined_class_counter[cc] += 1
-                if (k.get("subrepeat_flag") or "").lower() in {"yes", "y", "true"}:
+                # 0.10.0 dropped the standalone subrepeat_flag column;
+                # derive the structural counters from combined_class
+                # (works for both 0.9.x and 0.10.0 data).
+                if cc in {"tr_with_subrepeat", "tr_with_nested_tr"}:
                     n_subrepeat += 1
-                if (k.get("ssr_flag") or "").lower() in {"yes", "y", "true"}:
+                if cc in {"pure_ssr", "tr_with_ssr", "hor_with_ssr"} or \
+                        (k.get("ssr_flag") or "").lower() in {"yes", "y", "true"}:
                     n_ssr += 1
         # TRC-level aggregates
         repeat_type = next((a["repeat_type"] for a in arrays if a.get("repeat_type")), None)
@@ -988,13 +1225,8 @@ def render_index(model, out_path, run_meta, ctx):
     stats_html = "".join(
         f'<dt>{esc(label)}</dt><dd>{esc(val) if val != "" else ""}</dd>'
         for label, val in rows_stats)
-    hor_total = {"strong": 0, "mod": 0, "weak": 0, "none": 0}
-    for t in model["trcs"]:
-        if t["kite"]:
-            hor_total["strong"] += t["kite"]["n_hor_strong"]
-            hor_total["mod"]    += t["kite"]["n_hor_moderate"]
-            hor_total["weak"]   += t["kite"]["n_hor_weak"]
-            hor_total["none"]   += t["kite"]["n_no_hor"]
+    cls_total = class_totals(model)
+    n_hor_arrays = cls_total.get("hor", 0)
     n_tarean    = sum(1 for t in model["trcs"] if t["tarean"])
     n_sf_peers  = sum(1 for t in model["trcs"] if t["superfamily"])
     up = ctx["up"]
@@ -1006,9 +1238,8 @@ def render_index(model, out_path, run_meta, ctx):
         <dl class="tc-kv">
           <dt>TRCs total</dt>     <dd><a href="{up}tarean.html">{len(model["trcs"])}</a></dd>
           <dt>TAREAN-analysed</dt><dd><a href="{up}tarean.html">{n_tarean}</a></dd>
-          <dt>HOR calls</dt>      <dd>{hor_badge("HOR strong")} {hor_total["strong"]} ·
-                                      {hor_badge("HOR moderate")} {hor_total["mod"]} ·
-                                      {hor_badge("HOR weak")} {hor_total["weak"]}</dd>
+          <dt>HOR arrays</dt>     <dd>{class_badge("hor")} {n_hor_arrays}</dd>
+          <dt>Array classes</dt>  <dd>{class_mix_cell(cls_total)}</dd>
           <dt>Superfamilies</dt>  <dd><a href="{up}superfamilies.html">{len(model["superfamilies"])}</a>,
                                       {n_sf_peers} TRCs grouped</dd>
         </dl></div>
@@ -1063,10 +1294,7 @@ def _render_tarean_row(t, ctx):
     up = ctx["up"]
     ta = t["tarean"] or {}
     kite = t["kite"] or {}
-    hor_cell = (f'{hor_count_cell(kite["n_hor_strong"],   "strong")}'
-                f'{hor_count_cell(kite["n_hor_moderate"], "mod")}'
-                f'{hor_count_cell(kite["n_hor_weak"],     "weak")}'
-                f'{hor_count_cell(kite["n_no_hor"],       "none")}') if kite else ""
+    class_cell = class_mix_cell(Counter(kite.get("combined_class_counts") or {})) if kite else ""
     sf_cell = (f'<a href="{up}superfamilies.html#sf-{t["superfamily"]}">SF {t["superfamily"]}</a>'
                if t["superfamily"] else "")
     cons_short = ""
@@ -1088,7 +1316,7 @@ def _render_tarean_row(t, ctx):
             f'{esc(round(ta["total_score"], 4)) if ta.get("total_score") is not None else ""}</td>'
         f'<td>{esc((t.get("ssr_motif") or "").replace("%25","%"))}</td>'
         f'<td>{esc(t.get("annotation") or "")}</td>'
-        f'<td>{hor_cell}</td>'
+        f'<td>{class_cell}</td>'
         f'<td>{sf_cell}</td>'
         f'<td>{graph_thumb}</td>'
         f'<td>{logo_thumb}</td>'
@@ -1125,7 +1353,7 @@ def render_tarean(model, out_path, run_meta, ctx):
         <th>Score<br>(TAREAN)</th>
         <th>SSR motif</th>
         <th>Annotation</th>
-        <th>HOR<br>(strong / mod / weak / none)</th>
+        <th>Class mix</th>
         <th>Superfamily</th>
         <th>Graph</th>
         <th>Logo</th>
@@ -1144,23 +1372,21 @@ def render_tarean(model, out_path, run_meta, ctx):
 
 
 def render_kite(model, out_path, run_meta, ctx):
-    hor_total = {"strong": 0, "mod": 0, "weak": 0, "none": 0}
-    for t in model["trcs"]:
-        if t["kite"]:
-            hor_total["strong"] += t["kite"]["n_hor_strong"]
-            hor_total["mod"]    += t["kite"]["n_hor_moderate"]
-            hor_total["weak"]   += t["kite"]["n_hor_weak"]
-            hor_total["none"]   += t["kite"]["n_no_hor"]
-    total = sum(hor_total.values()) or 1
+    cls_total = class_totals(model)
+    total = sum(cls_total.values()) or 1
     bar = ""
-    for kind, label in (("strong", "HOR strong"), ("mod", "HOR moderate"),
-                        ("weak",   "HOR weak"),   ("none", "No HOR")):
-        pct = 100 * hor_total[kind] / total
-        if pct < 1 and hor_total[kind] == 0:
+    legend_bits = []
+    for raw in CANONICAL_CLASS_ORDER:
+        n = cls_total.get(raw, 0)
+        if not n:
             continue
-        bar += (f'<div class="tc-bar-seg hor-{kind}" '
-                f'style="width:{pct:.2f}%" title="{label}: {hor_total[kind]}">'
-                f'{hor_total[kind] if pct > 3 else ""}</div>')
+        pct = 100 * n / total
+        css = COMBINED_CLASS_CSS[raw]
+        bar += (f'<div class="tc-bar-seg class-bar-{css}" '
+                f'style="width:{pct:.2f}%" '
+                f'title="{esc(class_label(raw))}: {n}">'
+                f'{n if pct > 3 else ""}</div>')
+        legend_bits.append(f'{class_badge(raw)} {n}')
     rows = []
     for t in model["trcs"]:
         if not t["kite"]:
@@ -1172,6 +1398,8 @@ def render_kite(model, out_path, run_meta, ctx):
         kite_mon   = k.get("monomer_primary")
         med_conf   = k.get("median_confidence")
         med_str    = f"{med_conf:.3f}" if med_conf is not None else ""
+        cc_counts  = k.get("combined_class_counts") or {}
+        dominant   = k.get("combined_class")
         rows.append(
             "<tr>"
             f'<td data-order="{t["index"]}">{_trc_link(t["id"], prefix=ctx["trc_link_prefix"])}</td>'
@@ -1179,33 +1407,29 @@ def render_kite(model, out_path, run_meta, ctx):
             f'<td data-order="{tarean_mon or 0}">{esc(tarean_mon)}</td>'
             f'<td data-order="{t["n_arrays"]}">{t["n_arrays"]}</td>'
             f'<td data-order="{t["total_size"]}">{fmt_bp(t["total_size"])}</td>'
-            f'<td data-order="{k["n_hor_strong"]}">{hor_count_cell(k["n_hor_strong"],   "strong")}</td>'
-            f'<td data-order="{k["n_hor_moderate"]}">{hor_count_cell(k["n_hor_moderate"], "mod")}</td>'
-            f'<td data-order="{k["n_hor_weak"]}">{hor_count_cell(k["n_hor_weak"],     "weak")}</td>'
-            f'<td data-order="{k["n_no_hor"]}">{hor_count_cell(k["n_no_hor"],       "none")}</td>'
+            f'<td data-order="{esc(dominant or "")}">{class_badge(dominant)}</td>'
+            f'<td>{class_mix_cell(Counter(cc_counts))}</td>'
             f'<td data-order="{med_conf or 0}">{med_str}</td>'
             f'<td>{profile_thumb}</td>'
             "</tr>")
     body = f"""
     <h1>K-mer interval tandem repeat estimation (KITE)</h1>
     <section class="tc-prose">{load_section("kite")}</section>
-    <h3>HOR distribution across all analysed arrays</h3>
+    <h3>Array class distribution across all analysed arrays</h3>
     <div class="tc-bar" title="Total arrays: {total}">{bar}</div>
     <p style="font-size:12px;color:var(--fg-muted)">
-      {hor_badge("HOR strong")} {hor_total["strong"]}
-      · {hor_badge("HOR moderate")} {hor_total["mod"]}
-      · {hor_badge("HOR weak")} {hor_total["weak"]}
-      · {hor_badge("No HOR")} {hor_total["none"]}
-      (total {total} arrays). See <code>docs/hor_classification.md</code>
-      for the scoring formula and category thresholds.
+      {" · ".join(legend_bits)} (total {total} arrays). Classes are
+      kitehor's combined structural verdict per array.
     </p>
-    <h2>Per-TRC HOR summary</h2>
+    <h2>Per-TRC class summary</h2>
     <p style="font-size:12px;color:var(--fg-muted)">
       <strong>Monomer (KITE)</strong> is the most-frequent primary
       k-mer-interval estimate across the arrays of a given TRC.
       <strong>Monomer (TAREAN)</strong> is the TAREAN de&nbsp;Bruijn
-      consensus length. <strong>Median conf.</strong> is the median
-      HOR confidence of the TRC's arrays.
+      consensus length. <strong>Cluster class</strong> is the dominant
+      kitehor class; <strong>Class mix</strong> counts each class among
+      the TRC's arrays. <strong>Median conf.</strong> is the median HOR
+      confidence of the TRC's arrays.
     </p>
     <div class="tc-table-wrap">
     <table class="tc-table tc-datatable" data-page-length="25" data-order='[[0,"asc"]]'>
@@ -1215,10 +1439,8 @@ def render_kite(model, out_path, run_meta, ctx):
         <th>Monomer<br>(TAREAN)</th>
         <th>Arrays</th>
         <th>Total size</th>
-        <th>HOR<br>strong</th>
-        <th>HOR<br>moderate</th>
-        <th>HOR<br>weak</th>
-        <th>No&nbsp;HOR</th>
+        <th>Cluster<br>class</th>
+        <th>Class mix</th>
         <th>Median<br>conf.</th>
         <th>Profile</th>
       </tr></thead>
@@ -1278,25 +1500,29 @@ TRC_DIST_MINI_HEIGHT      = 12
 # SVG fill palette — saturated variants of the pastel badge colours so
 # small rectangles (down to ~2 px) stay legible without needing a
 # stroke. The badge CSS keeps its softer palette for text legibility.
-_HOR_FILL = {
-    "HOR strong":   "#2e8b2e",  # forest green
-    "HOR moderate": "#e88f00",  # saturated amber
-    "HOR weak":     "#d4a017",  # saturated gold
-    "No HOR":       "#909090",  # medium grey
+# Keyed by kitehor combined_class. Unresolved gets a flag colour.
+_CLASS_FILL = {
+    "hor":               "#2e8b2e",  # forest green
+    "hor_with_ssr":      "#2f9e78",  # green-teal (HOR + SSR)
+    "tr":                "#8a8a8a",  # neutral grey (baseline)
+    "tr_with_subrepeat": "#2bb3a3",  # teal
+    "tr_with_ssr":       "#e88f00",  # amber
+    "pure_ssr":          "#8e5bd0",  # purple
+    "unresolved":        "#c0392b",  # muted red — needs attention
+    "tr_with_nested_tr": "#3a7bd5",  # legacy 0.9.x — blue
 }
 
 
-def _hor_fill(arr):
-    return _HOR_FILL.get(arr.get("hor_status"), "#cccccc")
+def _class_fill(arr):
+    return _CLASS_FILL.get(arr.get("combined_class"), "#cccccc")
 
 
 def _array_title(arr):
-    conf = arr.get("hor_confidence")
-    status = arr.get("hor_status") or "—"
+    cc = arr.get("combined_class")
+    label = class_label(cc) if cc else (arr.get("hor_status") or "—")
     span = f"{arr['seqid']}:{arr['start']:,}-{arr['end']:,}"
     length = f"{fmt_bp(arr['end'] - arr['start'])}"
-    conf_s = f"{conf:.3f}" if conf is not None else "—"
-    return f"{span} · {length} · {status} · conf {conf_s}"
+    return f"{span} · {length} · {label}"
 
 
 def _render_ideogram(majors, by_seqid):
@@ -1348,7 +1574,7 @@ def _render_ideogram(majors, by_seqid):
             parts.append(
                 f'<rect class="tc-tra" x="{x_start:.2f}" y="{y}" '
                 f'width="{w:.2f}" height="{bar_h}" '
-                f'fill="{_hor_fill(arr)}" stroke="none" '
+                f'fill="{_class_fill(arr)}" stroke="none" '
                 f'data-title="{esc(_array_title(arr))}">'
                 f'<title>{esc(_array_title(arr))}</title></rect>'
             )
@@ -1375,13 +1601,9 @@ def _render_minor_table(minors, by_seqid):
         arrs = by_seqid[sid]
         n = len(arrs)
         total_arr_len = sum(a["end"] - a["start"] for a in arrs)
-        statuses = Counter(a.get("hor_status", "No HOR") for a in arrs)
-        mix_cells = (
-            f'{hor_count_cell(statuses.get("HOR strong", 0),   "strong")}'
-            f'{hor_count_cell(statuses.get("HOR moderate", 0), "mod")}'
-            f'{hor_count_cell(statuses.get("HOR weak", 0),     "weak")}'
-            f'{hor_count_cell(statuses.get("No HOR", 0),       "none")}'
-        )
+        class_counts = Counter(a.get("combined_class") for a in arrs
+                               if a.get("combined_class"))
+        mix_cells = class_mix_cell(class_counts)
         mini = [f'<svg viewBox="0 0 {TRC_DIST_MINI_WIDTH} {TRC_DIST_MINI_HEIGHT}" '
                 f'class="tc-mini-svg" style="width:{TRC_DIST_MINI_WIDTH}px;'
                 f'height:{TRC_DIST_MINI_HEIGHT}px;">']
@@ -1395,7 +1617,7 @@ def _render_minor_table(minors, by_seqid):
             mini.append(
                 f'<rect class="tc-tra" x="{x_start:.2f}" y="2" '
                 f'width="{w:.2f}" height="8" '
-                f'fill="{_hor_fill(arr)}" stroke="none" '
+                f'fill="{_class_fill(arr)}" stroke="none" '
                 f'data-title="{esc(_array_title(arr))}">'
                 f'<title>{esc(_array_title(arr))}</title></rect>')
         mini.append("</svg>")
@@ -1419,7 +1641,7 @@ def _render_minor_table(minors, by_seqid):
         <th>Length</th>
         <th>Arrays</th>
         <th>Total TRA length</th>
-        <th>HOR mix<br>(strong / mod / weak / none)</th>
+        <th>Class mix</th>
         <th>Positions</th>
       </tr></thead>
       <tbody>{"".join(rows)}</tbody>
@@ -1492,12 +1714,9 @@ def render_trc_distribution(trc, seqid_lengths):
         + " · ".join(summary_parts) +
         f'. Every major scaffold is drawn even when it carries no '
         f'arrays of this TRC &mdash; absence is informative too. '
-        f'Array colour encodes HOR confidence &mdash; '
-        f'{hor_badge("HOR strong")} '
-        f'{hor_badge("HOR moderate")} '
-        f'{hor_badge("HOR weak")} '
-        f'{hor_badge("No HOR")}.'
-        f' Hover a rectangle to see coordinates and confidence.'
+        f'Array colour encodes the kitehor class &mdash; '
+        f'{class_legend_inline()}.'
+        f' Hover a rectangle to see coordinates and class.'
         f'</p>'
     )
     return (
@@ -1516,27 +1735,20 @@ def _is_ssr(trc):
     return (trc.get("repeat_type") or "").upper() == "SSR" or trc.get("ssr_motif")
 
 
-def _fmt_score(x):
-    if x is None: return ""
-    try: return f"{float(x):.3f}"
-    except (TypeError, ValueError): return esc(x)
-
-
 def _arrays_table(arrays, include_hor=True):
     """Render the per-array DataTable body for a TRC dashboard.
 
-    When include_hor is True the table carries m1..m3, s1..s3,
-    HOR status, confidence, base monomer, and HOR period columns.
-    SSR dashboards instead get an `SSR motif` column since neither
-    TAREAN nor KITE apply to them meaningfully."""
+    When include_hor is True the table uses the kitehor Option-B layout:
+    Class badge, the top-5 monomer-size estimates with scores, and a
+    single adaptive "Structure" cell whose content depends on the
+    array's combined_class (HOR base/tile/multiplicity, sub-TR /
+    subrepeat monomer, SSR coverage + motif list, ...). SSR-typed TRCs
+    keep the minimal `SSR motif` column since neither TAREAN nor KITE
+    apply to them meaningfully."""
     rows = []
     for i, a in enumerate(arrays, 1):
         if include_hor:
-            hor_bcell = hor_badge(a.get("hor_status"))
-            conf = a.get("hor_confidence")
-            base = a.get("hor_base_monomer")
-            perd = a.get("hor_hor_period")
-            conf_str = f"{conf:.3f}" if conf is not None else ""
+            cc = a.get("combined_class")
             rows.append(
                 "<tr>"
                 f'<td>{i}</td>'
@@ -1544,16 +1756,9 @@ def _arrays_table(arrays, include_hor=True):
                 f'<td data-order="{a.get("start") or 0}">{esc(a.get("start"))}</td>'
                 f'<td data-order="{a.get("end") or 0}">{esc(a.get("end"))}</td>'
                 f'<td data-order="{a.get("length") or 0}">{fmt_bp(a.get("length"))}</td>'
-                f'<td data-order="{a.get("m1") or 0}">{esc(a.get("m1"))}</td>'
-                f'<td data-order="{a.get("s1") or 0}">{_fmt_score(a.get("s1"))}</td>'
-                f'<td data-order="{a.get("m2") or 0}">{esc(a.get("m2"))}</td>'
-                f'<td data-order="{a.get("s2") or 0}">{_fmt_score(a.get("s2"))}</td>'
-                f'<td data-order="{a.get("m3") or 0}">{esc(a.get("m3"))}</td>'
-                f'<td data-order="{a.get("s3") or 0}">{_fmt_score(a.get("s3"))}</td>'
-                f'<td>{hor_bcell}</td>'
-                f'<td data-order="{conf or 0}">{conf_str}</td>'
-                f'<td data-order="{base or 0}">{esc(base) if base else ""}</td>'
-                f'<td data-order="{perd or 0}">{esc(perd) if perd else ""}</td>'
+                f'<td data-order="{esc(cc or "")}">{class_badge(cc)}</td>'
+                f'<td data-order="{a.get("m1") or 0}">{monomer_estimates_cell(a)}</td>'
+                f'<td>{structure_cell(a)}</td>'
                 "</tr>")
         else:
             rows.append(
@@ -1568,20 +1773,24 @@ def _arrays_table(arrays, include_hor=True):
     return "".join(rows)
 
 
-ARRAYS_LEGEND = """
+def arrays_legend():
+    return f"""
 <div class="tc-legend">
-  <dt>m<sub>1</sub></dt><dd>Monomer size — primary estimate</dd>
-  <dt>m<sub>2</sub>, m<sub>3</sub></dt><dd>Alternative estimates (2nd and 3rd KITE peaks)</dd>
-  <dt>s<sub>1</sub>, s<sub>2</sub>, s<sub>3</sub></dt><dd>k-mer-interval scores for each peak</dd>
-  <dt>HOR status</dt><dd>category derived from the continuous confidence:
-      <span class="hor-badge hor-none">No HOR</span>
-      <span class="hor-badge hor-weak">HOR weak</span>
-      <span class="hor-badge hor-mod">HOR moderate</span>
-      <span class="hor-badge hor-strong">HOR strong</span></dd>
-  <dt>Confidence</dt><dd>continuous HOR score (base&times;harmonic geometric-mean,
-      bonus for multiple harmonics); 0 when the array has no base+harmonic structure.</dd>
-  <dt>Base (bp) / HOR period (bp)</dt><dd>fitted base monomer <em>m*</em> and
-      the largest supported harmonic <em>k<sub>max</sub>&middot;m*</em>.</dd>
+  <dt>Class</dt><dd>kitehor structural classification of the array:
+      {class_legend_inline()}</dd>
+  <dt>Monomer size estimates (Score)</dt><dd>up to five candidate monomer
+      sizes (bp) from the KITE periodogram, each followed by its k-mer-interval
+      score in parentheses, ranked best-first.</dd>
+  <dt>Structure</dt><dd>fields relevant to the array's class:
+      <em>HOR</em> — base monomer, HOR unit, and multiplicity
+      (base&times;multiplicity = HOR unit);
+      <em>HOR (SSR-rich)</em> — the HOR decomposition plus SSR coverage;
+      <em>Simple TR</em> — base monomer size;
+      <em>TR with subrepeats</em> — host monomer and the localized
+      subrepeat period (kitehor tandem_validate);
+      <em>TR with SSR / SSR</em> — total SSR coverage and the top motif(s)
+      with the percentage of the array each covers;
+      <em>Unresolved TR</em> — the dominant period only.</dd>
 </div>
 """
 
@@ -1671,15 +1880,18 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
     ]
     stats_html = "".join(f'<dt>{esc(k)}</dt><dd>{esc(v)}</dd>' for k, v in stats_kv)
 
-    # Classification / HOR card
+    # Classification / HOR card — driven by kitehor combined_class.
     kite = trc.get("kite") or {}
     class_rows = []
     if kite:
-        class_rows.append(("HOR strong arrays",   kite["n_hor_strong"]))
-        class_rows.append(("HOR moderate arrays", kite["n_hor_moderate"]))
-        class_rows.append(("HOR weak arrays",     kite["n_hor_weak"]))
-        class_rows.append(("No HOR detected",     kite["n_no_hor"]))
-        if kite.get("median_confidence") is not None:
+        cc_counts = kite.get("combined_class_counts") or {}
+        dominant = kite.get("combined_class")
+        class_rows.append(("Cluster class",
+                           class_badge(dominant) if dominant else "—"))
+        class_rows.append(("Class breakdown",
+                           class_mix_cell(Counter(cc_counts))))
+        # Median HOR confidence is only meaningful when HOR arrays exist.
+        if cc_counts.get("hor") and kite.get("median_confidence") is not None:
             class_rows.append(("Median HOR confidence",
                                f'{kite["median_confidence"]:.3f}'))
     if trc.get("superfamily"):
@@ -1696,9 +1908,13 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
     # Classification details (SSR motif / HOR / below-threshold callouts)
     callouts = []
     if _is_ssr(trc):
+        detail = ("TAREAN is not performed on SSR TRCs by design; the "
+                  "per-array table below carries the kitehor SSR classification "
+                  "and motif coverage." if kite else
+                  "TAREAN and KITE are not performed on SSR TRCs by design.")
         callouts.append(
             f'<div class="tc-callout"><strong>Simple Sequence Repeat.</strong> '
-            f'TAREAN and KITE are not performed on SSR TRCs by design. '
+            f'{detail} '
             f'Motif(s): <code>{esc((trc.get("ssr_motif") or "").replace("%25","%"))}</code></div>')
     elif not trc.get("tarean"):
         callouts.append(
@@ -1736,18 +1952,17 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
           {f'<div class="tc-fig">{logo}<div class="tc-fig-caption">sequence logo</div></div>' if logo else ""}
         </div>"""
 
-    # Arrays table
-    include_hor = not _is_ssr(trc) and any(a.get("m1") is not None for a in trc["arrays"])
+    # Arrays table — use the kitehor Option-B layout whenever kitehor
+    # produced per-array data, including SSR-typed TRCs (their arrays
+    # carry the pure_ssr / tr_with_ssr structure cell). SSR TRCs without
+    # kitehor data fall through to the minimal motif-only table.
+    include_hor = any(a.get("m1") is not None for a in trc["arrays"])
     if include_hor:
         head = ("<th>#</th><th>seqid</th><th>start</th><th>end</th><th>length</th>"
-                "<th>m<sub>1</sub></th><th>s<sub>1</sub></th>"
-                "<th>m<sub>2</sub></th><th>s<sub>2</sub></th>"
-                "<th>m<sub>3</sub></th><th>s<sub>3</sub></th>"
-                "<th>HOR status</th>"
-                "<th>Confidence</th>"
-                "<th>Base (bp)</th>"
-                "<th>HOR period (bp)</th>")
-        legend = ARRAYS_LEGEND
+                "<th>Class</th>"
+                "<th>Monomer size estimates (Score)</th>"
+                "<th>Structure</th>")
+        legend = arrays_legend()
     elif _is_ssr(trc):
         head = ("<th>#</th><th>seqid</th><th>start</th><th>end</th><th>length</th>"
                 "<th>SSR motif</th>")
@@ -1912,13 +2127,13 @@ def build_report(input_dir, prefix=None, output_dir=None, *, quiet=False):
     trc_count = len(model["trcs"])
     analysed  = sum(1 for t in model["trcs"] if t.get("tarean"))
     sf_count  = len(model["superfamilies"])
-    hor_s = sum(t["kite"]["n_hor_strong"]   for t in model["trcs"] if t.get("kite"))
-    hor_m = sum(t["kite"]["n_hor_moderate"] for t in model["trcs"] if t.get("kite"))
-    hor_w = sum(t["kite"]["n_hor_weak"]     for t in model["trcs"] if t.get("kite"))
+    cls_total = class_totals(model)
     if not quiet:
+        cls_str = ", ".join(f"{class_label(raw)}: {cls_total[raw]}"
+                            for raw in CANONICAL_CLASS_ORDER if cls_total.get(raw))
         print(f"TRCs: {trc_count}  TAREAN-analysed: {analysed}  "
               f"superfamilies: {sf_count}  "
-              f"HOR strong/moderate/weak: {hor_s}/{hor_m}/{hor_w}")
+              f"array classes: {cls_str or 'n/a'}")
 
     copy_assets(out_dir / "assets", Path(__file__).resolve())
     copy_report_content_source(out_dir)
