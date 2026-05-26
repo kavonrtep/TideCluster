@@ -1204,6 +1204,162 @@ def _shell(ctx, title, active, run_meta, main_html):
                       assets_href=ctx["assets_href"])
 
 
+def _sf_color_map(model):
+    """Deterministic distinct colour per superfamily id (golden-angle hue).
+    TRCs with no superfamily render grey."""
+    sf_ids = sorted({sf["id"] for sf in model.get("superfamilies", [])})
+    cmap = {}
+    for i, sid in enumerate(sf_ids):
+        hue = (i * 137.508) % 360
+        cmap[sid] = f"hsl({hue:.0f}, 62%, 52%)"
+    return cmap
+
+
+def _overview_tick(v):
+    """Axis tick label for a (positive) decade value."""
+    if v >= 1:
+        return f"{int(round(v)):,}"
+    return f"{v:g}"
+
+
+def render_cluster_overview(model, ctx):
+    """Interactive (hover + click) bubble chart summarising the whole run:
+    x = median per-array KITE monomer size (log bp), y = TRC coverage
+    (log Mbp), dot radius ∝ number of arrays, dot colour = superfamily.
+    Hand-rolled inline SVG; the floating tooltip is the same one the
+    genome-distribution ideograms use (see tidecluster.js)."""
+    import math
+    trc_prefix = ctx["trc_link_prefix"]
+    pts, n_excluded = [], 0
+    for t in model["trcs"]:
+        m1s = [a["m1"] for a in t["arrays"] if a.get("m1")]
+        cov_bp = t.get("total_size") or 0
+        if not m1s or cov_bp <= 0:
+            n_excluded += 1
+            continue
+        kite = t.get("kite") or {}
+        cc = kite.get("combined_class_counts") or {}
+        pts.append({
+            "id":   t["id"],
+            "x":    statistics.median(m1s),
+            "y":    cov_bp / 1e6,
+            "n":    t["n_arrays"],
+            "cov":  cov_bp,
+            "hor":  cc.get("hor", 0) + cc.get("hor_with_ssr", 0),
+            "cls":  kite.get("combined_class"),
+            "sf":   t.get("superfamily"),
+            "ann":  t.get("annotation"),
+        })
+    if not pts:
+        return ""
+
+    W, H = 860, 480
+    ml, mr, mt, mb = 70, 20, 20, 58
+    px0, px1 = ml, W - mr          # x pixel range (left→right)
+    py0, py1 = mt, H - mb          # y pixel range (top→bottom)
+
+    def _scale(vals, lo_px, hi_px, invert):
+        lo = math.floor(math.log10(min(vals)))
+        hi = math.ceil(math.log10(max(vals)))
+        if hi <= lo:
+            hi = lo + 1
+        span = hi - lo
+
+        def f(v):
+            tt = (math.log10(v) - lo) / span
+            return hi_px - tt * (hi_px - lo_px) if invert else lo_px + tt * (hi_px - lo_px)
+        return f, lo, hi
+
+    xf, xlo, xhi = _scale([p["x"] for p in pts], px0, px1, invert=False)
+    yf, ylo, yhi = _scale([p["y"] for p in pts], py0, py1, invert=True)
+    sfcol = _sf_color_map(model)
+
+    def radius(n):
+        return max(3.0, min(22.0, 2.2 * math.sqrt(n)))
+
+    parts = [f'<svg viewBox="0 0 {W} {H}" class="tc-scatter-svg" '
+             f'style="max-width:100%;height:auto;" '
+             f'role="img" aria-label="Cluster overview scatter">']
+    # Gridlines + ticks
+    for k in range(xlo, xhi + 1):
+        X = xf(10 ** k)
+        parts.append(f'<line x1="{X:.1f}" y1="{py0}" x2="{X:.1f}" y2="{py1}" '
+                     f'class="tc-grid"/>')
+        parts.append(f'<text x="{X:.1f}" y="{py1 + 16}" text-anchor="middle" '
+                     f'class="tc-axis-lbl">{_overview_tick(10 ** k)}</text>')
+    for k in range(ylo, yhi + 1):
+        Y = yf(10 ** k)
+        parts.append(f'<line x1="{px0}" y1="{Y:.1f}" x2="{px1}" y2="{Y:.1f}" '
+                     f'class="tc-grid"/>')
+        parts.append(f'<text x="{px0 - 8}" y="{Y + 3:.1f}" text-anchor="end" '
+                     f'class="tc-axis-lbl">{_overview_tick(10 ** k)}</text>')
+    # Axis titles
+    parts.append(f'<text x="{(px0 + px1) / 2:.0f}" y="{H - 6}" '
+                 f'text-anchor="middle" class="tc-axis-title">'
+                 f'Median monomer size per TRC (bp, log)</text>')
+    parts.append(f'<text x="16" y="{(py0 + py1) / 2:.0f}" '
+                 f'text-anchor="middle" class="tc-axis-title" '
+                 f'transform="rotate(-90 16 {(py0 + py1) / 2:.0f})">'
+                 f'TRC coverage (Mbp, log)</text>')
+    # Points — larger dots first so small ones stay clickable on top.
+    for p in sorted(pts, key=lambda p: -p["n"]):
+        cx, cy, r = xf(p["x"]), yf(p["y"]), radius(p["n"])
+        fill = sfcol.get(p["sf"], "#bbbbbb")
+        sf_line = (f'<br>superfamily: SF {esc(p["sf"])}' if p["sf"]
+                   else '<br>superfamily: unassigned')
+        cls_line = f'<br>class: {esc(class_label(p["cls"]))}' if p["cls"] else ''
+        ann_line = f'<br>annotation: {esc(p["ann"])}' if p.get("ann") else ''
+        title = (f'<strong>{esc(p["id"])}</strong>'
+                 f'<br>median monomer: {esc(int(round(p["x"])))} bp'
+                 f'<br>coverage: {p["y"]:.3g} Mbp ({p["cov"]:,} bp)'
+                 f'<br>arrays (TRA): {esc(p["n"])}'
+                 f'<br>HOR arrays: {esc(p["hor"])}'
+                 f'{cls_line}{sf_line}{ann_line}')
+        plain = f'{p["id"]} · {int(round(p["x"]))} bp · {p["y"]:.3g} Mbp · {p["n"]} TRA'
+        parts.append(
+            f'<a href="{trc_prefix}{esc(p["id"])}.html">'
+            f'<circle class="tc-point" cx="{cx:.1f}" cy="{cy:.1f}" r="{r:.1f}" '
+            f'fill="{fill}" data-html="1" data-title="{title}">'
+            f'<title>{esc(plain)}</title></circle></a>')
+    parts.append('</svg>')
+
+    # Legends: dot-size reference + superfamily swatches.
+    size_refs = [n for n in (1, 10, 100) if n <= max(p["n"] for p in pts)] or [1]
+    size_legend = "".join(
+        f'<span class="tc-size-ref"><svg width="{2*radius(n)+2:.0f}" '
+        f'height="{2*radius(n)+2:.0f}" style="vertical-align:middle">'
+        f'<circle cx="{radius(n)+1:.1f}" cy="{radius(n)+1:.1f}" r="{radius(n):.1f}" '
+        f'class="tc-point" fill="#bbbbbb"/></svg> {n}</span>'
+        for n in size_refs)
+    sf_present = sorted({p["sf"] for p in pts if p["sf"]})
+    sf_swatches = "".join(
+        f'<span class="tc-sf-leg"><span class="tc-sf-swatch" '
+        f'style="background:{sfcol[s]}"></span>SF {esc(s)}</span>'
+        for s in sf_present)
+    sf_legend = (f'<span class="tc-sf-leg"><span class="tc-sf-swatch" '
+                 f'style="background:#bbbbbb"></span>unassigned</span>{sf_swatches}')
+
+    excl = (f' {n_excluded} TRC(s) without a KITE monomer estimate '
+            f'(e.g. below the TAREAN size threshold) are not shown.'
+            if n_excluded else "")
+    return f"""
+    <section>
+      <h2>Cluster overview</h2>
+      <p style="font-size:12px;color:var(--fg-muted)">
+        Each dot is a TRC. <strong>x</strong> = median per-array monomer
+        size (KITE m₁, log); <strong>y</strong> = TRC coverage (log Mbp);
+        <strong>dot size</strong> ∝ number of arrays (TRA);
+        <strong>colour</strong> = superfamily (grey = unassigned). Hover a
+        dot for details, click to open the TRC.{excl}
+      </p>
+      <div class="tc-scatter-wrap">{''.join(parts)}</div>
+      <div class="tc-scatter-legend">
+        <span class="tc-leg-grp">arrays:&nbsp;{size_legend}</span>
+        <span class="tc-leg-grp">{sf_legend}</span>
+      </div>
+    </section>"""
+
+
 def render_index(model, out_path, run_meta, ctx):
     settings = model.get("settings", {}) or {}
     stats    = model.get("stats", {}) or {}
@@ -1248,9 +1404,11 @@ def render_index(model, out_path, run_meta, ctx):
     </section>"""
     overview_html = load_section("overview")
     credits_html  = load_section("credits")
+    cluster_chart = render_cluster_overview(model, ctx)
     main = f"""
     <h1>TideCluster report — {esc(model["meta"]["prefix"])}</h1>
     {cards}
+    {cluster_chart}
     <section class="tc-prose">{overview_html}</section>
     <hr style="margin:28px 0; border:0; border-top:1px solid var(--border);">
     <section class="tc-prose">{credits_html}</section>

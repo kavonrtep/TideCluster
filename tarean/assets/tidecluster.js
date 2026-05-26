@@ -88,15 +88,21 @@
     document.body.appendChild(t);
     return t;
   }
+  // Shared by the TRA ideogram rectangles and the cluster-overview
+  // scatter circles. Elements opt in via class + a data-title attribute;
+  // data-html="1" means data-title is HTML (used by the scatter points
+  // for a multi-line tooltip), otherwise it is plain text.
+  var TOOLTIP_SEL = 'rect.tc-tra, circle.tc-point';
   function initTraTooltip() {
     var tip = null;
     document.addEventListener('mouseover', function (ev) {
-      var r = ev.target.closest('rect.tc-tra');
+      var r = ev.target.closest(TOOLTIP_SEL);
       if (!r) return;
       var text = r.getAttribute('data-title');
       if (!text) return;
       tip = tip || ensureTooltip();
-      tip.textContent = text;
+      if (r.getAttribute('data-html')) tip.innerHTML = text;
+      else tip.textContent = text;
       tip.classList.add('tc-tooltip-visible');
     });
     document.addEventListener('mousemove', function (ev) {
@@ -109,12 +115,12 @@
       tip.style.top  = y + 'px';
     });
     document.addEventListener('mouseout', function (ev) {
-      var r = ev.target.closest('rect.tc-tra');
+      var r = ev.target.closest(TOOLTIP_SEL);
       if (!r || !tip) return;
-      // Only hide when we truly leave the rect; related target check
-      // avoids flicker when moving between adjacent rectangles.
+      // Only hide when we truly leave the element; related target check
+      // avoids flicker when moving between adjacent shapes.
       if (ev.relatedTarget && ev.relatedTarget.closest &&
-          ev.relatedTarget.closest('rect.tc-tra')) return;
+          ev.relatedTarget.closest(TOOLTIP_SEL)) return;
       tip.classList.remove('tc-tooltip-visible');
     });
   }

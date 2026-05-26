@@ -273,6 +273,33 @@ table.tc-table img            { max-width: none; }
 /* dimmed score in the monomer-estimates cell */
 .tc-score { color: var(--fg-muted); font-size: 11px; margin-left: 1px; }
 
+/* ======== cluster-overview scatter ======== */
+.tc-scatter-wrap {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--card);
+  padding: 6px;
+  margin: 6px 0;
+}
+.tc-scatter-svg { color: var(--fg); display: block; }
+.tc-scatter-svg .tc-grid { stroke: currentColor; stroke-width: 0.5; opacity: 0.12; }
+.tc-scatter-svg .tc-axis-lbl   { fill: currentColor; opacity: 0.65; font-size: 10px; }
+.tc-scatter-svg .tc-axis-title { fill: currentColor; opacity: 0.8;  font-size: 12px; }
+.tc-point { fill-opacity: 0.72; cursor: pointer; }
+.tc-point:hover { fill-opacity: 0.95; stroke: var(--fg); stroke-width: 1.5px; }
+.tc-scatter-legend {
+  display: flex; flex-wrap: wrap; gap: 14px;
+  font-size: 11px; color: var(--fg-muted); margin: 4px 2px 10px;
+  align-items: center;
+}
+.tc-leg-grp { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tc-size-ref { display: inline-flex; align-items: center; gap: 3px; }
+.tc-sf-leg   { display: inline-flex; align-items: center; gap: 3px; }
+.tc-sf-swatch {
+  width: 11px; height: 11px; border-radius: 50%;
+  display: inline-block; vertical-align: middle;
+}
+
 /* ======== consensus block ======== */
 
 .tc-consensus {
