@@ -671,21 +671,43 @@ tr.tc-details-open .tc-details-control::before {
 }
 .tc-tooltip-visible { display: block; }
 
-/* ======== m1/m2/m3 + HOR legend block ========
-   Small explanatory panel shown above the dashboard arrays table. */
+/* ======== per-TRA column legend ========
+   Collapsible <details> panel shown above the dashboard arrays table.
+   Closed by default; click the summary to unfold the column glossary. */
 .tc-legend {
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 4px;
-  padding: 8px 12px;
+  padding: 4px 12px;
   margin: 12px 0;
   font-size: 12px;
   color: var(--fg-muted);
-  line-height: 1.6;
+  line-height: 1.55;
 }
+.tc-legend > summary {
+  cursor: pointer;
+  padding: 4px 0;
+  color: var(--fg);
+  font-weight: 600;
+  font-size: 12px;
+  user-select: none;
+  list-style: revert;  /* keep the default disclosure triangle */
+}
+.tc-legend[open] > summary { margin-bottom: 4px; }
 .tc-legend code { font-family: var(--font-mono); color: var(--fg); }
-.tc-legend dt { display: inline; color: var(--fg); font-weight: 600; }
-.tc-legend dd { display: inline; margin: 0 16px 0 4px; }
+.tc-legend-list {
+  margin: 0;
+  padding: 6px 0 2px;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+}
+.tc-legend-list dt {
+  color: var(--fg);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.tc-legend-list dd { margin: 0; }
 
 /* ======== DataTables overrides to match the theme ======== */
 

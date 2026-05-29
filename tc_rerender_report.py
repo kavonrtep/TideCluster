@@ -2691,37 +2691,38 @@ def _arrays_table(arrays, include_hor=True):
 
 
 def arrays_legend():
+    """Trimmed per-TRA column legend. Wrapped in a <details> so it stays
+    collapsed by default; click the summary to unfold. Structured as a
+    proper <dl> (previous markup put <dt>/<dd> directly under a <div>,
+    which DataTables sometimes mis-styled)."""
     return """
-<div class="tc-legend">
-  <dt>Founder / Strongest</dt><dd>
-      <strong>Strongest</strong> is the period with the highest
-      identity_med in the array (kitehor rescore's <code>founder_period</code>
-      column). <strong>Founder</strong> is the smallest peak P whose
-      period is an integer divisor of strongest (k = strongest/P,
-      2 ≤ k ≤ 30) with identity_med ≥ 0.7; falls back to strongest when
-      no such divisor exists. A <code>*</code> next to the founder means
-      rescore couldn't tell us a founder (NA) and TideCluster fell back
-      to the top-scored kite peak.</dd>
-  <dt>&Delta;id</dt><dd>identity_med(strongest) − identity_med(founder)
-      in percentage points. NA when founder = strongest (no
-      multiplicity decomposition fired).</dd>
-  <dt>&times;k</dt><dd>multiplicity of strongest over founder
-      (= round(strongest / founder)); 1 when no decomposition.</dd>
-  <dt>Other periods</dt><dd>peaks with identity_med ≥ 0.7 other than
-      founder and strongest, plus any short peaks (period below
-      rescore's min-period so identity is NA) whose kite rank is better
-      than the founder's. Sorted by identity descending.</dd>
-  <dt>Subrepeat</dt><dd>up to two candidate subrepeats (period ≤
-      founder/3 with partial occupancy), ranked by
-      <code>scan_occupancy_frac</code> desc. Tiered as
-      {hi} (per-base scan + alignment / k-mer support agree) or
-      {li} (scan finds it without alignment).
-      Click <span class="tc-details-control tc-details-control-static"></span>
-      on the row to see every peak with its tier and full diagnostics.</dd>
-  <dt>SSR</dt><dd>dominant short-motif tandem repeat from kitehor's
-      ssr-scan + coverage percentage; top motifs in the expanded
-      tooltip.</dd>
-</div>
+<details class="tc-legend">
+  <summary>Column legend</summary>
+  <dl class="tc-legend-list">
+    <dt>Founder / Strongest</dt><dd>
+        <strong>Strongest</strong> = highest-identity peak (rescore's
+        <code>founder_period</code>). <strong>Founder</strong> = smallest
+        divisor P of Strongest with k ∈ [2, 30] and id_med ≥ 0.7; falls
+        back to Strongest. Red <code>*</code> = NA from rescore, fell
+        back to top kite peak.</dd>
+    <dt>&Delta;id</dt><dd>id(Strongest) − id(Founder), pp. NA when
+        Founder = Strongest.</dd>
+    <dt>&times;k</dt><dd>round(Strongest / Founder); 1 if none. Amber
+        <code>~</code> pill = irregular (non-integer); hover for raw k.</dd>
+    <dt>Other periods</dt><dd>peaks with id_med ≥ 0.7 other than
+        Founder and Strongest, plus short peaks (period &lt;
+        rescore's min-period) whose kite rank is better than the
+        Founder's. Sorted by identity desc.</dd>
+    <dt>Subrepeat</dt><dd>≤ 2 candidates ≤ Founder/3 with partial
+        occupancy, ranked by <code>scan_occupancy_frac</code> desc.
+        Tiered {hi} (scan + alignment / k-mer support agree) or
+        {li} (scan only). Click
+        <span class="tc-details-control tc-details-control-static"></span>
+        on a row for every peak with its tier and full diagnostics.</dd>
+    <dt>SSR</dt><dd>dominant short-motif tandem repeat from kitehor's
+        ssr-scan + coverage %; top motifs in the expanded child row.</dd>
+  </dl>
+</details>
 """.format(hi=_tier_pill("HIGH"), li=_tier_pill("LIKELY"))
 
 
