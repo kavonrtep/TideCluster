@@ -217,6 +217,28 @@ def md_to_html(md_text):
             out.append(f"<li>{_md_inline(m.group(1))}</li>")
             continue
 
+        # List-item continuation: an indented line (≥ 2 leading spaces
+        # or a tab) directly under a list item is appended to that item
+        # so multi-line bullets render as a single <li>.
+        if (list_mode and out and out[-1].endswith("</li>")
+                and (raw.startswith("  ") or raw.startswith("\t"))):
+            cont = _md_inline(line.strip())
+            out[-1] = out[-1][:-len("</li>")] + " " + cont + "</li>"
+            continue
+
+        # Blockquote: lines starting with `>`. Consecutive quote lines
+        # join into one <blockquote>. (The original parser dropped the
+        # marker into paragraph text; fix lifted with the list bug.)
+        m = re.match(r"^>\s?(.*)$", line)
+        if m:
+            flush_para(); close_list()
+            qtxt = _md_inline(m.group(1))
+            if out and out[-1].startswith("<blockquote>") and out[-1].endswith("</blockquote>"):
+                out[-1] = out[-1][:-len("</blockquote>")] + " " + qtxt + "</blockquote>"
+            else:
+                out.append(f"<blockquote>{qtxt}</blockquote>")
+            continue
+
         # Raw-HTML block passthrough.
         if line.lstrip().startswith("<"):
             flush_para(); close_list()
@@ -1380,6 +1402,180 @@ def _overview_tick(v):
     return f"{v:g}"
 
 
+# ----------------------------------------------------------------------
+# Index-level genome-distribution plot (chromosome ideogram showing
+# every TRA across the run, with a click-to-highlight TRC selector on
+# the left). Hand-rolled SVG; the highlight + search interactions live
+# in tidecluster.js (`initIndexDistribution`).
+#
+# Distinct from the PER-TRC ideogram (`render_trc_distribution`) which
+# only shows arrays of one TRC and lives on each TRC dashboard.
+# ----------------------------------------------------------------------
+
+INDEX_DIST_MIN_CONTIG = 1_000_000   # hide scaffolds smaller than this
+INDEX_DIST_MAX_CONTIGS = 80         # hard cap so plant assemblies stay legible
+INDEX_DIST_SVG_WIDTH   = 760
+INDEX_DIST_LABEL_WIDTH = 170
+INDEX_DIST_ROW_HEIGHT  = 16
+INDEX_DIST_BAR_HEIGHT  = 9
+
+
+def render_index_distribution(model, ctx):
+    """Return a `<section>` HTML block with chromosome ideogram + TRC
+    side-selector. Empty string if there are no contigs ≥ the threshold
+    or no arrays — both happen on tiny test datasets.
+
+    Each TRA <rect> carries data-trc / data-sf and a per-rectangle CSS
+    variable `--sf` set to the superfamily colour. Default rendering is
+    uniform muted grey; when the surrounding container's data-active-trc
+    matches a rectangle's data-trc the JS adds `tc-idx-active` to it and
+    CSS lifts it to its superfamily colour + outline."""
+    trcs = model.get("trcs") or []
+    seqid_lengths = model.get("seqid_lengths") or {}
+    # All arrays, tagged with their TRC id and superfamily colour. We
+    # collect by_seqid first so contig filtering is one pass.
+    sfcol = _sf_color_map(model)
+    by_seqid = {}
+    for t in trcs:
+        sf_color = sfcol.get(t.get("superfamily"), "#888888")
+        for a in t.get("arrays") or []:
+            sid = a.get("seqid")
+            if not sid:
+                continue
+            by_seqid.setdefault(sid, []).append((t["id"], sf_color, a))
+    if not by_seqid:
+        return ""
+    # Contig length resolution: prefer seqid_lengths.tsv; fall back to
+    # the max array end on that contig so legacy runs without the
+    # side-car still get a plot (with slightly under-reported lengths).
+    contig_lengths = {sid: int(l) for sid, l in seqid_lengths.items()}
+    for sid, items in by_seqid.items():
+        if sid not in contig_lengths:
+            contig_lengths[sid] = max(a["end"] for _, _, a in items)
+    # Keep contigs ≥ threshold, longest first, capped at MAX_CONTIGS.
+    kept = sorted(((sid, L) for sid, L in contig_lengths.items()
+                   if L >= INDEX_DIST_MIN_CONTIG),
+                  key=lambda x: -x[1])[:INDEX_DIST_MAX_CONTIGS]
+    if not kept:
+        return ""
+    n_hidden = sum(1 for L in contig_lengths.values()
+                   if L < INDEX_DIST_MIN_CONTIG)
+    max_len = max(L for _, L in kept)
+    label_w = INDEX_DIST_LABEL_WIDTH
+    bar_w   = INDEX_DIST_SVG_WIDTH - label_w - 20
+    row_h   = INDEX_DIST_ROW_HEIGHT
+    bar_h   = INDEX_DIST_BAR_HEIGHT
+    min_rect_w = 1.5
+    height = len(kept) * row_h + 44
+
+    parts = [
+        f'<svg viewBox="0 0 {INDEX_DIST_SVG_WIDTH} {height}" '
+        f'class="tc-idx-svg" style="max-width:100%;height:auto;" '
+        f'data-active-trc="">'
+    ]
+    for i, (sid, length) in enumerate(kept):
+        y = i * row_h + 4
+        label = sid if len(sid) <= 22 else sid[:20] + "…"
+        parts.append(
+            f'<text x="4" y="{y + bar_h * 0.85:.0f}" font-size="11" '
+            f'fill="currentColor">{esc(label)}</text>')
+        parts.append(
+            f'<text x="{label_w - 6}" y="{y + bar_h * 0.85:.0f}" '
+            f'font-size="10" text-anchor="end" fill="currentColor" '
+            f'opacity="0.55">{fmt_bp(length)}</text>')
+        contig_px = (length / max_len) * bar_w
+        parts.append(
+            f'<rect x="{label_w}" y="{y}" width="{contig_px:.2f}" '
+            f'height="{bar_h}" fill="#e9e9e9" stroke="none"/>')
+        # Draw TRAs ordered by ascending length so the small ones land
+        # on top and stay clickable on dense regions.
+        items = sorted(by_seqid.get(sid, []),
+                       key=lambda it: -(it[2]["end"] - it[2]["start"]))
+        for trc_id, sf_color, a in items:
+            x = label_w + (a["start"] / max_len) * bar_w
+            w = max(min_rect_w,
+                    ((a["end"] - a["start"]) / max_len) * bar_w)
+            title = (f'{trc_id} · {esc(sid)}:{a["start"]:,}-{a["end"]:,} '
+                     f'· {fmt_bp(a["end"] - a["start"])}')
+            parts.append(
+                f'<rect class="tc-idx-tra" x="{x:.2f}" y="{y:.1f}" '
+                f'width="{w:.2f}" height="{bar_h}" '
+                f'data-trc="{esc(trc_id)}" '
+                f'style="--sf:{sf_color}" '
+                f'data-title="{title}"><title>{title}</title></rect>')
+    # Scale bar across the bottom.
+    scale_y = len(kept) * row_h + 16
+    parts.append(
+        f'<line x1="{label_w}" y1="{scale_y}" x2="{label_w + bar_w}" '
+        f'y2="{scale_y}" stroke="#888" stroke-width="0.5"/>')
+    parts.append(
+        f'<text x="{label_w}" y="{scale_y + 13}" font-size="10" '
+        f'fill="currentColor">0</text>')
+    parts.append(
+        f'<text x="{label_w + bar_w}" y="{scale_y + 13}" font-size="10" '
+        f'text-anchor="end" fill="currentColor">{fmt_bp(max_len)}</text>')
+    parts.append("</svg>")
+    svg_html = "\n".join(parts)
+
+    # Sidebar: TRCs ordered by total coverage desc (= TRC numbering).
+    # Each item carries its data-trc + sf colour swatch.
+    up = ctx["up"]
+    sf_label = {sf["id"]: sf for sf in model.get("superfamilies", [])}
+    trc_items = []
+    for t in sorted(trcs, key=lambda t: -(t.get("total_size") or 0)):
+        n_tra = len(t.get("arrays") or [])
+        if not n_tra:
+            continue
+        sf = t.get("superfamily")
+        sf_html = (f'<span class="tc-idx-sf-chip" '
+                   f'style="background:{sfcol[sf]}"></span>'
+                   if sf else
+                   '<span class="tc-idx-sf-chip tc-idx-sf-chip-empty"></span>')
+        cov = fmt_bp(t.get("total_size") or 0)
+        trc_items.append(
+            f'<li class="tc-idx-trc-item" data-trc="{esc(t["id"])}" '
+            f'title="{esc(t["id"])} · {n_tra} TRA · {cov}">'
+            f'{sf_html}'
+            f'<a class="tc-idx-trc-link" '
+            f'href="{up}trc/{esc(t["id"])}.html">{esc(t["id"])}</a>'
+            f'<span class="tc-idx-trc-meta">{n_tra}&nbsp;TRA · {cov}</span>'
+            f'</li>')
+
+    hidden_note = (f' <span class="tc-idx-hidden-note">'
+                   f'{n_hidden} scaffold(s) &lt; '
+                   f'{fmt_bp(INDEX_DIST_MIN_CONTIG)} hidden</span>'
+                   if n_hidden else '')
+    capped_note = (f' <span class="tc-idx-hidden-note">'
+                   f'showing {INDEX_DIST_MAX_CONTIGS} longest contigs</span>'
+                   if len(kept) == INDEX_DIST_MAX_CONTIGS else '')
+
+    return f"""
+    <section class="tc-idx-dist-wrap">
+      <h2>TRC distribution across the assembly</h2>
+      <p style="font-size:12px;color:var(--fg-muted);margin:4px 0 10px;">
+        Each tick is a tandem-repeat array (TRA). Click a TRC on the
+        left to highlight just its arrays — others fade. Click the
+        active TRC again, or the <em>Show all</em> button, to reset.
+        Contigs shorter than {fmt_bp(INDEX_DIST_MIN_CONTIG)} are
+        hidden.{hidden_note}{capped_note}
+      </p>
+      <div class="tc-idx-dist">
+        <aside class="tc-idx-sidebar">
+          <div class="tc-idx-sidebar-head">
+            <input type="search" class="tc-idx-trc-search"
+                   placeholder="Filter TRCs…" aria-label="Filter TRCs">
+            <button type="button" class="tc-btn tc-idx-trc-reset"
+                    title="Clear selection">Show all</button>
+          </div>
+          <ul class="tc-idx-trc-list">
+            {"".join(trc_items)}
+          </ul>
+        </aside>
+        <div class="tc-idx-plot">{svg_html}</div>
+      </div>
+    </section>"""
+
+
 def render_cluster_overview(model, ctx):
     """Interactive (hover + click) bubble chart summarising the whole run:
     x = median per-array KITE monomer size (log bp), y = TRC coverage
@@ -1462,7 +1658,7 @@ def render_cluster_overview(model, ctx):
     # Points — larger dots first so small ones stay clickable on top.
     for p in sorted(pts, key=lambda p: -p["n"]):
         cx, cy, r = xf(p["x"]), yf(p["y"]), radius(p["n"])
-        fill = sfcol.get(p["sf"], "#bbbbbb")
+        fill = sfcol.get(p["sf"], "#8a8a8a")
         sf_line = (f'<br>superfamily: SF {esc(p["sf"])}' if p["sf"]
                    else '<br>superfamily: unassigned')
         cls_line = f'<br>class: {esc(class_label(p["cls"]))}' if p["cls"] else ''
@@ -1487,7 +1683,7 @@ def render_cluster_overview(model, ctx):
         f'<span class="tc-size-ref"><svg width="{2*radius(n)+2:.0f}" '
         f'height="{2*radius(n)+2:.0f}" style="vertical-align:middle">'
         f'<circle cx="{radius(n)+1:.1f}" cy="{radius(n)+1:.1f}" r="{radius(n):.1f}" '
-        f'class="tc-point" fill="#bbbbbb"/></svg> {n}</span>'
+        f'class="tc-point" fill="#8a8a8a"/></svg> {n}</span>'
         for n in size_refs)
     sf_present = sorted({p["sf"] for p in pts if p["sf"]})
     sf_swatches = "".join(
@@ -1495,7 +1691,7 @@ def render_cluster_overview(model, ctx):
         f'style="background:{sfcol[s]}"></span>SF {esc(s)}</span>'
         for s in sf_present)
     sf_legend = (f'<span class="tc-sf-leg"><span class="tc-sf-swatch" '
-                 f'style="background:#bbbbbb"></span>unassigned</span>{sf_swatches}')
+                 f'style="background:#8a8a8a"></span>unassigned</span>{sf_swatches}')
 
     excl = (f' {n_excluded} TRC(s) without a KITE monomer estimate '
             f'(e.g. below the TAREAN size threshold) are not shown.'
@@ -1528,64 +1724,117 @@ def render_index(model, out_path, run_meta, ctx):
         if k in settings:
             rows_settings.append(
                 f'<dt>{esc(k)}</dt><dd>{esc(settings[k])}</dd>')
-    rows_stats = [
-        ("Number of TRCs",                   stats.get("n_trcs_total")),
-        ("TRCs above threshold",             stats.get("n_trcs_above_threshold")),
-        ("Number of SSRs in TRCs",           stats.get("n_ssrs")),
-        ("Total length of TRCs",             fmt_bp(stats.get("total_tr_length"))),
-        ("Number of TRAs",                   stats.get("n_tras")),
-        ("Input sequence length",            fmt_bp(stats.get("input_sequence_length"))),
-    ]
-    stats_html = "".join(
-        f'<dt>{esc(label)}</dt><dd>{esc(val) if val != "" else ""}</dd>'
-        for label, val in rows_stats)
     n_tarean    = sum(1 for t in model["trcs"] if t["tarean"])
     n_sf_peers  = sum(1 for t in model["trcs"] if t["superfamily"])
     up = ctx["up"]
-    # Structural roll-up: v0.12 counters (founder/subrepeat/SSR/fallback)
-    # replace the old combined_class mix; legacy dirs keep the class line.
-    if model.get("is_v012"):
-        n_hor     = sum(1 for t in model["trcs"] for a in t["arrays"]
-                        if (a.get("multiplicity") or 1) > 1)
-        n_subrep  = sum(1 for t in model["trcs"] for a in t["arrays"]
-                        if a.get("subrepeat_1_tier"))
-        n_ssr_arr = sum(1 for t in model["trcs"] for a in t["arrays"]
-                        if (a.get("ssr_dominant_motif") or "NA") != "NA")
-        n_fb      = sum(1 for t in model["trcs"] for a in t["arrays"]
-                        if a.get("founder_fallback"))
-        struct_html = (
-            f'<dt>HOR arrays (×k≥2)</dt><dd>{n_hor}</dd>'
-            f'<dt>Subrepeat arrays</dt><dd>{n_subrep}</dd>'
-            f'<dt>SSR arrays</dt><dd>{n_ssr_arr}</dd>'
-            + (f'<dt>Fallback founder</dt><dd>{n_fb}</dd>' if n_fb else ''))
+    is_v012 = bool(model.get("is_v012"))
+
+    # Per-array aggregates: counts + SSR motif tally weighted by bp.
+    # Fallback-founder count is intentionally not surfaced here (see TRC card).
+    n_hor = n_subrep = n_ssr_signal = n_ssr_dom = 0
+    ssr_bp = Counter()
+    total_ssr_bp = 0
+    for t in model["trcs"]:
+        for a in t["arrays"]:
+            if (a.get("multiplicity") or 1) > 1:
+                n_hor += 1
+            if a.get("subrepeat_1_tier"):
+                n_subrep += 1
+            motif = (a.get("ssr_dominant_motif") or "").strip()
+            pct   = a.get("ssr_total_coverage_pct") or 0
+            if motif and motif != "NA":
+                n_ssr_signal += 1
+                alen = (a.get("array_length")
+                        or (a.get("end") or 0) - (a.get("start") or 0))
+                bp = int((alen or 0) * float(pct) / 100.0)
+                ssr_bp[motif]  += bp
+                total_ssr_bp   += bp
+                if float(pct) >= 50.0:
+                    n_ssr_dom += 1
+    top_ssr = ssr_bp.most_common(3)
+    # Wrap each motif so the _kv helper's "contains <" detection skips
+    # escaping (otherwise &nbsp; entities would be double-encoded).
+    top_ssr_html = (", ".join(
+        f'<span class="tc-ssr-motif">{esc(m)}&nbsp;({fmt_bp(bp)})</span>'
+        for m, bp in top_ssr) if top_ssr else "")
+
+    # ------------------------------------------------------------------
+    # RUN SUMMARY — sectioned: Input / Clusters / Arrays. REPORTS tile
+    # was dropped (its rows are folded in here or reachable from the
+    # bubble chart / per-tab links). Fallback-founder line removed by
+    # request; per-TRC card still flags it inline.
+    # ------------------------------------------------------------------
+    def _kv(rows):
+        # Each row: (label, ready-to-render html or plain value). Plain
+        # values are esc()'d; explicit HTML strings (links, motifs) pass
+        # through. None / "" rows are skipped.
+        out = []
+        for label, val in rows:
+            if val in (None, ""):
+                continue
+            html = val if (isinstance(val, str) and "<" in val) else esc(val)
+            out.append(f'<dt>{esc(label)}</dt><dd>{html}</dd>')
+        return "".join(out)
+
+    input_rows = [
+        ("sequence length", fmt_bp(stats.get("input_sequence_length"))),
+    ]
+    cluster_rows = [
+        ("total",                  stats.get("n_trcs_total")),
+        ("above length threshold", stats.get("n_trcs_above_threshold")),
+        ("with TAREAN consensus",
+            f'<a href="{up}tarean.html">{n_tarean}</a>'),
+        ("total length",           fmt_bp(stats.get("total_tr_length"))),
+        ("superfamilies",
+            f'<a href="{up}superfamilies.html">{len(model["superfamilies"])}</a>'
+            f' ({n_sf_peers} TRCs grouped)'),
+    ]
+    array_rows = [("total (KITE-analysed)", stats.get("n_tras"))]
+    if is_v012:
+        array_rows += [
+            ("HOR (×k≥2)",           n_hor),
+            ("with subrepeat",       n_subrep),
+            ("with SSR signal",      n_ssr_signal),
+            ("SSR-dominant (≥50 %)", n_ssr_dom),
+        ]
     else:
+        # Legacy roll-up for pre-v0.12 dirs.
         cls_total = class_totals(model)
-        n_hor_arrays = cls_total.get("hor", 0)
-        struct_html = (
-            f'<dt>HOR arrays</dt>     <dd>{class_badge("hor")} {n_hor_arrays}</dd>'
-            f'<dt>Array classes</dt>  <dd>{class_mix_cell(cls_total)}</dd>')
+        array_rows += [
+            ("HOR arrays",
+                f'{class_badge("hor")} {cls_total.get("hor", 0)}'),
+            ("array classes", class_mix_cell(cls_total)),
+        ]
+    if total_ssr_bp:
+        array_rows += [
+            ("SSR total length", fmt_bp(total_ssr_bp)),
+            ("top SSR motifs",   top_ssr_html),
+        ]
+
+    run_summary_body = (
+        f'<div class="tc-kv-section">Input</div>'
+        f'<dl class="tc-kv">{_kv(input_rows)}</dl>'
+        f'<div class="tc-kv-section">Clusters (TRC)</div>'
+        f'<dl class="tc-kv">{_kv(cluster_rows)}</dl>'
+        f'<div class="tc-kv-section">Arrays (TRA)</div>'
+        f'<dl class="tc-kv">{_kv(array_rows)}</dl>')
+
     cards = f"""
-    <section class="tc-cards">
+    <section class="tc-cards tc-cards-2">
       <div class="tc-card"><div class="tc-card-title">Run summary</div>
-        <dl class="tc-kv">{stats_html}</dl></div>
-      <div class="tc-card"><div class="tc-card-title">Reports</div>
-        <dl class="tc-kv">
-          <dt>TRCs total</dt>     <dd><a href="{up}tarean.html">{len(model["trcs"])}</a></dd>
-          <dt>TAREAN-analysed</dt><dd><a href="{up}tarean.html">{n_tarean}</a></dd>
-          {struct_html}
-          <dt>Superfamilies</dt>  <dd><a href="{up}superfamilies.html">{len(model["superfamilies"])}</a>,
-                                      {n_sf_peers} TRCs grouped</dd>
-        </dl></div>
+        {run_summary_body}</div>
       <div class="tc-card"><div class="tc-card-title">Run settings</div>
         <dl class="tc-kv">{"".join(rows_settings)}</dl></div>
     </section>"""
     overview_html = load_section("overview")
     credits_html  = load_section("credits")
     cluster_chart = render_cluster_overview(model, ctx)
+    distribution_chart = render_index_distribution(model, ctx)
     main = f"""
     <h1>TideCluster report — {esc(model["meta"]["prefix"])}</h1>
     {cards}
     {cluster_chart}
+    {distribution_chart}
     <section class="tc-prose">{overview_html}</section>
     <hr style="margin:28px 0; border:0; border-top:1px solid var(--border);">
     <section class="tc-prose">{credits_html}</section>

@@ -92,7 +92,7 @@
   // scatter circles. Elements opt in via class + a data-title attribute;
   // data-html="1" means data-title is HTML (used by the scatter points
   // for a multi-line tooltip), otherwise it is plain text.
-  var TOOLTIP_SEL = 'rect.tc-tra, circle.tc-point';
+  var TOOLTIP_SEL = 'rect.tc-tra, rect.tc-idx-tra, circle.tc-point';
   function initTraTooltip() {
     var tip = null;
     document.addEventListener('mouseover', function (ev) {
@@ -185,11 +185,76 @@
     });
   }
 
+  // ---------- index page: TRC distribution selector ---------------------
+  // The cross-TRC ideogram on the index page lets the reader pick one
+  // TRC from the left-side list to highlight just its arrays on the
+  // chromosome bars. Default state shows every TRA in muted grey.
+  //
+  // - Click a TRC item        → make it active (others fade via CSS).
+  // - Click the active item   → clear (back to "show all").
+  // - "Show all" button       → same as clicking the active item.
+  // - Search input            → live-filter the TRC list by substring.
+  // - The TRC name itself is a <a href> link to the TRC dashboard; we
+  //   keep that link working — clicks on the link area navigate, clicks
+  //   on the surrounding row toggle the highlight.
+  function initIndexDistribution() {
+    var dist = document.querySelector('.tc-idx-dist');
+    if (!dist) return;
+    var svg = dist.querySelector('.tc-idx-svg');
+    var list = dist.querySelector('.tc-idx-trc-list');
+    var search = dist.querySelector('.tc-idx-trc-search');
+    var reset = dist.querySelector('.tc-idx-trc-reset');
+    if (!svg || !list) return;
+
+    function applyActive(trcId) {
+      svg.setAttribute('data-active-trc', trcId || '');
+      // Toggle `.tc-idx-active` on every TRA rect so the per-rect --sf
+      // CSS variable can take effect on the matching ones only.
+      var rects = svg.querySelectorAll('rect.tc-idx-tra');
+      rects.forEach(function (r) {
+        if (trcId && r.getAttribute('data-trc') === trcId) {
+          r.classList.add('tc-idx-active');
+        } else {
+          r.classList.remove('tc-idx-active');
+        }
+      });
+      // Highlight the corresponding sidebar row.
+      list.querySelectorAll('.tc-idx-trc-item').forEach(function (li) {
+        li.classList.toggle('tc-idx-trc-active',
+          !!trcId && li.getAttribute('data-trc') === trcId);
+      });
+    }
+
+    list.addEventListener('click', function (ev) {
+      // Let real link clicks navigate.
+      if (ev.target.closest('a.tc-idx-trc-link')) return;
+      var item = ev.target.closest('.tc-idx-trc-item');
+      if (!item) return;
+      var trcId = item.getAttribute('data-trc');
+      var current = svg.getAttribute('data-active-trc') || '';
+      applyActive(current === trcId ? '' : trcId);
+    });
+
+    if (reset) {
+      reset.addEventListener('click', function () { applyActive(''); });
+    }
+    if (search) {
+      search.addEventListener('input', function () {
+        var q = search.value.trim().toLowerCase();
+        list.querySelectorAll('.tc-idx-trc-item').forEach(function (li) {
+          var id = (li.getAttribute('data-trc') || '').toLowerCase();
+          li.classList.toggle('tc-idx-trc-hidden', !!q && id.indexOf(q) === -1);
+        });
+      });
+    }
+  }
+
   ready(function () {
     initDataTables();
     initConsensusTools();
     initTrcJumper();
     initTraTooltip();
     initDetailsExpand();
+    initIndexDistribution();
   });
 })();

@@ -171,9 +171,23 @@ h3 { font-size: 15px; margin: 16px 0 8px; }
   color: var(--fg-muted);
   margin-bottom: 8px;
 }
-.tc-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13px; }
+.tc-kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13px; margin: 0; }
 .tc-kv dt { color: var(--fg-muted); }
 .tc-kv dd { margin: 0; font-family: var(--font-mono); font-size: 12px; }
+/* Subsection header inside a tc-card holding several tc-kv lists. */
+.tc-kv-section {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--fg-muted);
+  margin: 10px 0 4px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--border);
+}
+.tc-kv-section:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+/* When the cards row holds just two cards (index page after the
+   REPORTS tile was removed), give each a bit more breathing room. */
+.tc-cards-2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
 
 /* ======== tables ======== */
 
@@ -229,7 +243,10 @@ table.tc-table img            { max-width: none; }
 .hor-cnt-weak   { background: var(--hor-cnt-weak-bg);   display: block; text-align: center; padding: 2px 8px; }
 .hor-cnt-none   { background: var(--hor-cnt-none-bg);   display: block; text-align: center; padding: 2px 8px; }
 
-/* ======== kitehor combined_class badges + count pills ======== */
+/* ======== kitehor combined_class badges + count pills (legacy) ========
+   Only rendered for pre-v0.12 report dirs that still carry the
+   combined_class column. v0.12 reports surface HOR / subrep / SSR as
+   per-array signals instead and don't trigger these styles. */
 
 .class-badge {
   display: inline-block;
@@ -516,6 +533,122 @@ tr.tc-details-open .tc-details-control::before {
 .tc-mini-svg rect.tc-tra { cursor: pointer; }
 .tc-ideogram-svg rect.tc-tra:hover,
 .tc-mini-svg rect.tc-tra:hover { filter: brightness(1.1); }
+
+/* ======== index-page TRC distribution plot ========
+   Cross-TRC ideogram with a left-side TRC selector. Default: every
+   array drawn in muted grey. Active TRC (set by JS via data-active-trc
+   on the svg) gets its superfamily colour from a per-rect --sf CSS
+   var; the rest fade. */
+.tc-idx-dist-wrap { margin: 20px 0 8px; }
+.tc-idx-dist {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.tc-idx-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-height: 540px;
+  border-right: 1px solid var(--border);
+  padding-right: 8px;
+}
+.tc-idx-sidebar-head {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.tc-idx-trc-search {
+  flex: 1;
+  min-width: 0;
+  font: 12px var(--font);
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: var(--card);
+  color: var(--fg);
+}
+.tc-idx-trc-reset {
+  font-size: 11px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+.tc-idx-trc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+  font-size: 12px;
+}
+.tc-idx-trc-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: none;
+}
+.tc-idx-trc-item:hover           { background: rgba(0, 0, 0, 0.04); }
+.tc-idx-trc-item.tc-idx-trc-active {
+  background: rgba(46, 139, 46, 0.10);
+  font-weight: 600;
+}
+.tc-idx-trc-item.tc-idx-trc-hidden { display: none; }
+.tc-idx-sf-chip {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.tc-idx-sf-chip-empty {
+  background: transparent;
+  border: 1px dashed var(--fg-muted);
+}
+.tc-idx-trc-link {
+  color: var(--fg);
+  text-decoration: none;
+  flex: 0 0 auto;
+}
+.tc-idx-trc-item:hover .tc-idx-trc-link { text-decoration: underline; }
+.tc-idx-trc-meta {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-muted);
+  flex-shrink: 0;
+}
+.tc-idx-plot { min-width: 0; overflow-x: auto; }
+.tc-idx-svg text { font-family: var(--font); }
+/* Default: every TRA muted grey, slightly transparent. */
+.tc-idx-svg rect.tc-idx-tra {
+  fill: #888;
+  opacity: 0.55;
+  cursor: pointer;
+}
+.tc-idx-svg rect.tc-idx-tra:hover { opacity: 0.9; }
+/* Filter active: non-selected TRAs keep the default grey so the
+   ideogram's overall density stays readable; selected TRAs switch to
+   a saturated red with a thin dark outline so they pop against the
+   greys. (The per-rect --sf variable is preserved for future use but
+   not consumed here.) */
+.tc-idx-svg[data-active-trc]:not([data-active-trc=""])
+  rect.tc-idx-tra.tc-idx-active {
+  fill: #d62728;
+  opacity: 1;
+  stroke: rgba(0, 0, 0, 0.65);
+  stroke-width: 0.6;
+}
+.tc-idx-hidden-note {
+  margin-left: 8px;
+  font-style: italic;
+}
 
 /* ======== floating tooltip for TRA rectangles ======== */
 .tc-tooltip {
