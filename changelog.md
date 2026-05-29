@@ -1,3 +1,20 @@
+## 1.10.2 (2026-05-29)
+- Fix conda packaging: `kitehor=0.12.0` was missing from
+  `conda/tidecluster/meta.yaml`'s `requirements.run`, so
+  `mamba install tidecluster` did not pull it in. Users had to
+  install kitehor manually for the kite step to work. Root cause:
+  `meta.yaml` is hand-maintained and drifted from `conda-deps.txt`
+  when the kitehor integration landed in 1.10.0.
+- Add a drift-check helper `tests/check_conda_recipe_deps.py` that
+  asserts every package in `conda-deps.txt` is also present in the
+  recipe's `requirements.run`. Wired into `tests/smoke.sh` so future
+  drift is caught on every push/PR.
+- `tests/smoke.sh` now also calls `kitehor --version` so a missing
+  KITE backend on PATH fails the source-tree smoke gate.
+- `conda/tidecluster/meta.yaml` `test.commands` adds
+  `kitehor --version` so conda-build's post-install test phase also
+  catches a missing kitehor at tag time.
+
 ## 1.10.1 (2026-05-29)
 - Fix Python 3.11 incompatibility in the report v2 builder: a
   backslash inside an f-string expression part (per-array Details

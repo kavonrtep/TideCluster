@@ -22,6 +22,14 @@ echo "=== CLI --version / --help ==="
 "$ROOT/tc_comparative_analysis.R" --help > /dev/null
 "$ROOT/tc_summarize_comparative_analysis.R" --help > /dev/null
 "$ROOT/tc_per_tra_consensus.py" --help > /dev/null
+# KITE backend reachable on PATH (catches the 1.10.1 packaging slip
+# where kitehor was missing from the conda recipe's requirements.run).
+kitehor --version > /dev/null || {
+  echo "FAIL: kitehor not on PATH"; exit 1; }
+
+echo
+echo "=== conda recipe ↔ conda-deps.txt drift check ==="
+python3 "$ROOT/tests/check_conda_recipe_deps.py"
 
 echo
 echo "=== tidehunter on smoke fasta ==="
