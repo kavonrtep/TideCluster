@@ -79,6 +79,7 @@ From: condaforge/miniforge3:latest
 channels:
   - conda-forge
   - bioconda
+  - petrnovak
 channel_priority: flexible
 EOF
     export CONDARC=/opt/conda/config/.condarc
@@ -99,7 +100,7 @@ EOF
     # at the top of this def for why.
     echo "=== Installing runtime dependencies ==="
     /opt/conda/bin/mamba install -y -n base \
-        -c conda-forge -c bioconda \
+        -c conda-forge -c bioconda -c petrnovak \
         --file /opt/tidecluster/conda-deps.txt
 
     # Verify bioconductor-genomeinfodbdata installed cleanly. Its
@@ -129,6 +130,7 @@ EOF
         tc_reannotate.py \
         tc_merge_annotations.py \
         tc_per_tra_consensus.py \
+        tc_rerender_report.py \
         tc_utils.py \
         tc_comparative_analysis.R \
         tc_summarize_comparative_analysis.R; do

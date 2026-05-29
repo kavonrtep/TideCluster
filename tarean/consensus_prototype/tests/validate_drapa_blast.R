@@ -177,6 +177,21 @@ merge_intervals <- function(starts, ends) {
 kite <- read.table(opt$`kite-tsv`, header = TRUE, sep = "\t",
                    stringsAsFactors = FALSE, check.names = FALSE, quote = "",
                    comment.char = "")
+# Accept both CSV schemas. kitehor (TideCluster >=1.10) emits lowercase
+# `hor_*` column names; the legacy R kite.R emitted capitalised `HOR_*`.
+# The rest of this script was written for the capitalised names, so we
+# alias the new lowercase columns up when the old ones are absent.
+.kite_aliases <- list(
+  c("hor_status",       "HOR_status"),
+  c("hor_confidence",   "HOR_confidence"),
+  c("hor_founder",      "HOR_base_monomer"),
+  c("hor_tile",         "HOR_hor_period"),
+  c("hor_multiplicity", "HOR_n_harmonics"))
+for (.pair in .kite_aliases) {
+  if (.pair[1] %in% colnames(kite) && !(.pair[2] %in% colnames(kite))) {
+    kite[[.pair[2]]] <- kite[[.pair[1]]]
+  }
+}
 kite_key <- sprintf("%s__%s__%d-%d", kite$TRC_ID, kite$seqid,
                     kite$start, kite$end)
 kite_idx <- setNames(seq_len(nrow(kite)), kite_key)

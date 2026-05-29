@@ -24,3 +24,5 @@ r-jsonlite
 r-reshape2
 mafft
 bedtools
+# Requires `-c petrnovak` in addition to conda-forge + bioconda.
+kitehor=0.12.0

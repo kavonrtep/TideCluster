@@ -45,9 +45,10 @@ link at the top-right of the navigation bar.
   Higher-order repeat relationships are included but are not the
   only source of superfamily membership.
 - **HOR (Higher-Order Repeat)** — a tandem repeat whose repeating
-  unit is itself a block of several basic monomers. Classified per
-  TRA on a continuous confidence score; see
-  `docs/hor_classification.md` for the formula.
+  unit is itself a block of several basic monomers. The per-TRA
+  Founder period is the base monomer; the Strongest period is the
+  best-supported periodic signal; **×k = round(Strongest / Founder)**
+  is reported per array and an array is called HOR when ×k ≥ 2.
 - **Monomer** — the basic repeating unit of a tandem repeat. Its
   length in bp is the monomer size.
 

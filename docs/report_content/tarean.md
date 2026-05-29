@@ -11,15 +11,19 @@ the highest-scoring variant.
 
 The table shows one row per TRC (family). Key columns:
 
+- **Type** — `TR` for tandem repeat clusters, `SSR` for clusters whose
+  monomer is a simple sequence repeat.
 - **Monomer (TAREAN)** — primary TAREAN consensus length in bp.
 - **Score (TAREAN)** — *k*-mer coverage score of the chosen
   consensus. Higher values indicate a tighter consensus.
 - **Array sizes (min / med / max)** — length range of the TRAs in
   this family, in bp.
-- **HOR (strong / mod / weak / none)** — four tinted cells counting
-  how many arrays of this family fall in each HOR confidence bin.
 - **Graph / Logo** — thumbnails; click for the full image. Both are
   produced by TAREAN for the primary consensus variant.
 
-For SSR-type TRCs and TRCs below the length threshold only the
-cluster statistics are reported; TAREAN is not run on them.
+For SSR-type TRCs and TRCs below the length threshold the TAREAN
+columns (Monomer, Score, Graph, Logo, Consensus) are empty;
+cluster statistics still show.
+
+Per-array HOR / subrepeat / SSR signals (formerly summarised here)
+now live on each TRC's dashboard, reachable by clicking the TRC id.

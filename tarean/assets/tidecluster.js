@@ -88,15 +88,21 @@
     document.body.appendChild(t);
     return t;
   }
+  // Shared by the TRA ideogram rectangles and the cluster-overview
+  // scatter circles. Elements opt in via class + a data-title attribute;
+  // data-html="1" means data-title is HTML (used by the scatter points
+  // for a multi-line tooltip), otherwise it is plain text.
+  var TOOLTIP_SEL = 'rect.tc-tra, rect.tc-idx-tra, circle.tc-point';
   function initTraTooltip() {
     var tip = null;
     document.addEventListener('mouseover', function (ev) {
-      var r = ev.target.closest('rect.tc-tra');
+      var r = ev.target.closest(TOOLTIP_SEL);
       if (!r) return;
       var text = r.getAttribute('data-title');
       if (!text) return;
       tip = tip || ensureTooltip();
-      tip.textContent = text;
+      if (r.getAttribute('data-html')) tip.innerHTML = text;
+      else tip.textContent = text;
       tip.classList.add('tc-tooltip-visible');
     });
     document.addEventListener('mousemove', function (ev) {
@@ -109,12 +115,12 @@
       tip.style.top  = y + 'px';
     });
     document.addEventListener('mouseout', function (ev) {
-      var r = ev.target.closest('rect.tc-tra');
+      var r = ev.target.closest(TOOLTIP_SEL);
       if (!r || !tip) return;
-      // Only hide when we truly leave the rect; related target check
-      // avoids flicker when moving between adjacent rectangles.
+      // Only hide when we truly leave the element; related target check
+      // avoids flicker when moving between adjacent shapes.
       if (ev.relatedTarget && ev.relatedTarget.closest &&
-          ev.relatedTarget.closest('rect.tc-tra')) return;
+          ev.relatedTarget.closest(TOOLTIP_SEL)) return;
       tip.classList.remove('tc-tooltip-visible');
     });
   }
@@ -125,10 +131,130 @@
     else { document.addEventListener('DOMContentLoaded', fn); }
   }
 
+  // ---------- per-array Details child row (DataTables row.child) ------------
+  // The arrays table on each TRC dashboard carries a `data-details`
+  // attribute per <tr> holding the HTML for the diagnostics panel. A
+  // click on the leading `.tc-details-control` cell toggles a child row
+  // via DataTables' row().child() API. Falls back to inserting a sibling
+  // <tr> when the table isn't a DataTable (legacy / static pages).
+  function initDetailsExpand() {
+    document.addEventListener('click', function (ev) {
+      var ctrl = ev.target.closest('.tc-details-control');
+      if (!ctrl || ctrl.classList.contains('tc-details-control-static')) return;
+      ev.preventDefault();
+      var tr = ctrl.closest('tr');
+      if (!tr) return;
+      var html = tr.getAttribute('data-details');
+      if (!html) return;
+      // Try the DataTables path first.
+      if (window.jQuery) {
+        var $tr = jQuery(tr);
+        var $table = $tr.closest('table.tc-datatable');
+        if ($table.length && jQuery.fn.DataTable.isDataTable($table[0])) {
+          var dt = $table.DataTable();
+          var row = dt.row($tr);
+          if (row.child.isShown()) {
+            row.child.hide();
+            tr.classList.remove('tc-details-open');
+            ctrl.classList.remove('open');
+          } else {
+            row.child(html, 'tc-details-row').show();
+            tr.classList.add('tc-details-open');
+            ctrl.classList.add('open');
+          }
+          return;
+        }
+      }
+      // Fallback: toggle a sibling <tr>.
+      var next = tr.nextElementSibling;
+      if (next && next.classList.contains('tc-details-row')) {
+        next.parentNode.removeChild(next);
+        tr.classList.remove('tc-details-open');
+        ctrl.classList.remove('open');
+      } else {
+        var nrow = document.createElement('tr');
+        nrow.className = 'tc-details-row';
+        var nc = document.createElement('td');
+        nc.colSpan = tr.children.length;
+        nc.innerHTML = html;
+        nrow.appendChild(nc);
+        tr.parentNode.insertBefore(nrow, tr.nextSibling);
+        tr.classList.add('tc-details-open');
+        ctrl.classList.add('open');
+      }
+    });
+  }
+
+  // ---------- index page: TRC distribution selector ---------------------
+  // The cross-TRC ideogram on the index page lets the reader pick one
+  // TRC from the left-side list to highlight just its arrays on the
+  // chromosome bars. Default state shows every TRA in muted grey.
+  //
+  // - Click a TRC item        → make it active (others fade via CSS).
+  // - Click the active item   → clear (back to "show all").
+  // - "Show all" button       → same as clicking the active item.
+  // - Search input            → live-filter the TRC list by substring.
+  // - The TRC name itself is a <a href> link to the TRC dashboard; we
+  //   keep that link working — clicks on the link area navigate, clicks
+  //   on the surrounding row toggle the highlight.
+  function initIndexDistribution() {
+    var dist = document.querySelector('.tc-idx-dist');
+    if (!dist) return;
+    var svg = dist.querySelector('.tc-idx-svg');
+    var list = dist.querySelector('.tc-idx-trc-list');
+    var search = dist.querySelector('.tc-idx-trc-search');
+    var reset = dist.querySelector('.tc-idx-trc-reset');
+    if (!svg || !list) return;
+
+    function applyActive(trcId) {
+      svg.setAttribute('data-active-trc', trcId || '');
+      // Toggle `.tc-idx-active` on every TRA rect so the per-rect --sf
+      // CSS variable can take effect on the matching ones only.
+      var rects = svg.querySelectorAll('rect.tc-idx-tra');
+      rects.forEach(function (r) {
+        if (trcId && r.getAttribute('data-trc') === trcId) {
+          r.classList.add('tc-idx-active');
+        } else {
+          r.classList.remove('tc-idx-active');
+        }
+      });
+      // Highlight the corresponding sidebar row.
+      list.querySelectorAll('.tc-idx-trc-item').forEach(function (li) {
+        li.classList.toggle('tc-idx-trc-active',
+          !!trcId && li.getAttribute('data-trc') === trcId);
+      });
+    }
+
+    list.addEventListener('click', function (ev) {
+      // Let real link clicks navigate.
+      if (ev.target.closest('a.tc-idx-trc-link')) return;
+      var item = ev.target.closest('.tc-idx-trc-item');
+      if (!item) return;
+      var trcId = item.getAttribute('data-trc');
+      var current = svg.getAttribute('data-active-trc') || '';
+      applyActive(current === trcId ? '' : trcId);
+    });
+
+    if (reset) {
+      reset.addEventListener('click', function () { applyActive(''); });
+    }
+    if (search) {
+      search.addEventListener('input', function () {
+        var q = search.value.trim().toLowerCase();
+        list.querySelectorAll('.tc-idx-trc-item').forEach(function (li) {
+          var id = (li.getAttribute('data-trc') || '').toLowerCase();
+          li.classList.toggle('tc-idx-trc-hidden', !!q && id.indexOf(q) === -1);
+        });
+      });
+    }
+  }
+
   ready(function () {
     initDataTables();
     initConsensusTools();
     initTrcJumper();
     initTraTooltip();
+    initDetailsExpand();
+    initIndexDistribution();
   });
 })();

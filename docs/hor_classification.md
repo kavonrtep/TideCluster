@@ -1,5 +1,16 @@
 # HOR classification (KITE)
 
+> **As of TideCluster 1.10.0 the KITE analysis is performed by
+> [kitehor](https://github.com/kavonrtep/kitehor) (Rust).** The
+> sections below describe the legacy R algorithm that powered KITE
+> through version 1.9.x; they are kept for historical context and to
+> document the four-bin `hor_status` taxonomy that the report still
+> uses. kitehor's `hor_verdict` is mapped onto those bins by
+> `tc_utils._kitehor_status`. For the upstream algorithm see kitehor's
+> own documentation, in particular `docs/new/rule_proto_impl_plan.md`.
+> Integration mapping is documented in
+> [`kitehor_integration_plan.md`](kitehor_integration_plan.md).
+
 ## 1. Background
 
 A **higher-order repeat** (HOR) is a tandem repeat in which a block of

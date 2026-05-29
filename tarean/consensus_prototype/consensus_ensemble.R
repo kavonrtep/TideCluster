@@ -242,6 +242,14 @@ result$quality_grade <- ifelse(is.na(cov),                       "D",
 kite <- read.table(opt$`kite-tsv`, header = TRUE, sep = "\t",
                    stringsAsFactors = FALSE, check.names = FALSE,
                    quote = "", comment.char = "")
+# Alias kitehor lowercase columns to the legacy capitalised names this
+# script was written for (see validate_drapa_blast.R for details).
+for (.pair in list(c("hor_status",     "HOR_status"),
+                   c("hor_confidence", "HOR_confidence"))) {
+  if (.pair[1] %in% colnames(kite) && !(.pair[2] %in% colnames(kite))) {
+    kite[[.pair[2]]] <- kite[[.pair[1]]]
+  }
+}
 kite$id <- sprintf("%s__%s__%d-%d", kite$TRC_ID, kite$seqid, kite$start, kite$end)
 result <- merge(result, kite[, c("id","TRC_ID","monomer_size",
                                  "HOR_status","HOR_confidence")],

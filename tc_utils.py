@@ -4,6 +4,7 @@ import gzip
 import itertools
 import os
 import shutil
+import statistics
 import subprocess
 import tempfile
 from collections import OrderedDict
@@ -2019,3 +2020,579 @@ def prepare_fasta_input(fasta_path):
             os.remove(temp_fasta)
 
     return temp_fasta, cleanup
+
+
+# ----------------------------------------------------------------------
+# kitehor IO helpers (replacement for tarean/kite.R)
+# ----------------------------------------------------------------------
+
+def build_kite_multifasta(fasta_dir, out_fa):
+    """Concatenate every TRC_*.fasta in `fasta_dir` into one multi-FASTA
+    suitable for `kitehor analyze`.
+
+    The per-TRC fastas under `{prefix}_tarean/fasta/` store sequences as
+    dimers (sequence concatenated with itself). kitehor expects one TR
+    array per record, so each sequence is halved back to its single-array
+    length. Headers are rewritten to `<TRC>:<original_header>` so the
+    TRC ID survives kitehor's per-record output and `tc_rerender_report`
+    can split it back."""
+    n_records = 0
+    with open(out_fa, "w") as fh_out:
+        for path in sorted(glob.glob(os.path.join(fasta_dir, "TRC_*.fasta"))):
+            trc = os.path.basename(path)[:-len(".fasta")]
+            with open(path) as fh:
+                for hdr, seq in read_single_fasta_as_generator(fh):
+                    half = seq[:len(seq) // 2] if len(seq) >= 2 else seq
+                    if not half:
+                        continue
+                    fh_out.write(f">{trc}:{hdr}\n{half}\n")
+                    n_records += 1
+    return n_records
+
+
+# Map kitehor's finer-grained verdict + confidence onto the legacy
+# 4-bin status string that the report consumes. Thresholds match
+# HOR_BIN_WEAK / MODERATE / STRONG from the removed tarean/kite.R so
+# colours, badges, and per-TRC roll-ups stay comparable across versions.
+_KITE_HOR_BIN_WEAK     = 0.10
+_KITE_HOR_BIN_MODERATE = 0.20
+_KITE_HOR_BIN_STRONG   = 0.40
+
+
+def _kitehor_status(verdict, confidence):
+    if verdict != "hor":
+        return "No HOR"
+    try:
+        c = float(confidence)
+    except (TypeError, ValueError):
+        return "No HOR"
+    if c < _KITE_HOR_BIN_WEAK:     return "No HOR"
+    if c < _KITE_HOR_BIN_MODERATE: return "HOR weak"
+    if c < _KITE_HOR_BIN_STRONG:   return "HOR moderate"
+    return "HOR strong"
+
+
+_FOUNDER_ID_MIN  = 0.7    # rescore --subrepeat-founder-id-min default
+_KMAX            = 30     # rescore --rule-k-max default
+_RATIO_TOL       = 0.05   # how close to integer multiplicity must be
+_SUBREP_RATIO    = 0.33   # period <= founder/3 ⇒ qualifies as candidate band
+
+
+def _classify_subrepeat_tier(peak, founder_period):
+    """Per-peak subrepeat tier, ported from kitehor's decision tree
+    (docs/rule_proto.md). Reads only rescored peak columns:
+       HIGH               period<=founder/4, scan_occ>=0.15,
+                          AND (subrepeat=true OR phaseC>=0.10 OR autoF>=0.4)
+       LIKELY             period<=founder/4, scan_occ>=0.20, scan_n>=10
+       AMBIGUOUS          founder/4 < period <= founder/3 with mild support
+       OBSERVATIONAL      founder is NA but scan_occ >= 0.05
+       REJECT_*           any of the disqualifying rules (phantom,
+                          ratio > 1/3, founder-itself, no tandem run, ...)
+    The report's main 'Subrepeat' cell surfaces HIGH+LIKELY only; the
+    Details panel shows everything that wasn't rejected outright."""
+    def _num(v):
+        if v in (None, "", "NA"): return None
+        try: return float(v)
+        except (TypeError, ValueError): return None
+
+    if peak.get("phantom", "").strip() == "true":
+        return "REJECT_PHANTOM"
+    period = _num(peak.get("period"))
+    if period is None or period <= 0:
+        return "REJECT_BAD"
+    occ    = _num(peak.get("scan_occupancy_frac"))
+    if founder_period is None or founder_period <= 0:
+        # rule 4 — rescore over-flagged, no founder in record
+        if occ is None or occ < 0.05:
+            return "REJECT_NO_FOUNDER"
+        return "OBSERVATIONAL"
+    ratio = period / founder_period
+    idm    = _num(peak.get("identity_med"))
+    covf   = _num(peak.get("coverage_frac"))
+    scan_n = _num(peak.get("scan_n_intervals"))
+    phaseC = _num(peak.get("kmer_phase_contrast"))
+    autoF  = _num(peak.get("kmer_autocorr_founder"))
+    srflag = peak.get("subrepeat", "").strip() == "true"
+    # rule 1d — this peak IS a clean array-wide tandem at its own period
+    if (idm is not None and idm >= 0.85 and
+        covf is not None and covf >= 0.95 and
+        occ  is not None and occ  >= 0.95):
+        return "REJECT_IS_FOUNDER"
+    if ratio > _SUBREP_RATIO:
+        return "REJECT_TOO_LARGE"
+    if ratio <= 0.25:
+        # HIGH: per-base scan confirms tandem AND an independent signal
+        # (rescore subrepeat flag, phaseC, or autoF) agrees.
+        if (occ is not None and occ >= 0.15
+            and (srflag
+                 or (phaseC is not None and phaseC >= 0.10)
+                 or (autoF  is not None and autoF  >= 0.4))):
+            return "HIGH"
+        # LIKELY: per-base scan finds it even without alignment support.
+        if (occ is not None and occ >= 0.20
+            and scan_n is not None and scan_n >= 10):
+            return "LIKELY"
+        # KMER_SUPPORT: scan didn't catch it (e.g. interspersed not
+        # contiguous), but k-mer autocorrelation / phase contrast fires.
+        # Cheat-sheet calls this 'probably real'; we surface it in the
+        # Details panel rather than the main Subrepeat cell.
+        if ((phaseC is not None and phaseC >= 0.10)
+            or (autoF is not None and autoF  >= 0.4)):
+            return "KMER_SUPPORT"
+        return "WEAK"
+    # 0.25 < ratio <= 0.33 — ambiguous band
+    if ((occ is not None and occ >= 0.20)
+        or (phaseC is not None and phaseC >= 0.10)
+        or (autoF  is not None and autoF  >= 0.4)):
+        return "AMBIGUOUS"
+    return "REJECT_AMBIGUOUS_LOW"
+
+
+# Two-pass founder reassignment thresholds (see build_monomer_size_csv).
+_TRC_CONSENSUS_MIN_ARRAYS = 3      # min Pass-1 founders to compute consensus
+_TRC_CONSENSUS_MIN_FRAC   = 0.25   # dominant cluster must hold >= this fraction
+_TRC_CONSENSUS_TOL        = 0.10   # ±10% to belong to the dominant period cluster
+_RESCUE_ID_MIN            = 0.5    # relaxed id_med gate when TRC consensus exists
+_RESCUE_WINDOW_PCT        = 0.10   # ± this fraction of trc_consensus_founder
+_RESCUE_WINDOW_BP_MIN     = 20     # ... or this many bp, whichever is larger
+_RELAXED_RATIO_TOL        = 0.20   # solo-TRA fallback: relaxed k tolerance
+
+# SSR-founder override: when an array is SSR-pure (≥ this fraction of
+# the array length covered by the dominant SSR motif), the kite top
+# peak IS the SSR period — but rescore can't evaluate that period (it's
+# below rescore's min-period) and instead picks a noise peak with high
+# id_med but vanishingly small kite score. The override forces
+# founder = strongest = kite top peak. Threshold chosen from drapa data:
+# the count of override candidates is flat across [70, 99] %, dropping
+# only below 50 %.
+_SSR_OVERRIDE_COVERAGE    = 95.0   # ssr_total_coverage_pct threshold
+_RELAXED_ID_MIN           = 0.7    # solo-TRA fallback: keeps strict id_med gate
+
+
+def _num_or_none(v):
+    if v in (None, "", "NA"):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _trc_consensus_founder(periods):
+    """Median of the largest ±_TRC_CONSENSUS_TOL period cluster across the
+    strict (Pass-1) per-TRA founder assignments in one TRC. Returns
+    (consensus_period, n_supporting) or (None, 0) when the cluster is
+    too small (< _TRC_CONSENSUS_MIN_ARRAYS) or doesn't hold enough of
+    the TRC's reassigned arrays (< _TRC_CONSENSUS_MIN_FRAC)."""
+    if len(periods) < _TRC_CONSENSUS_MIN_ARRAYS:
+        return None, 0
+    best_n, best_members = 0, None
+    for anchor in periods:
+        members = [p for p in periods
+                   if abs(p - anchor) / max(anchor, 1.0) <= _TRC_CONSENSUS_TOL]
+        if len(members) > best_n:
+            best_n, best_members = len(members), members
+    if (best_n < _TRC_CONSENSUS_MIN_ARRAYS
+        or best_n / len(periods) < _TRC_CONSENSUS_MIN_FRAC):
+        return None, 0
+    return statistics.median(best_members), best_n
+
+
+def _rescue_founder_from_trc(peaks, strongest, trc_consensus):
+    """Pass 2 — TRC-aware rescue. Look for a rescored peak whose period
+    is within max(±10%, ±20bp) of the TRC consensus founder, with the
+    relaxed id_med gate (>= 0.5). Returns (peak, period) or None."""
+    if trc_consensus is None or strongest is None:
+        return None
+    window = max(trc_consensus * _RESCUE_WINDOW_PCT, _RESCUE_WINDOW_BP_MIN)
+    candidates = []
+    for p in peaks:
+        P = _num_or_none(p.get("period"))
+        if P is None or P >= strongest:
+            continue
+        if abs(P - trc_consensus) > window:
+            continue
+        idm = _num_or_none(p.get("identity_med"))
+        if idm is None or idm < _RESCUE_ID_MIN:
+            continue
+        candidates.append((abs(P - trc_consensus), P, p))
+    if not candidates:
+        return None
+    candidates.sort()              # closest to consensus wins
+    _, period, peak = candidates[0]
+    return peak, period
+
+
+def _relaxed_individual_founder(peaks, strongest, kmax=_KMAX):
+    """Pass 3 — solo / no-consensus fallback. Relaxed ±0.20 multiplicity
+    tolerance, strict id_med >= 0.7 gate. Returns (peak, P, k_round,
+    k_raw) or None."""
+    if strongest is None:
+        return None
+    cands = []
+    for p in peaks:
+        P = _num_or_none(p.get("period"))
+        if P is None or P >= strongest:
+            continue
+        idm = _num_or_none(p.get("identity_med"))
+        if idm is None or idm < _RELAXED_ID_MIN:
+            continue
+        k = strongest / P
+        kr = round(k)
+        if not (2 <= kr <= kmax):
+            continue
+        if abs(k - kr) > _RELAXED_RATIO_TOL:
+            continue
+        cands.append((P, p, kr, k))
+    if not cands:
+        return None
+    cands.sort(key=lambda c: c[0])
+    P, peak, kr, k = cands[0]
+    return peak, P, kr, k
+
+
+def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
+    """Build the per-array summary CSV (one row per array) from kitehor
+    >=0.12.0 outputs: the rescored peaks TSV (`<prefix>.rescored.peaks.tsv`,
+    24 cols = kite + 15 rescore) and the ssr-scan summary
+    (`<prefix>.ssr.tsv`). Filename stays `monomer_size_top3_estimats.csv`
+    so tc_per_tra_consensus.py + the R consensus prototype still find it.
+
+    Per array we compute, in three passes:
+
+    - **Pass 1 (per-TRA strict)**: rescore's `founder_period` column is
+      the *strongest* (highest-identity) period. The *founder* is
+      reassigned by searching for the smallest peak P whose period is
+      an integer divisor of strongest (k = strongest/P, 2 ≤ k ≤ 30,
+      |k - round(k)| ≤ 0.05) with `identity_med(P) ≥ 0.7`. If none,
+      founder = strongest, multiplicity = 1.
+    - **Pass 2 (TRC consensus rescue)**: for each TRC, compute the
+      consensus founder from Pass-1 successes (median of the largest
+      ±10% cluster; gated by ≥ 3 arrays AND ≥ 25 % of the TRC's
+      reassigned arrays). Arrays where Pass 1 left founder=strongest
+      look for a rescored peak within max(±10%, ±20bp) of the
+      consensus with id_med ≥ 0.5; if found, set founder = that peak's
+      period, multiplicity = round(strongest/founder), and mark
+      **irregular_multiplicity = true** (the raw fractional k is
+      stored in `multiplicity_raw`).
+    - **Pass 3 (solo / no-consensus fallback)**: when Pass 2 can't help
+      (no TRC consensus, or no peak near it), relax the per-array
+      multiplicity tolerance to ±0.20 (still id_med ≥ 0.7), flagging
+      success as irregular_multiplicity = true.
+
+    Other columns:
+    - **founder_fallback**: true when rescore returned NA founder_period
+      (separate concept from irregular_multiplicity).
+    - **delta_id_pp**: identity_med(strongest) − identity_med(founder)
+      in percentage points; NA when founder = strongest.
+    - **top-5 monomer estimates by score**.
+    - **top-2 subrepeat candidates** drawn from peaks classified HIGH
+      or LIKELY (see _classify_subrepeat_tier).
+    - **SSR fields** lifted from `<prefix>.ssr.tsv`.
+
+    `kite_tsv` is currently unused but kept on the signature to keep
+    the call site self-documenting (it pairs with the rescored peaks
+    file). Empty `hor_status` / `hor_confidence` cells are emitted so
+    the per-TRA consensus R script's HOR_* alias shim doesn't choke."""
+    import csv
+    import collections
+
+    _num = _num_or_none
+
+    def _fmt_bp(v):
+        if v is None: return ""
+        try:
+            iv = int(round(float(v)))
+            return str(iv) if abs(float(v) - iv) < 1e-6 else f"{float(v):g}"
+        except (TypeError, ValueError):
+            return ""
+
+    def _fmt_sc(v):
+        if v is None: return ""
+        return f"{float(v):.10f}".rstrip("0").rstrip(".")
+
+    def _fmt_id(v):
+        if v is None: return ""
+        return f"{float(v):.4f}".rstrip("0").rstrip(".")
+
+    def _fmt_pp(v):
+        if v is None: return ""
+        return f"{float(v):.2f}"
+
+    # ---- Read all rescored peaks, group by record_id, sort by rank ----
+    peaks_by_rec = collections.defaultdict(list)
+    with open(rescored_peaks_tsv, newline="") as fh:
+        for r in csv.DictReader(fh, delimiter="\t"):
+            peaks_by_rec[r["case_id"]].append(r)
+    for rs in peaks_by_rec.values():
+        rs.sort(key=lambda r: int(r.get("rank") or 0))
+
+    # ---- Read SSR scan summary keyed by record_id ----
+    ssr_by_rec = {}
+    if ssr_tsv and os.path.exists(ssr_tsv):
+        with open(ssr_tsv, newline="") as fh:
+            for r in csv.DictReader(fh, delimiter="\t"):
+                ssr_by_rec[r["record_id"]] = r
+
+    # ---- Pass 1: per-array strict reassignment ----
+    # Stash one dict per record with the strict result + the raw peaks
+    # list (used again in Pass 2/3 and for the subrepeat tier classifier).
+    pass1 = []
+    for record_id, peaks in peaks_by_rec.items():
+        if ":" not in record_id:
+            continue
+        trc, rest = record_id.split(":", 1)
+        parts = rest.rsplit("_", 2)
+        if len(parts) != 3:
+            continue
+        seqid, start, end = parts
+        rank1 = peaks[0]
+        fp = _num(rank1.get("founder_period"))
+        fallback = False
+        if fp is None:
+            fallback        = True
+            strongest_peak  = rank1
+            strongest_period = _num(rank1.get("period"))
+            founder_peak    = rank1
+            founder_period  = strongest_period
+            multiplicity    = 1
+            multiplicity_raw = 1.0 if strongest_period else None
+        else:
+            strongest_period = fp
+            strongest_peak   = next(
+                (p for p in peaks if _num(p.get("period")) == fp), rank1)
+            candidates = []
+            for p in peaks:
+                P = _num(p.get("period"))
+                if P is None or P >= fp:
+                    continue
+                idm = _num(p.get("identity_med"))
+                if idm is None or idm < _FOUNDER_ID_MIN:
+                    continue
+                k = fp / P
+                kr = round(k)
+                if not (2 <= kr <= _KMAX):
+                    continue
+                if abs(k - kr) > _RATIO_TOL:
+                    continue
+                candidates.append((P, idm, kr, k, p))
+            if candidates:
+                candidates.sort(key=lambda c: c[0])    # smallest period wins
+                P, _id, kr, k_raw, fp_peak = candidates[0]
+                founder_period   = P
+                founder_peak     = fp_peak
+                multiplicity     = kr
+                multiplicity_raw = k_raw
+            else:
+                founder_period   = strongest_period
+                founder_peak     = strongest_peak
+                multiplicity     = 1
+                multiplicity_raw = 1.0
+        pass1.append({
+            "record_id":         record_id,
+            "trc":               trc,
+            "seqid":             seqid,
+            "start":             start,
+            "end":               end,
+            "peaks":             peaks,
+            "rank1":             rank1,
+            "strongest_peak":    strongest_peak,
+            "strongest_period":  strongest_period,
+            "founder_peak":      founder_peak,
+            "founder_period":    founder_period,
+            "multiplicity":      multiplicity,
+            "multiplicity_raw":  multiplicity_raw,
+            "fallback":          fallback,
+            "irregular":         False,
+        })
+
+    # ---- Pass 2 prep: TRC consensus founder from Pass-1 successes ----
+    records_by_trc = collections.defaultdict(list)
+    for e in pass1:
+        records_by_trc[e["trc"]].append(e)
+    consensus_by_trc = {}
+    for trc, recs in records_by_trc.items():
+        strict_founders = [e["founder_period"] for e in recs
+                           if e["multiplicity"] > 1 and not e["fallback"]
+                           and e["founder_period"] is not None]
+        consensus_period, _n = _trc_consensus_founder(strict_founders)
+        consensus_by_trc[trc] = consensus_period
+
+    # ---- Pass 2 + Pass 3: rescue arrays where Pass 1 left mult=1 ----
+    for e in pass1:
+        if e["multiplicity"] > 1 or e["fallback"]:
+            continue
+        if e["strongest_period"] is None:
+            continue
+        # Pass 2 — TRC consensus rescue
+        trc_consensus = consensus_by_trc.get(e["trc"])
+        rescued = _rescue_founder_from_trc(
+            e["peaks"], e["strongest_period"], trc_consensus)
+        if rescued:
+            founder_peak, founder_period = rescued
+            raw = e["strongest_period"] / founder_period
+            kr  = int(round(raw))
+            # Only count as a real rescue when the rounded multiplicity
+            # is at least 2 — strongest ≈ founder rescues add no HOR
+            # signal and would inflate the irregular count.
+            if kr >= 2:
+                e["founder_peak"]     = founder_peak
+                e["founder_period"]   = founder_period
+                e["multiplicity_raw"] = raw
+                e["multiplicity"]     = kr
+                e["irregular"]        = True
+                continue
+        # Pass 3 — solo / no-consensus relaxed individual fallback
+        relaxed = _relaxed_individual_founder(e["peaks"], e["strongest_period"])
+        if relaxed:
+            founder_peak, P, kr, k_raw = relaxed
+            e["founder_peak"]     = founder_peak
+            e["founder_period"]   = P
+            e["multiplicity"]     = kr
+            e["multiplicity_raw"] = k_raw
+            e["irregular"]        = True
+
+    # ---- Pass 4: SSR-founder override ----
+    # On SSR-pure (≥95 %) arrays rescore's identity-driven founder pick
+    # is unreliable: the SSR period sits below rescore's min-period and
+    # gets NA identity; every long-period peak it can evaluate has
+    # near-perfect id_med (because the array is literally `(motif)ₙ`,
+    # any multiple-of-motif period aligns perfectly). Force founder =
+    # strongest = kite top peak so the report shows the actual SSR
+    # period. Mark `ssr_override` so the report can surface a badge.
+    # The flag fires on every SSR-pure array — even when rescue/
+    # fallback already produced the same period — because the SSR
+    # badge supersedes the red-`*` fallback marker for these rows
+    # (rescore-NA on a sub-min-period SSR motif is the expected case,
+    # not an anomaly worth flagging).
+    for e in pass1:
+        e["ssr_override"] = False
+        ssr = ssr_by_rec.get(e["record_id"], {})
+        cov = _num(ssr.get("total_ssr_coverage_pct"))
+        motif = (ssr.get("dominant_motif") or "").strip()
+        if cov is None or cov < _SSR_OVERRIDE_COVERAGE:
+            continue
+        if not motif or motif == "NA":
+            continue
+        kite_top_period = _num(e["rank1"].get("period"))
+        if kite_top_period is None:
+            continue
+        e["founder_period"]   = kite_top_period
+        e["strongest_period"] = kite_top_period
+        e["multiplicity"]     = 1
+        e["multiplicity_raw"] = 1.0
+        e["irregular"]        = False
+        e["fallback"]         = False   # SSR badge supersedes fallback
+        # Re-point the peak refs to rank-1 so id_med (typically NA on
+        # the SSR period) and other diagnostics come from the right row.
+        e["founder_peak"]   = e["rank1"]
+        e["strongest_peak"] = e["rank1"]
+        e["ssr_override"]   = True
+
+    # ---- Build output rows ----
+    rows = []
+    for e in pass1:
+        founder_id   = _num(e["founder_peak"].get("identity_med"))
+        strongest_id = _num(e["strongest_peak"].get("identity_med"))
+        delta_id_pp = (
+            (strongest_id - founder_id) * 100.0
+            if (founder_id is not None and strongest_id is not None
+                and e["multiplicity"] > 1)
+            else None)
+
+        # Top-5 peaks by score (rescored peaks are emitted in rank order).
+        peaks = e["peaks"]
+        top5 = peaks[:5] + [None] * max(0, 5 - len(peaks))
+        ms_scores = [
+            (None, None) if p is None
+            else (_num(p.get("period")), _num(p.get("score")))
+            for p in top5]
+
+        # Subrepeat candidates: tier each peak, keep HIGH+LIKELY, sort by
+        # scan_occupancy_frac desc, take top 2.
+        sr_keep = []
+        for p in peaks:
+            t = _classify_subrepeat_tier(p, e["founder_period"])
+            if t in ("HIGH", "LIKELY"):
+                sr_keep.append((
+                    _num(p.get("scan_occupancy_frac")) or 0.0,
+                    _num(p.get("period")),
+                    t))
+        sr_keep.sort(key=lambda c: -c[0])
+        sr1 = sr_keep[0] if len(sr_keep) > 0 else None
+        sr2 = sr_keep[1] if len(sr_keep) > 1 else None
+
+        ssr = ssr_by_rec.get(e["record_id"], {})
+        rows.append({
+            "TRC_ID":            e["trc"],
+            "seqid":             e["seqid"],
+            "start":             e["start"],
+            "end":               e["end"],
+            "array_length":      e["rank1"].get("array_length", ""),
+            "monomer_size":      _fmt_bp(ms_scores[0][0]),
+            "score":             _fmt_sc(ms_scores[0][1]),
+            "monomer_size_2":    _fmt_bp(ms_scores[1][0]),
+            "score_2":           _fmt_sc(ms_scores[1][1]),
+            "monomer_size_3":    _fmt_bp(ms_scores[2][0]),
+            "score_3":           _fmt_sc(ms_scores[2][1]),
+            "monomer_size_4":    _fmt_bp(ms_scores[3][0]),
+            "score_4":           _fmt_sc(ms_scores[3][1]),
+            "monomer_size_5":    _fmt_bp(ms_scores[4][0]),
+            "score_5":           _fmt_sc(ms_scores[4][1]),
+            "hor_status":        "",
+            "hor_confidence":    "",
+            "founder_period":    _fmt_bp(e["founder_period"]),
+            "strongest_period":  _fmt_bp(e["strongest_period"]),
+            "multiplicity":      str(e["multiplicity"]),
+            "multiplicity_raw":  (f"{e['multiplicity_raw']:.4f}"
+                                  if e["multiplicity_raw"] is not None else ""),
+            "irregular_multiplicity": "true" if e["irregular"] else "false",
+            "delta_id_pp":       _fmt_pp(delta_id_pp),
+            "founder_id_med":    _fmt_id(founder_id),
+            "strongest_id_med":  _fmt_id(strongest_id),
+            "founder_fallback":  "true" if e["fallback"] else "false",
+            "ssr_founder_override": "true" if e.get("ssr_override") else "false",
+            "subrepeat_1_period": _fmt_bp(sr1[1]) if sr1 else "",
+            "subrepeat_1_occ":    _fmt_id(sr1[0]) if sr1 else "",
+            "subrepeat_1_tier":   sr1[2] if sr1 else "",
+            "subrepeat_2_period": _fmt_bp(sr2[1]) if sr2 else "",
+            "subrepeat_2_occ":    _fmt_id(sr2[0]) if sr2 else "",
+            "subrepeat_2_tier":   sr2[2] if sr2 else "",
+            "ssr_flag":           ssr.get("ssr_flag", ""),
+            "ssr_dominant_motif": ssr.get("dominant_motif", ""),
+            "ssr_dominant_motif_coverage_pct":
+                                  ssr.get("dominant_motif_coverage_pct", ""),
+            "ssr_total_coverage_pct": ssr.get("total_ssr_coverage_pct", ""),
+            "ssr_top_motifs":     ssr.get("top_motifs", ""),
+            "consensus_period_bp":ssr.get("consensus_period_bp", ""),
+        })
+
+    def _sort_key(r):
+        try: return (0, int(r["TRC_ID"].split("_")[1]))
+        except (IndexError, ValueError): return (1, r["TRC_ID"])
+    rows.sort(key=_sort_key)
+
+    header = [
+        "TRC_ID", "seqid", "start", "end", "array_length",
+        "monomer_size",   "score",
+        "monomer_size_2", "score_2",
+        "monomer_size_3", "score_3",
+        "monomer_size_4", "score_4",
+        "monomer_size_5", "score_5",
+        "hor_status", "hor_confidence",
+        "founder_period", "strongest_period", "multiplicity",
+        "multiplicity_raw", "irregular_multiplicity",
+        "delta_id_pp", "founder_id_med", "strongest_id_med",
+        "founder_fallback", "ssr_founder_override",
+        "subrepeat_1_period", "subrepeat_1_occ", "subrepeat_1_tier",
+        "subrepeat_2_period", "subrepeat_2_occ", "subrepeat_2_tier",
+        "ssr_flag", "ssr_dominant_motif",
+        "ssr_dominant_motif_coverage_pct", "ssr_total_coverage_pct",
+        "ssr_top_motifs", "consensus_period_bp",
+    ]
+    with open(out_csv, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=header, delimiter="\t",
+                           lineterminator="\n", extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+    return len(rows)

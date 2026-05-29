@@ -48,7 +48,18 @@ size estimates for the entire TRC, KITE also estimates monomer sizes for each ar
 evaluating the distances between all repetitive k-mers across the tandem repeat array,
 with each tandem array analyzed individually. This method facilitates the detection of
 higher-order repeats and captures the variability in monomer size across different tandem
-repeat arrays. The KITE analysis includes:
+repeat arrays.
+
+Starting in TideCluster 1.10.0, the KITE step is powered by
+[kitehor](https://github.com/kavonrtep/kitehor) `0.12.0` — a
+sequence-agnostic Rust reimplementation of the same k-mer-interval
+principle. The pipeline runs `kitehor kite-periodicity` followed in
+parallel by `kitehor rescore` (banded semi-global alignment scoring of
+the top-N kite peaks) and `kitehor ssr-scan`; the heavier `analyze`
+cascade is dropped. kitehor is installed transitively from the
+`petrnovak` conda channel.
+
+The KITE analysis includes:
 
 - Monomer size estimate for the entire TRC : This estimate may differ from the TAREAN
 estimate due to the different methodologies employed.
@@ -56,6 +67,25 @@ estimate due to the different methodologies employed.
    - Primary estimate : The estimate with the highest score.
    - Alternative estimates : Estimates with lower scores, these estimates help in identifying
 higher-order repeats.
+- Per-array founder / strongest / multiplicity: from the rescored
+  peaks, TideCluster derives the **strongest** period (rescore's
+  `founder_period` = highest identity_med) and reassigns the **founder**
+  to the smallest peak P whose period is an integer divisor of the
+  strongest (k = strongest/P) with `identity_med(P) ≥ 0.7` — recovering
+  the HOR base / tile decomposition. When rescore cannot assign a
+  founder, TideCluster falls back to the top-scored kite peak and marks
+  the array with a `*` in the report.
+- Subrepeat candidates: peaks with `period ≤ founder/3` and partial
+  per-base occupancy. Tiered HIGH / LIKELY (surfaced in the per-TRA
+  table) / KMER_SUPPORT / AMBIGUOUS / WEAK / OBSERVATIONAL (Details
+  panel only). Strict by design — true nested subrepeats (a short
+  motif occupying only part of each longer monomer; not the same as an
+  HOR pattern that tiles the whole longer monomer) are rare.
+- SSR scan with dominant motif, total coverage, and top motifs.
+- All surfaced in the report's KITE page, the per-TRC dashboards
+  (▸ click opens the per-array Details child row with the full
+  rescore diagnostics), and the per-array columns of
+  `monomer_size_top3_estimats.csv`.
 
 | ![./workflow_scheme.svg](./workflow_scheme.svg) |
 |:-----------------------------------------------:|
