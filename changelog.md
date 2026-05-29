@@ -1,4 +1,4 @@
-## 1.10.0 (unreleased)
+## 1.10.0 (2026-05-29)
 - KITE step now runs [kitehor](https://github.com/kavonrtep/kitehor)
   `0.12.0` (Rust) instead of the R `tarean/kite.R` script. The slow
   cascade (`rule-classify` → `tandem-validate` → `summary-merge`)
