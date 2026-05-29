@@ -31,7 +31,7 @@ jobs:
           auto-update-conda: false
           use-mamba: true
           activate-environment: release
-          python-version: "3.11"
+          python-version: "3.12"
           channels: conda-forge,bioconda,petrnovak
           channel-priority: strict
 
