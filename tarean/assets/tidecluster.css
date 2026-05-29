@@ -27,7 +27,8 @@
   --hor-cnt-weak-bg:   #fff8dc;
   --hor-cnt-none-bg:   #fafafa;
 
-  /* kitehor combined_class badge palette (light) */
+  /* kitehor combined_class badge palette — used only when rendering
+     legacy (pre-v0.12) report dirs; v0.12+ reports drop combined_class. */
   --class-hor-bg:    #8fce8f;  --class-hor-fg:    #0e3d0e;
   --class-horssr-bg: #7fc6a8;  --class-horssr-fg: #0e3d2a;
   --class-tr-bg:     #e6e6e6;  --class-tr-fg:     #4a4a4a;
@@ -67,7 +68,7 @@
     --hor-cnt-weak-bg:   #6b550033;
     --hor-cnt-none-bg:   #1e293b;
 
-    /* kitehor combined_class badge palette (dark) */
+    /* kitehor combined_class badge palette (legacy reports, dark) */
     --class-hor-bg:    #0e3d0e;  --class-hor-fg:    #8fce8f;
     --class-horssr-bg: #0e3d2a;  --class-horssr-fg: #7fc6a8;
     --class-tr-bg:     #2a3344;  --class-tr-fg:     #c0c8d4;
@@ -454,6 +455,9 @@ tr.tc-details-open .tc-details-control::before {
 .tc-prose code        { background: var(--code-bg); padding: 1px 5px; border-radius: 3px;
                         font-family: var(--font-mono); font-size: 12px; }
 .tc-prose pre code    { display: block; padding: 8px 10px; font-size: 12px; }
+.tc-prose blockquote  { margin: 10px 0 12px; padding: 6px 12px;
+                        border-left: 3px solid var(--border);
+                        color: var(--fg-muted); font-style: italic; }
 
 /* ======== callouts (skipped sections, warnings) ======== */
 

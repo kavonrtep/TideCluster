@@ -2483,7 +2483,14 @@ def _other_periods_cell(a):
     short_high_rank.sort()
 
     def _id_str(i):
-        return f".{int(round(i * 100)):02d}"
+        # Compact identity label for the Other-periods column. Most
+        # values land in [.70, .99] and render as ".NN"; values that
+        # round up to 1.00 (0.995 ≤ i ≤ 1.00) used to overflow the
+        # 2-digit slot and display as ".100" — clamp to "1.00" instead.
+        pct = int(round(i * 100))
+        if pct >= 100:
+            return "1.00"
+        return f".{pct:02d}"
     bits = [f'{p}<span class="tc-score">({_id_str(i)})</span>'
             for i, p in high_id[:6]]
     bits += [f'{p}<span class="tc-score">(rank&nbsp;{r})</span>'
