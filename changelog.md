@@ -90,6 +90,47 @@
 - Per-TRC heatmap PNGs (`profile_plots/profile_*.png`,
   `profile_plots/profile_top3_*.png`) still rendered by
   `tarean/kite_heatmaps.R` from kitehor's `--periodogram` bundle.
+- **Pass 4 SSR-founder override.** On SSR-pure arrays
+  (`ssr_total_coverage_pct ≥ 95 %` with a dominant motif), rescore's
+  identity-driven founder pick is unreliable: the SSR motif period
+  sits below rescore's min-period (so id_med is NA) while every long
+  multiple-of-motif period rescore *can* evaluate has near-perfect
+  identity on the underlying `(motif)ₙ` string. Pass 4 forces
+  founder = strongest = kite top peak (rank 1), multiplicity = 1, and
+  stamps a new `ssr_founder_override = true` column. A lavender
+  **SSR** badge in the Founder cell marks the provenance and
+  supersedes the red `*` fallback marker (rescore-NA on a
+  sub-min-period SSR motif is the expected case, not an anomaly).
+  Validated on drapa: 127 SSR-pure arrays flagged (matching the
+  source data), 15 spurious founder periods flipped, 3 spurious HOR
+  calls demoted, 112 redundant fallback flags cleared.
+- **Index page redesign.** REPORTS tile removed; RUN SUMMARY card
+  reorganised into three labelled subsections — Input / Clusters
+  (TRC) / Arrays (TRA) — with SSR enrichment (# arrays with SSR
+  signal, # SSR-dominant ≥ 50 %, total SSR bp, top-3 SSR motifs by
+  bp covered). "TAREAN-analysed" relabelled to "with TAREAN
+  consensus" since every array goes through KITE.
+- **TRC distribution plot** (new section on the index page). Hand-
+  rolled SVG ideogram showing every TRA across the assembly, with a
+  left-side TRC selector + live search + "Show all" reset. Default
+  view is muted grey; clicking a TRC lifts only its arrays to red
+  with a thin outline. Contigs < 1 Mb hidden, capped at 80 longest.
+- **TAREAN tab cleanup.** Dropped the H/S/X (HOR/subrep/SSR tally)
+  column on v0.12 reports — the same signals live on the per-TRC
+  dashboard. Type column simplified to TR or SSR. Page widened to
+  1560 px so Graph / Consensus columns no longer scroll on standard
+  screens.
+- **Legends rewritten for v0.12.** KITE tab legend (`kite.md`) and
+  per-TRC card column legend (`arrays_legend`, now a collapsible
+  `<details>` block) drop combined_class references and describe the
+  v0.12 founder / strongest / ×k / subrepeat / SSR signals. Per-TRC
+  ideogram legend lists the five colour swatches `_class_fill`
+  actually emits in v0.12 mode (HOR / Subrepeat / SSR / Fallback /
+  Plain TR).
+- **Bug fixes.** Other-periods identity formatter capped at `1.00`
+  (was emitting `.100` for any identity in [.995, 1.00] due to the
+  `02d` minimum-width format). Multi-line markdown bullets and
+  blockquotes now render correctly in the About / Credits sections.
 - New conda runtime dependency: `kitehor=0.12.0` (requires
   `-c petrnovak`). No new Python plotting deps.
 - Removed: `tarean/kite.R` (736 lines).
