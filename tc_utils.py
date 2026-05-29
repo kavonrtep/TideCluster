@@ -2156,6 +2156,16 @@ _RESCUE_ID_MIN            = 0.5    # relaxed id_med gate when TRC consensus exis
 _RESCUE_WINDOW_PCT        = 0.10   # ± this fraction of trc_consensus_founder
 _RESCUE_WINDOW_BP_MIN     = 20     # ... or this many bp, whichever is larger
 _RELAXED_RATIO_TOL        = 0.20   # solo-TRA fallback: relaxed k tolerance
+
+# SSR-founder override: when an array is SSR-pure (≥ this fraction of
+# the array length covered by the dominant SSR motif), the kite top
+# peak IS the SSR period — but rescore can't evaluate that period (it's
+# below rescore's min-period) and instead picks a noise peak with high
+# id_med but vanishingly small kite score. The override forces
+# founder = strongest = kite top peak. Threshold chosen from drapa data:
+# the count of override candidates is flat across [70, 99] %, dropping
+# only below 50 %.
+_SSR_OVERRIDE_COVERAGE    = 95.0   # ssr_total_coverage_pct threshold
 _RELAXED_ID_MIN           = 0.7    # solo-TRA fallback: keeps strict id_med gate
 
 
@@ -2442,6 +2452,43 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
             e["multiplicity_raw"] = k_raw
             e["irregular"]        = True
 
+    # ---- Pass 4: SSR-founder override ----
+    # On SSR-pure (≥95 %) arrays rescore's identity-driven founder pick
+    # is unreliable: the SSR period sits below rescore's min-period and
+    # gets NA identity; every long-period peak it can evaluate has
+    # near-perfect id_med (because the array is literally `(motif)ₙ`,
+    # any multiple-of-motif period aligns perfectly). Force founder =
+    # strongest = kite top peak so the report shows the actual SSR
+    # period. Mark `ssr_override` so the report can surface a badge.
+    # The flag fires on every SSR-pure array — even when rescue/
+    # fallback already produced the same period — because the SSR
+    # badge supersedes the red-`*` fallback marker for these rows
+    # (rescore-NA on a sub-min-period SSR motif is the expected case,
+    # not an anomaly worth flagging).
+    for e in pass1:
+        e["ssr_override"] = False
+        ssr = ssr_by_rec.get(e["record_id"], {})
+        cov = _num(ssr.get("total_ssr_coverage_pct"))
+        motif = (ssr.get("dominant_motif") or "").strip()
+        if cov is None or cov < _SSR_OVERRIDE_COVERAGE:
+            continue
+        if not motif or motif == "NA":
+            continue
+        kite_top_period = _num(e["rank1"].get("period"))
+        if kite_top_period is None:
+            continue
+        e["founder_period"]   = kite_top_period
+        e["strongest_period"] = kite_top_period
+        e["multiplicity"]     = 1
+        e["multiplicity_raw"] = 1.0
+        e["irregular"]        = False
+        e["fallback"]         = False   # SSR badge supersedes fallback
+        # Re-point the peak refs to rank-1 so id_med (typically NA on
+        # the SSR period) and other diagnostics come from the right row.
+        e["founder_peak"]   = e["rank1"]
+        e["strongest_peak"] = e["rank1"]
+        e["ssr_override"]   = True
+
     # ---- Build output rows ----
     rows = []
     for e in pass1:
@@ -2504,6 +2551,7 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
             "founder_id_med":    _fmt_id(founder_id),
             "strongest_id_med":  _fmt_id(strongest_id),
             "founder_fallback":  "true" if e["fallback"] else "false",
+            "ssr_founder_override": "true" if e.get("ssr_override") else "false",
             "subrepeat_1_period": _fmt_bp(sr1[1]) if sr1 else "",
             "subrepeat_1_occ":    _fmt_id(sr1[0]) if sr1 else "",
             "subrepeat_1_tier":   sr1[2] if sr1 else "",
@@ -2535,7 +2583,7 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
         "founder_period", "strongest_period", "multiplicity",
         "multiplicity_raw", "irregular_multiplicity",
         "delta_id_pp", "founder_id_med", "strongest_id_med",
-        "founder_fallback",
+        "founder_fallback", "ssr_founder_override",
         "subrepeat_1_period", "subrepeat_1_occ", "subrepeat_1_tier",
         "subrepeat_2_period", "subrepeat_2_occ", "subrepeat_2_tier",
         "ssr_flag", "ssr_dominant_motif",

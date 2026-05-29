@@ -975,6 +975,8 @@ def load_kite_top3(paths):
                 "founder_id_med":   num(row.get("founder_id_med")),
                 "strongest_id_med": num(row.get("strongest_id_med")),
                 "founder_fallback": (row.get("founder_fallback") or "").strip() == "true",
+                "ssr_founder_override":
+                                    (row.get("ssr_founder_override") or "").strip() == "true",
                 # Top-2 subrepeat candidates (main column)
                 "subrepeat_1_period": ni(row.get("subrepeat_1_period")),
                 "subrepeat_1_occ":    num(row.get("subrepeat_1_occ")),
@@ -1040,7 +1042,40 @@ def load_kite_top3(paths):
             "array_length": ni(row.get("array_length")),
             **hor,
         }
+        # Idempotent SSR-founder override applied at load time so CSVs
+        # produced before the fix (drapa-style) render correctly without
+        # a full re-run. The condition mirrors tc_utils._SSR_OVERRIDE_*.
+        if is_v012:
+            _apply_ssr_founder_override(out[(trc, sid, start, end)])
     return out
+
+
+# Module-level constant (mirrors tc_utils._SSR_OVERRIDE_COVERAGE).
+_SSR_OVERRIDE_COVERAGE_PCT = 95.0
+
+
+def _apply_ssr_founder_override(rec):
+    """In-place: on SSR-pure (≥95 %) arrays, force founder = strongest
+    = kite top peak (m1) and stamp the provenance flag. Always clears
+    `founder_fallback` because the SSR badge supersedes that marker
+    (on SSR-pure arrays rescore is expected to return NA — the red `*`
+    isn't an anomaly worth flagging). Idempotent."""
+    cov   = rec.get("ssr_total_coverage_pct")
+    motif = rec.get("ssr_dominant_motif")
+    m1    = rec.get("m1")
+    if (cov is None or cov < _SSR_OVERRIDE_COVERAGE_PCT
+            or not motif or motif == "NA" or m1 is None):
+        return
+    rec["founder_period"]   = m1
+    rec["strongest_period"] = m1
+    rec["multiplicity"]     = 1
+    rec["multiplicity_raw"] = 1.0
+    rec["irregular_multiplicity"] = False
+    rec["founder_id_med"]   = None
+    rec["strongest_id_med"] = None
+    rec["delta_id_pp"]      = None
+    rec["founder_fallback"] = False
+    rec["ssr_founder_override"] = True
 
 
 def load_rescored_peaks(paths):
@@ -2444,6 +2479,12 @@ def _other_periods_cell(a):
     short peaks (period < min_period so rescore returned NA identity)
     whose kite rank is better than the founder's rank. Sorted by
     identity desc (NAs by rank)."""
+    # SSR-pure arrays: every multiple-of-motif period aligns perfectly
+    # on the underlying (motif)ₙ string, so rescore reports id_med ≈
+    # 1.00 for dozens of long-period noise peaks. Suppress this column
+    # entirely on those rows — the SSR badge already says everything.
+    if a.get("ssr_founder_override"):
+        return "—"
     peaks = a.get("rescored_peaks") or []
     if not peaks:
         return "—"
@@ -2656,7 +2697,17 @@ def _arrays_table(arrays, include_hor=True):
             mult   = a.get("multiplicity") or 1
             delta  = a.get("delta_id_pp")
             fb     = a.get("founder_fallback")
-            fp_html = (esc(fp) + ('<span class="tc-fallback">*</span>' if fb else "")
+            ssr_or = a.get("ssr_founder_override")
+            glyphs = []
+            if fb:
+                glyphs.append('<span class="tc-fallback" '
+                              'title="rescore returned NA founder; '
+                              'fell back to top kite peak">*</span>')
+            if ssr_or:
+                glyphs.append('<span class="tc-ssr-badge" '
+                              'title="SSR-pure array: founder set to '
+                              'kite top peak (= SSR period)">SSR</span>')
+            fp_html = (esc(fp) + "".join(glyphs)
                        if fp is not None else "—")
             sp_html = esc(sp) if sp is not None else "—"
             delta_html = (f"{delta:+.1f}<span class='tc-meta'>&nbsp;pp</span>"

@@ -307,6 +307,20 @@ table.tc-table img            { max-width: none; }
   vertical-align: middle;
   margin-left: 2px;
 }
+/* SSR-founder override marker — purple pill next to the Founder
+   period when the array is SSR-pure and the founder was forced to
+   the kite top peak (= SSR motif period). Same palette family as
+   the pure-SSR class badge so the two read as related. */
+.tc-ssr-badge {
+  display: inline-block;
+  padding: 0 5px;
+  background: #e6d3f7; color: #4a2078;
+  font-size: 10px; font-weight: 600;
+  border-radius: 2px;
+  cursor: help;
+  vertical-align: middle;
+  margin-left: 3px;
+}
 
 /* ======== per-array Details child row (DataTables row.child) ======== */
 .tc-details-col { width: 24px; padding: 4px 2px; }
