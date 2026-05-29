@@ -1,3 +1,20 @@
+## 1.10.1 (2026-05-29)
+- Fix Python 3.11 incompatibility in the report v2 builder: a
+  backslash inside an f-string expression part (per-array Details
+  child row Founder line) raised a `SyntaxError` on the CI runner
+  (PEP 701 relaxed this in 3.12, which is why local tests passed).
+  The exception was swallowed by `_build_report_v2`'s broad
+  try/except, surfacing as a stderr WARNING and an empty
+  `<prefix>_index.html` — the `tests/short.sh` `[ -s short_index.html ]`
+  guard then failed with `FAIL: no index.html`. Targeted fix: hoist
+  the conditional out of the f-string. Verified by an AST scanner
+  across `tc_rerender_report.py`, `tc_utils.py`, `TideCluster.py` —
+  this was the only instance.
+- CI: bump `python-version` 3.11 → 3.12 across all three workflows
+  (`tests.yml`, `release.yml`, `conda-release.yml`) so 3.12-only
+  syntax can't slip past local-dev testing again. `conda-deps.txt`
+  still has `python>=3.6` — the bump is CI-side only.
+
 ## 1.10.0 (2026-05-29)
 - KITE step now runs [kitehor](https://github.com/kavonrtep/kitehor)
   `0.12.0` (Rust) instead of the R `tarean/kite.R` script. The slow
