@@ -275,6 +275,16 @@ table.tc-table img            { max-width: none; }
 .tc-meta  { color: var(--fg-muted); font-size: 11px; margin-left: 4px; }
 .tc-dim   { color: var(--fg-muted); }
 .tc-fallback { color: #c0392b; font-weight: bold; margin-left: 1px; }
+.tc-irreg {
+  display: inline-block;
+  padding: 0 5px;
+  background: #ffd9a6; color: #6b3f00;
+  font-size: 10px; font-weight: 600;
+  border-radius: 2px;
+  cursor: help;
+  vertical-align: middle;
+  margin-left: 2px;
+}
 
 /* ======== per-array Details child row (DataTables row.child) ======== */
 .tc-details-col { width: 24px; padding: 4px 2px; }

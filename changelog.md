@@ -13,16 +13,31 @@
   Two new CLI flags on `TideCluster.py run_all`/`tarean`:
   `--kite-rescore-max-period` (default 10000) and `--kite-rescore-top-n`
   (default 20).
-- Founder / Strongest / Multiplicity are now derived in TideCluster from
-  the rescored peaks. **Strongest** = rescore's `founder_period`
-  (highest-identity peak). **Founder** = the smallest peak P with
-  `identity_med(P) ≥ 0.7` whose period is an integer divisor of
-  Strongest (k = Strongest/P, 2 ≤ k ≤ 30, ±0.05 tolerance) — recovering
-  the v0.10-style HOR base / tile decomposition. When rescore returns
-  NA founder_period (no peak passes 0.7 or every peak above
-  `--kite-rescore-max-period`), TideCluster falls back to the
-  top-scored kite peak (rank 1) and marks the array as a fallback in
-  the report.
+- Founder / Strongest / Multiplicity are now derived in TideCluster in
+  **three passes** that combine per-array strict reassignment with
+  TRC-level cluster context:
+    - **Pass 1 (per-TRA strict)**: **Strongest** = rescore's
+      `founder_period` (highest-identity peak). **Founder** = the
+      smallest peak P with `identity_med(P) ≥ 0.7` whose period is an
+      integer divisor of Strongest (k = Strongest/P, 2 ≤ k ≤ 30,
+      ±0.05 tolerance) — recovers the v0.10-style HOR base / tile
+      decomposition.
+    - **Pass 2 (TRC consensus rescue)**: per TRC, computes the
+      consensus founder (median of the largest ±10 % cluster across
+      Pass-1 successes, gated by ≥ 3 arrays AND ≥ 25 % of the TRC's
+      reassigned arrays). Arrays where Pass 1 left founder = strongest
+      look for a rescored peak within max(±10 %, ±20 bp) of the
+      consensus with `id_med ≥ 0.5`; rescues fire only when the
+      resulting multiplicity rounds to ≥ 2. Marked
+      `irregular_multiplicity = true`. On CEN6 this nearly triples the
+      HOR call count (7 → 19) by recovering arrays with irregular k.
+    - **Pass 3 (solo / no-consensus fallback)**: when Pass 2 doesn't
+      help, a relaxed per-array tolerance (±0.20 of integer, still
+      `id_med ≥ 0.7`) fires and is also flagged irregular.
+  When rescore returns NA founder_period (no peak passes 0.7 or every
+  peak above `--kite-rescore-max-period`), TideCluster falls back to
+  the top-scored kite peak (rank 1) and marks the array as a
+  `founder_fallback` in the report (separate from `irregular_multiplicity`).
 - Subrepeat tiering is ported from kitehor's `docs/rule_proto.md`
   cheat-sheet: per peak, tier ∈ `{HIGH, LIKELY, KMER_SUPPORT,
   AMBIGUOUS, WEAK, OBSERVATIONAL, REJECT_*}`. The per-array
@@ -41,9 +56,14 @@
 - Report (v2) — roll-ups updated: the per-TRC Classification card,
   the index summary, and the KITE overview swap the old
   `combined_class` distribution / Class mix columns for per-array
-  counters (HOR ×k≥2, Subrepeat, SSR, Fallback). Genome-distribution
-  ideograms colour by the dominant signal per array (HOR green,
-  subrepeat teal, SSR purple, fallback red, simple TR neutral grey).
+  counters (HOR ×k≥2, Subrepeat, SSR, Fallback). The per-TRC card
+  additionally surfaces the **Prevalent founder** (median of the
+  largest ±10 % founder cluster within the TRC, with the supporting
+  array count) and the **HOR multiplicities** distribution
+  (e.g. `×2 (12), ×3 (2), ×4 (1), ×5 (3)`) when v0.12 data is
+  present. Genome-distribution ideograms colour by the dominant
+  signal per array (HOR green, subrepeat teal, SSR purple,
+  fallback red, simple TR neutral grey).
 - `monomer_size_top3_estimats.csv` schema (still consumed by
   `tc_per_tra_consensus.py` and the R consensus prototype):
   - HOR columns (`hor_status`, `hor_confidence`) kept as empty cells
@@ -51,6 +71,8 @@
   - Top-5 monomer-size peaks by score (`monomer_size` ..
     `monomer_size_5` + `score*`), from the rescored peaks file.
   - New columns: `founder_period`, `strongest_period`, `multiplicity`,
+    `multiplicity_raw` (fractional k for irregular cases),
+    `irregular_multiplicity` (true when Pass 2 / Pass 3 fired),
     `delta_id_pp`, `founder_id_med`, `strongest_id_med`,
     `founder_fallback`, `subrepeat_{1,2}_period`,
     `subrepeat_{1,2}_occ`, `subrepeat_{1,2}_tier`, and the SSR

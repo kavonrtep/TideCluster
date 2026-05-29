@@ -946,6 +946,9 @@ def load_kite_top3(paths):
                 "founder_period":   ni(row.get("founder_period")),
                 "strongest_period": ni(row.get("strongest_period")),
                 "multiplicity":     ni(row.get("multiplicity")) or 1,
+                "multiplicity_raw": num(row.get("multiplicity_raw")),
+                "irregular_multiplicity":
+                                    (row.get("irregular_multiplicity") or "").strip() == "true",
                 "delta_id_pp":      num(row.get("delta_id_pp")),
                 "founder_id_med":   num(row.get("founder_id_med")),
                 "strongest_id_med": num(row.get("strongest_id_med")),
@@ -1234,6 +1237,29 @@ def build_model(input_dir: Path, prefix: str):
             monomer_primary = Counter(m1_values).most_common(1)[0][0]
             dominant_class = (combined_class_counter.most_common(1)[0][0]
                               if combined_class_counter else None)
+            # TRC-level aggregates (v0.12). prevalent_founder = median of
+            # per-array founder_period values that cluster within ±10 % of
+            # each other (the same anchor used by build_monomer_size_csv's
+            # Pass 2 TRC consensus). multiplicity_counts = distribution of
+            # the rounded multiplicity for HOR arrays (×k≥2).
+            founder_periods = [a["founder_period"] for a in arrays
+                               if a.get("founder_period")]
+            prev_founder = None
+            prev_founder_n = 0
+            if len(founder_periods) >= 3:
+                best_n, best_members = 0, []
+                for anchor in founder_periods:
+                    members = [p for p in founder_periods
+                               if abs(p - anchor) / max(anchor, 1.0) <= 0.10]
+                    if len(members) > best_n:
+                        best_n, best_members = len(members), members
+                if best_n >= 3:
+                    prev_founder   = int(round(statistics.median(best_members)))
+                    prev_founder_n = best_n
+            mult_counts = Counter(
+                int(a["multiplicity"]) for a in arrays
+                if (a.get("multiplicity") or 1) > 1)
+            n_irreg = sum(1 for a in arrays if a.get("irregular_multiplicity"))
             kite_block = {
                 "monomer_primary":  int(monomer_primary),
                 "n_no_hor":         kite_counts["no_hor"],
@@ -1249,6 +1275,11 @@ def build_model(input_dir: Path, prefix: str):
                 "combined_class_counts": dict(combined_class_counter) or None,
                 "n_subrepeat":      n_subrepeat,
                 "n_ssr":            n_ssr,
+                # v0.12 TRC aggregates
+                "prevalent_founder":   prev_founder,
+                "prevalent_founder_n": prev_founder_n,
+                "multiplicity_counts": dict(mult_counts) or None,
+                "n_irregular":         n_irreg,
             }
         tarean_block = None
         if has_tarean:
@@ -2275,7 +2306,15 @@ def _details_html(a):
         head_bits.append(
             f'<strong>Strongest:</strong> {esc(sp)} '
             f'<span class="tc-dim">{_idstr(s_id)}</span>')
-    head_bits.append(f'<strong>&times;{mult}</strong>')
+    irreg     = a.get("irregular_multiplicity")
+    mult_raw  = a.get("multiplicity_raw")
+    if irreg and mult_raw is not None:
+        head_bits.append(
+            f'<strong>&times;{mult}</strong> '
+            f'<span class="tc-irreg" title="irregular multiplicity">irreg</span>'
+            f' <span class="tc-dim">(k = {mult_raw:.3f})</span>')
+    else:
+        head_bits.append(f'<strong>&times;{mult}</strong>')
     if delta is not None:
         head_bits.append(f'<span class="tc-dim">&Delta;id {delta:+.2f}&nbsp;pp</span>')
     header = ('<div class="tc-details-summary">'
@@ -2370,6 +2409,12 @@ def _arrays_table(arrays, include_hor=True):
             sp_html = esc(sp) if sp is not None else "—"
             delta_html = (f"{delta:+.1f}<span class='tc-meta'>&nbsp;pp</span>"
                           if delta is not None else "—")
+            irreg     = a.get("irregular_multiplicity")
+            mult_raw  = a.get("multiplicity_raw")
+            mult_html = f"&times;{mult}"
+            if irreg and mult_raw is not None:
+                mult_html += (' <span class="tc-irreg" '
+                              f'title="irregular multiplicity (k = {mult_raw:.2f})">~</span>')
             details_attr = html.escape(_details_html(a), quote=True)
             rows.append(
                 f'<tr data-details="{details_attr}">'
@@ -2382,7 +2427,7 @@ def _arrays_table(arrays, include_hor=True):
                 f'<td data-order="{fp or 0}">{fp_html}</td>'
                 f'<td data-order="{delta if delta is not None else -9999}">{delta_html}</td>'
                 f'<td data-order="{sp or 0}">{sp_html}</td>'
-                f'<td data-order="{mult}">&times;{mult}</td>'
+                f'<td data-order="{mult_raw or mult}">{mult_html}</td>'
                 f'<td>{_other_periods_cell(a)}</td>'
                 f'<td>{_subrepeat_cell(a)}</td>'
                 f'<td>{_ssr_cell(a)}</td>'
@@ -2546,7 +2591,30 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
         n_ssr    = sum(1 for a in trc["arrays"]
                        if (a.get("ssr_dominant_motif") or "NA") != "NA")
         n_fb     = sum(1 for a in trc["arrays"] if a.get("founder_fallback"))
+        # TRC-level aggregates from build_model: prevalent founder and
+        # multiplicity distribution across the TRC's HOR arrays.
+        prev_f   = kite.get("prevalent_founder")
+        prev_n   = kite.get("prevalent_founder_n", 0)
+        mc       = kite.get("multiplicity_counts") or {}
+        n_irreg  = kite.get("n_irregular", 0)
+        if prev_f:
+            class_rows.append(
+                ("Prevalent founder",
+                 f'{prev_f} bp <span class="tc-dim">'
+                 f'(in {prev_n}/{len(trc["arrays"])} arrays)</span>'))
+        if mc:
+            # Unicode ×/NBSP keep the line readable in the dl row even
+            # though the class_html builder escapes plain values (only
+            # values containing '<' bypass esc()).
+            mc_str = ", ".join(f'×{k} ({v})'
+                               for k, v in sorted(mc.items()))
+            class_rows.append(("HOR multiplicities", mc_str))
         class_rows.append(("Arrays with HOR call (×k≥2)", str(n_hor)))
+        if n_irreg:
+            class_rows.append(
+                ("Arrays with irregular multiplicity",
+                 f'{n_irreg} <span class="tc-dim">(non-integer k, '
+                 f'founder taken from TRC consensus)</span>'))
         class_rows.append(("Arrays with subrepeat",       str(n_subrep)))
         class_rows.append(("Arrays with SSR",             str(n_ssr)))
         if n_fb:

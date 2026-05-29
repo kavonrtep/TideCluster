@@ -4,6 +4,7 @@ import gzip
 import itertools
 import os
 import shutil
+import statistics
 import subprocess
 import tempfile
 from collections import OrderedDict
@@ -2147,6 +2148,99 @@ def _classify_subrepeat_tier(peak, founder_period):
     return "REJECT_AMBIGUOUS_LOW"
 
 
+# Two-pass founder reassignment thresholds (see build_monomer_size_csv).
+_TRC_CONSENSUS_MIN_ARRAYS = 3      # min Pass-1 founders to compute consensus
+_TRC_CONSENSUS_MIN_FRAC   = 0.25   # dominant cluster must hold >= this fraction
+_TRC_CONSENSUS_TOL        = 0.10   # ±10% to belong to the dominant period cluster
+_RESCUE_ID_MIN            = 0.5    # relaxed id_med gate when TRC consensus exists
+_RESCUE_WINDOW_PCT        = 0.10   # ± this fraction of trc_consensus_founder
+_RESCUE_WINDOW_BP_MIN     = 20     # ... or this many bp, whichever is larger
+_RELAXED_RATIO_TOL        = 0.20   # solo-TRA fallback: relaxed k tolerance
+_RELAXED_ID_MIN           = 0.7    # solo-TRA fallback: keeps strict id_med gate
+
+
+def _num_or_none(v):
+    if v in (None, "", "NA"):
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _trc_consensus_founder(periods):
+    """Median of the largest ±_TRC_CONSENSUS_TOL period cluster across the
+    strict (Pass-1) per-TRA founder assignments in one TRC. Returns
+    (consensus_period, n_supporting) or (None, 0) when the cluster is
+    too small (< _TRC_CONSENSUS_MIN_ARRAYS) or doesn't hold enough of
+    the TRC's reassigned arrays (< _TRC_CONSENSUS_MIN_FRAC)."""
+    if len(periods) < _TRC_CONSENSUS_MIN_ARRAYS:
+        return None, 0
+    best_n, best_members = 0, None
+    for anchor in periods:
+        members = [p for p in periods
+                   if abs(p - anchor) / max(anchor, 1.0) <= _TRC_CONSENSUS_TOL]
+        if len(members) > best_n:
+            best_n, best_members = len(members), members
+    if (best_n < _TRC_CONSENSUS_MIN_ARRAYS
+        or best_n / len(periods) < _TRC_CONSENSUS_MIN_FRAC):
+        return None, 0
+    return statistics.median(best_members), best_n
+
+
+def _rescue_founder_from_trc(peaks, strongest, trc_consensus):
+    """Pass 2 — TRC-aware rescue. Look for a rescored peak whose period
+    is within max(±10%, ±20bp) of the TRC consensus founder, with the
+    relaxed id_med gate (>= 0.5). Returns (peak, period) or None."""
+    if trc_consensus is None or strongest is None:
+        return None
+    window = max(trc_consensus * _RESCUE_WINDOW_PCT, _RESCUE_WINDOW_BP_MIN)
+    candidates = []
+    for p in peaks:
+        P = _num_or_none(p.get("period"))
+        if P is None or P >= strongest:
+            continue
+        if abs(P - trc_consensus) > window:
+            continue
+        idm = _num_or_none(p.get("identity_med"))
+        if idm is None or idm < _RESCUE_ID_MIN:
+            continue
+        candidates.append((abs(P - trc_consensus), P, p))
+    if not candidates:
+        return None
+    candidates.sort()              # closest to consensus wins
+    _, period, peak = candidates[0]
+    return peak, period
+
+
+def _relaxed_individual_founder(peaks, strongest, kmax=_KMAX):
+    """Pass 3 — solo / no-consensus fallback. Relaxed ±0.20 multiplicity
+    tolerance, strict id_med >= 0.7 gate. Returns (peak, P, k_round,
+    k_raw) or None."""
+    if strongest is None:
+        return None
+    cands = []
+    for p in peaks:
+        P = _num_or_none(p.get("period"))
+        if P is None or P >= strongest:
+            continue
+        idm = _num_or_none(p.get("identity_med"))
+        if idm is None or idm < _RELAXED_ID_MIN:
+            continue
+        k = strongest / P
+        kr = round(k)
+        if not (2 <= kr <= kmax):
+            continue
+        if abs(k - kr) > _RELAXED_RATIO_TOL:
+            continue
+        cands.append((P, p, kr, k))
+    if not cands:
+        return None
+    cands.sort(key=lambda c: c[0])
+    P, peak, kr, k = cands[0]
+    return peak, P, kr, k
+
+
 def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
     """Build the per-array summary CSV (one row per array) from kitehor
     >=0.12.0 outputs: the rescored peaks TSV (`<prefix>.rescored.peaks.tsv`,
@@ -2154,41 +2248,46 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
     (`<prefix>.ssr.tsv`). Filename stays `monomer_size_top3_estimats.csv`
     so tc_per_tra_consensus.py + the R consensus prototype still find it.
 
-    Per array we compute:
+    Per array we compute, in three passes:
 
-    - **founder period / strongest period / multiplicity**: rescore's
-      `founder_period` column is treated as the *strongest* (highest-
-      identity) period. The *founder* is reassigned by searching for the
-      smallest peak P whose period is an integer divisor of strongest
-      (k = strongest/P, 2 ≤ k ≤ 30, |k - round(k)| ≤ 0.05) with
-      `identity_med(P) ≥ 0.7`. If no qualifying divisor exists,
+    - **Pass 1 (per-TRA strict)**: rescore's `founder_period` column is
+      the *strongest* (highest-identity) period. The *founder* is
+      reassigned by searching for the smallest peak P whose period is
+      an integer divisor of strongest (k = strongest/P, 2 ≤ k ≤ 30,
+      |k - round(k)| ≤ 0.05) with `identity_med(P) ≥ 0.7`. If none,
       founder = strongest, multiplicity = 1.
+    - **Pass 2 (TRC consensus rescue)**: for each TRC, compute the
+      consensus founder from Pass-1 successes (median of the largest
+      ±10% cluster; gated by ≥ 3 arrays AND ≥ 25 % of the TRC's
+      reassigned arrays). Arrays where Pass 1 left founder=strongest
+      look for a rescored peak within max(±10%, ±20bp) of the
+      consensus with id_med ≥ 0.5; if found, set founder = that peak's
+      period, multiplicity = round(strongest/founder), and mark
+      **irregular_multiplicity = true** (the raw fractional k is
+      stored in `multiplicity_raw`).
+    - **Pass 3 (solo / no-consensus fallback)**: when Pass 2 can't help
+      (no TRC consensus, or no peak near it), relax the per-array
+      multiplicity tolerance to ±0.20 (still id_med ≥ 0.7), flagging
+      success as irregular_multiplicity = true.
+
+    Other columns:
     - **founder_fallback**: true when rescore returned NA founder_period
-      (no peak passed the 0.7 identity gate, or every candidate sat
-      above --max-period). The report visually marks these.
-    - **delta_id_pp**: identity_med(strongest) − identity_med(founder),
-      in percentage points. NA when founder = strongest (tie).
-    - **top-5 monomer estimates by score** for the "Monomer size
-      estimates (Score)" report cell.
-    - **top-2 subrepeat candidates by scan_occupancy_frac** drawn from
-      peaks classified HIGH or LIKELY (see _classify_subrepeat_tier).
-      Every non-rejected peak is also tier-labelled for the Details
-      panel — the rerender re-reads the rescored peaks TSV directly
-      and re-runs the classifier so this CSV stays compact.
+      (separate concept from irregular_multiplicity).
+    - **delta_id_pp**: identity_med(strongest) − identity_med(founder)
+      in percentage points; NA when founder = strongest.
+    - **top-5 monomer estimates by score**.
+    - **top-2 subrepeat candidates** drawn from peaks classified HIGH
+      or LIKELY (see _classify_subrepeat_tier).
     - **SSR fields** lifted from `<prefix>.ssr.tsv`.
 
-    The `kite_tsv` argument is currently unused but is kept on the
-    signature to keep the call site self-documenting (it pairs with the
-    rescored peaks file). Empty `hor_status` / `hor_confidence` cells
-    are emitted so the per-TRA consensus R script's HOR_* alias shim
-    doesn't choke on the missing columns."""
+    `kite_tsv` is currently unused but kept on the signature to keep
+    the call site self-documenting (it pairs with the rescored peaks
+    file). Empty `hor_status` / `hor_confidence` cells are emitted so
+    the per-TRA consensus R script's HOR_* alias shim doesn't choke."""
     import csv
     import collections
 
-    def _num(v):
-        if v in (None, "", "NA"): return None
-        try: return float(v)
-        except (TypeError, ValueError): return None
+    _num = _num_or_none
 
     def _fmt_bp(v):
         if v is None: return ""
@@ -2225,8 +2324,10 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
             for r in csv.DictReader(fh, delimiter="\t"):
                 ssr_by_rec[r["record_id"]] = r
 
-    # ---- Per-array derivation ----
-    rows = []
+    # ---- Pass 1: per-array strict reassignment ----
+    # Stash one dict per record with the strict result + the raw peaks
+    # list (used again in Pass 2/3 and for the subrepeat tier classifier).
+    pass1 = []
     for record_id, peaks in peaks_by_rec.items():
         if ":" not in record_id:
             continue
@@ -2235,23 +2336,21 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
         if len(parts) != 3:
             continue
         seqid, start, end = parts
-        rank1 = peaks[0]                 # kite top-by-score
-        fp_raw = rank1.get("founder_period", "NA")
-        fp = _num(fp_raw)
+        rank1 = peaks[0]
+        fp = _num(rank1.get("founder_period"))
         fallback = False
         if fp is None:
-            # Rescore couldn't tell us a founder — fall back to rank-1.
             fallback        = True
             strongest_peak  = rank1
             strongest_period = _num(rank1.get("period"))
             founder_peak    = rank1
             founder_period  = strongest_period
             multiplicity    = 1
+            multiplicity_raw = 1.0 if strongest_period else None
         else:
             strongest_period = fp
             strongest_peak   = next(
                 (p for p in peaks if _num(p.get("period")) == fp), rank1)
-            # Search for the smallest divisor with id_med >= 0.7.
             candidates = []
             for p in peaks:
                 P = _num(p.get("period"))
@@ -2266,24 +2365,96 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
                     continue
                 if abs(k - kr) > _RATIO_TOL:
                     continue
-                candidates.append((P, idm, kr, p))
+                candidates.append((P, idm, kr, k, p))
             if candidates:
                 candidates.sort(key=lambda c: c[0])    # smallest period wins
-                founder_period, _id, multiplicity, founder_peak = candidates[0]
+                P, _id, kr, k_raw, fp_peak = candidates[0]
+                founder_period   = P
+                founder_peak     = fp_peak
+                multiplicity     = kr
+                multiplicity_raw = k_raw
             else:
-                founder_period = strongest_period
-                founder_peak   = strongest_peak
-                multiplicity   = 1
+                founder_period   = strongest_period
+                founder_peak     = strongest_peak
+                multiplicity     = 1
+                multiplicity_raw = 1.0
+        pass1.append({
+            "record_id":         record_id,
+            "trc":               trc,
+            "seqid":             seqid,
+            "start":             start,
+            "end":               end,
+            "peaks":             peaks,
+            "rank1":             rank1,
+            "strongest_peak":    strongest_peak,
+            "strongest_period":  strongest_period,
+            "founder_peak":      founder_peak,
+            "founder_period":    founder_period,
+            "multiplicity":      multiplicity,
+            "multiplicity_raw":  multiplicity_raw,
+            "fallback":          fallback,
+            "irregular":         False,
+        })
 
-        founder_id   = _num(founder_peak.get("identity_med"))
-        strongest_id = _num(strongest_peak.get("identity_med"))
+    # ---- Pass 2 prep: TRC consensus founder from Pass-1 successes ----
+    records_by_trc = collections.defaultdict(list)
+    for e in pass1:
+        records_by_trc[e["trc"]].append(e)
+    consensus_by_trc = {}
+    for trc, recs in records_by_trc.items():
+        strict_founders = [e["founder_period"] for e in recs
+                           if e["multiplicity"] > 1 and not e["fallback"]
+                           and e["founder_period"] is not None]
+        consensus_period, _n = _trc_consensus_founder(strict_founders)
+        consensus_by_trc[trc] = consensus_period
+
+    # ---- Pass 2 + Pass 3: rescue arrays where Pass 1 left mult=1 ----
+    for e in pass1:
+        if e["multiplicity"] > 1 or e["fallback"]:
+            continue
+        if e["strongest_period"] is None:
+            continue
+        # Pass 2 — TRC consensus rescue
+        trc_consensus = consensus_by_trc.get(e["trc"])
+        rescued = _rescue_founder_from_trc(
+            e["peaks"], e["strongest_period"], trc_consensus)
+        if rescued:
+            founder_peak, founder_period = rescued
+            raw = e["strongest_period"] / founder_period
+            kr  = int(round(raw))
+            # Only count as a real rescue when the rounded multiplicity
+            # is at least 2 — strongest ≈ founder rescues add no HOR
+            # signal and would inflate the irregular count.
+            if kr >= 2:
+                e["founder_peak"]     = founder_peak
+                e["founder_period"]   = founder_period
+                e["multiplicity_raw"] = raw
+                e["multiplicity"]     = kr
+                e["irregular"]        = True
+                continue
+        # Pass 3 — solo / no-consensus relaxed individual fallback
+        relaxed = _relaxed_individual_founder(e["peaks"], e["strongest_period"])
+        if relaxed:
+            founder_peak, P, kr, k_raw = relaxed
+            e["founder_peak"]     = founder_peak
+            e["founder_period"]   = P
+            e["multiplicity"]     = kr
+            e["multiplicity_raw"] = k_raw
+            e["irregular"]        = True
+
+    # ---- Build output rows ----
+    rows = []
+    for e in pass1:
+        founder_id   = _num(e["founder_peak"].get("identity_med"))
+        strongest_id = _num(e["strongest_peak"].get("identity_med"))
         delta_id_pp = (
             (strongest_id - founder_id) * 100.0
             if (founder_id is not None and strongest_id is not None
-                and multiplicity > 1)
+                and e["multiplicity"] > 1)
             else None)
 
         # Top-5 peaks by score (rescored peaks are emitted in rank order).
+        peaks = e["peaks"]
         top5 = peaks[:5] + [None] * max(0, 5 - len(peaks))
         ms_scores = [
             (None, None) if p is None
@@ -2294,7 +2465,7 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
         # scan_occupancy_frac desc, take top 2.
         sr_keep = []
         for p in peaks:
-            t = _classify_subrepeat_tier(p, founder_period)
+            t = _classify_subrepeat_tier(p, e["founder_period"])
             if t in ("HIGH", "LIKELY"):
                 sr_keep.append((
                     _num(p.get("scan_occupancy_frac")) or 0.0,
@@ -2304,13 +2475,13 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
         sr1 = sr_keep[0] if len(sr_keep) > 0 else None
         sr2 = sr_keep[1] if len(sr_keep) > 1 else None
 
-        ssr = ssr_by_rec.get(record_id, {})
+        ssr = ssr_by_rec.get(e["record_id"], {})
         rows.append({
-            "TRC_ID":            trc,
-            "seqid":             seqid,
-            "start":             start,
-            "end":               end,
-            "array_length":      rank1.get("array_length", ""),
+            "TRC_ID":            e["trc"],
+            "seqid":             e["seqid"],
+            "start":             e["start"],
+            "end":               e["end"],
+            "array_length":      e["rank1"].get("array_length", ""),
             "monomer_size":      _fmt_bp(ms_scores[0][0]),
             "score":             _fmt_sc(ms_scores[0][1]),
             "monomer_size_2":    _fmt_bp(ms_scores[1][0]),
@@ -2321,17 +2492,18 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
             "score_4":           _fmt_sc(ms_scores[3][1]),
             "monomer_size_5":    _fmt_bp(ms_scores[4][0]),
             "score_5":           _fmt_sc(ms_scores[4][1]),
-            # Legacy hor_* columns kept empty for the R consensus
-            # prototype's HOR_* alias shim (don't remove these keys).
             "hor_status":        "",
             "hor_confidence":    "",
-            "founder_period":    _fmt_bp(founder_period),
-            "strongest_period":  _fmt_bp(strongest_period),
-            "multiplicity":      str(multiplicity),
+            "founder_period":    _fmt_bp(e["founder_period"]),
+            "strongest_period":  _fmt_bp(e["strongest_period"]),
+            "multiplicity":      str(e["multiplicity"]),
+            "multiplicity_raw":  (f"{e['multiplicity_raw']:.4f}"
+                                  if e["multiplicity_raw"] is not None else ""),
+            "irregular_multiplicity": "true" if e["irregular"] else "false",
             "delta_id_pp":       _fmt_pp(delta_id_pp),
             "founder_id_med":    _fmt_id(founder_id),
             "strongest_id_med":  _fmt_id(strongest_id),
-            "founder_fallback":  "true" if fallback else "false",
+            "founder_fallback":  "true" if e["fallback"] else "false",
             "subrepeat_1_period": _fmt_bp(sr1[1]) if sr1 else "",
             "subrepeat_1_occ":    _fmt_id(sr1[0]) if sr1 else "",
             "subrepeat_1_tier":   sr1[2] if sr1 else "",
@@ -2361,6 +2533,7 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
         "monomer_size_5", "score_5",
         "hor_status", "hor_confidence",
         "founder_period", "strongest_period", "multiplicity",
+        "multiplicity_raw", "irregular_multiplicity",
         "delta_id_pp", "founder_id_med", "strongest_id_med",
         "founder_fallback",
         "subrepeat_1_period", "subrepeat_1_occ", "subrepeat_1_tier",

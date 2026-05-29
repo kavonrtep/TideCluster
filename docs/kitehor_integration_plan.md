@@ -434,3 +434,56 @@ class-driven roll-ups), `tarean/assets/tidecluster.js`
 (`initDetailsExpand` for the DataTables child rows; generalise the
 floating tooltip), `tarean/assets/tidecluster.css` (tier pills,
 details row, fallback marker).
+
+## Addendum (cont.): TRC-aware two-pass founder reassignment
+
+After the initial v0.12 cut shipped, we extended the per-array
+founder reassignment into a **three-pass** algorithm that exploits
+cluster-level context. The motivating case is CEN6's TRC_1:
+`84848657..84876251` — strongest period 2386 bp (id_med 0.998), a
+clear ~503 bp peak at id_med 0.736 (passes the 0.7 gate), but
+2386/503 = 4.744 is well outside the ±0.05 strict integer-multiple
+window. The cluster as a whole prefers a ~500 bp founder (median 502
+across 31/33 arrays once we look TRC-wide).
+
+**Algorithm (`tc_utils.build_monomer_size_csv`):**
+
+1. **Pass 1 — per-TRA strict**: smallest divisor with `id_med ≥ 0.7`,
+   integer k ∈ [2, 30], ratio tolerance ±0.05 (unchanged).
+2. **Pass 2 — TRC consensus rescue**: per TRC, the consensus founder
+   is the median of the largest ±10 % cluster of Pass-1 founders;
+   gated by ≥ 3 arrays AND ≥ 25 % of the TRC's reassigned arrays.
+   Arrays where Pass 1 left founder = strongest look for a rescored
+   peak within `max(±10 %, ±20 bp)` of the consensus with
+   `id_med ≥ 0.5` (relaxed because the cluster context provides a
+   strong prior). The rescue is only adopted when the resulting
+   multiplicity rounds to ≥ 2 (rescues where strongest ≈ founder add
+   no HOR signal). The array gets `irregular_multiplicity = true`
+   and the raw fractional k is stored in `multiplicity_raw`.
+3. **Pass 3 — solo / no-consensus relaxed individual**: per-array
+   tolerance relaxed to ±0.20 of integer, still `id_med ≥ 0.7`,
+   k ∈ [2, 30]. Flagged irregular when it fires. Designed for TRCs
+   with no consensus (e.g. solo-TRA TRCs).
+
+**Validated on CEN6**:
+- TRC_1 strict-only: 7/33 arrays reassigned.
+- After Pass 2: 18/33 arrays carry an HOR multiplicity (11 of them
+  rescued via the consensus, 7 strict), with the distribution
+  `×2 (12), ×3 (2), ×4 (1), ×5 (3)`.
+- Prevalent founder for TRC_1: 502 bp (in 31/33 arrays).
+- Across the whole assembly: HOR call count rose from 7 (strict-only)
+  to 19 (7 strict + 12 rescued).
+
+**Report:**
+
+- Per-TRA table `×k` cell appends a `~` pill (amber) when
+  `irregular_multiplicity = true`; hovering shows the raw fractional
+  k (e.g. `~` → "irregular multiplicity (k = 4.74)").
+- Details child row header gains an `irreg` tag plus `(k = 4.744)`.
+- Per-TRC Classification card adds **Prevalent founder**
+  ("502 bp (in 31/33 arrays)"), **HOR multiplicities** distribution
+  (`×2 (12), ×3 (2), ×4 (1), ×5 (3)`), and an **Arrays with
+  irregular multiplicity** counter when non-zero.
+
+**CSV schema additions** (`monomer_size_top3_estimats.csv`):
+`multiplicity_raw`, `irregular_multiplicity`.
