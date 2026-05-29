@@ -437,8 +437,27 @@ def class_totals(model):
     return total
 
 
-def class_legend_inline():
-    """One-line legend of the class badges, canonical display order."""
+def class_legend_inline(is_v012=False):
+    """One-line legend of the ideogram colour palette.
+
+    Legacy (pre-v0.12) reports use the kitehor combined_class cascade
+    and emit all seven canonical pills. v0.12 reports drop the cascade;
+    `_class_fill()` falls back to colouring by the dominant structural
+    signal (HOR / Subrepeat / SSR / Fallback / Plain TR) — the v0.12
+    legend matches that set and reuses the same colour swatches as the
+    badges elsewhere in the report."""
+    if is_v012:
+        v012_items = [
+            ("hor",               "HOR (×k≥2)"),
+            ("tr_with_subrepeat", "Subrepeat"),
+            ("pure_ssr",          "SSR"),
+            ("unresolved",        "Fallback founder"),
+            ("tr",                "Plain TR"),
+        ]
+        return " ".join(
+            f'<span class="class-badge class-{COMBINED_CLASS_CSS[key]}">'
+            f'{esc(label)}</span>'
+            for key, label in v012_items)
     return " ".join(class_badge(raw) for raw in CANONICAL_CLASS_ORDER)
 
 
@@ -2308,17 +2327,21 @@ def _render_ideogram(majors, by_seqid):
     return "\n".join(parts)
 
 
-def _render_minor_table(minors, by_seqid):
-    """DataTables row per minor contig with inline mini-SVG + HOR mix."""
+def _render_minor_table(minors, by_seqid, is_v012=False):
+    """DataTables row per minor contig with inline mini-SVG + (legacy)
+    combined_class mix. v0.12 reports drop the Class-mix column (every
+    row would render `—` because v0.12 has no combined_class)."""
     if not minors: return ""
     rows = []
     for sid, length in minors:
         arrs = by_seqid[sid]
         n = len(arrs)
         total_arr_len = sum(a["end"] - a["start"] for a in arrs)
-        class_counts = Counter(a.get("combined_class") for a in arrs
-                               if a.get("combined_class"))
-        mix_cells = class_mix_cell(class_counts)
+        mix_cells = ""
+        if not is_v012:
+            class_counts = Counter(a.get("combined_class") for a in arrs
+                                   if a.get("combined_class"))
+            mix_cells = class_mix_cell(class_counts)
         mini = [f'<svg viewBox="0 0 {TRC_DIST_MINI_WIDTH} {TRC_DIST_MINI_HEIGHT}" '
                 f'class="tc-mini-svg" style="width:{TRC_DIST_MINI_WIDTH}px;'
                 f'height:{TRC_DIST_MINI_HEIGHT}px;">']
@@ -2342,10 +2365,11 @@ def _render_minor_table(minors, by_seqid):
             f'<td data-order="{length}">{fmt_bp(length)}</td>'
             f'<td data-order="{n}">{n}</td>'
             f'<td data-order="{total_arr_len}">{fmt_bp(total_arr_len)}</td>'
-            f'<td>{mix_cells}</td>'
-            f'<td>{"".join(mini)}</td>'
+            + ("" if is_v012 else f'<td>{mix_cells}</td>')
+            + f'<td>{"".join(mini)}</td>'
             "</tr>"
         )
+    mix_th = "" if is_v012 else "<th>Class mix</th>"
     return f"""
     <h3>Minor contigs carrying arrays of this TRC ({len(minors)})</h3>
     <div class="tc-table-wrap">
@@ -2356,7 +2380,7 @@ def _render_minor_table(minors, by_seqid):
         <th>Length</th>
         <th>Arrays</th>
         <th>Total TRA length</th>
-        <th>Class mix</th>
+        {mix_th}
         <th>Positions</th>
       </tr></thead>
       <tbody>{"".join(rows)}</tbody>
@@ -2422,6 +2446,17 @@ def render_trc_distribution(trc, seqid_lengths):
             f"{len(minors_with_arrays)} minor contig"
             f"{'' if len(minors_with_arrays) == 1 else 's'} with arrays "
             f"({n_minor_arrays} array{'' if n_minor_arrays == 1 else 's'})")
+    is_v012 = any(a.get("founder_period") is not None for a in trc["arrays"])
+    colour_intro = (
+        "Array colour encodes the dominant structural signal &mdash; "
+        if is_v012
+        else "Array colour encodes the kitehor class &mdash; "
+    )
+    hover_hint = (
+        "Hover a rectangle to see coordinates and signals."
+        if is_v012
+        else "Hover a rectangle to see coordinates and class."
+    )
     summary = (
         f'<p style="font-size:12px;color:var(--fg-muted)">'
         f'Genome distribution of this TRC&#39;s arrays across the '
@@ -2429,16 +2464,15 @@ def render_trc_distribution(trc, seqid_lengths):
         + " · ".join(summary_parts) +
         f'. Every major scaffold is drawn even when it carries no '
         f'arrays of this TRC &mdash; absence is informative too. '
-        f'Array colour encodes the kitehor class &mdash; '
-        f'{class_legend_inline()}.'
-        f' Hover a rectangle to see coordinates and class.'
+        f'{colour_intro}{class_legend_inline(is_v012=is_v012)}.'
+        f' {hover_hint}'
         f'</p>'
     )
     return (
         f'<h2>TRA genome distribution</h2>'
         f'{summary}'
         f'<div class="tc-ideogram">{_render_ideogram(majors, by_seqid)}</div>'
-        f'{_render_minor_table(minors_with_arrays, by_seqid)}'
+        f'{_render_minor_table(minors_with_arrays, by_seqid, is_v012=is_v012)}'
     )
 
 
