@@ -272,6 +272,64 @@ table.tc-table img            { max-width: none; }
 
 /* dimmed score in the monomer-estimates cell */
 .tc-score { color: var(--fg-muted); font-size: 11px; margin-left: 1px; }
+.tc-meta  { color: var(--fg-muted); font-size: 11px; margin-left: 4px; }
+.tc-dim   { color: var(--fg-muted); }
+.tc-fallback { color: #c0392b; font-weight: bold; margin-left: 1px; }
+
+/* ======== per-array Details child row (DataTables row.child) ======== */
+.tc-details-col { width: 24px; padding: 4px 2px; }
+.tc-details-control {
+  width: 24px; cursor: pointer; user-select: none;
+  text-align: center; padding: 4px 2px;
+}
+.tc-details-control::before {
+  content: "▸"; display: inline-block;
+  transition: transform 0.12s ease;
+  color: var(--fg-muted); font-size: 13px;
+}
+.tc-details-control.open::before,
+tr.tc-details-open .tc-details-control::before {
+  transform: rotate(90deg); color: var(--accent);
+}
+.tc-details-control-static { cursor: default; opacity: 0.6; }
+.tc-details-row > td {
+  background: var(--stripe);
+  border-left: 3px solid var(--accent);
+  padding: 8px 10px;
+}
+.tc-details-summary {
+  font-size: 13px; padding: 2px 0 6px;
+}
+.tc-details-ssr {
+  font-size: 12px; color: var(--fg-muted); padding: 2px 0 6px;
+}
+.tc-details-table-wrap { overflow-x: auto; margin-top: 4px; }
+.tc-details-table {
+  width: 100%; border-collapse: collapse; font-size: 11px;
+  font-family: var(--font-mono);
+}
+.tc-details-table th, .tc-details-table td {
+  padding: 2px 6px; border-bottom: 1px solid var(--border);
+  text-align: right; white-space: nowrap;
+}
+.tc-details-table th:nth-child(-n+2),
+.tc-details-table td:nth-child(-n+2) { text-align: left; }
+.tc-details-table th { color: var(--fg-muted); font-weight: 600; }
+.tc-details-table td:last-child { text-align: center; }
+
+/* ======== subrepeat tier pills ======== */
+.tc-tier {
+  display: inline-block; padding: 1px 6px; margin: 0 2px;
+  border-radius: 3px; font-size: 10px; font-weight: 600;
+  white-space: nowrap; vertical-align: middle;
+}
+.tc-tier-high   { background: #2e8b2e; color: #ffffff; }
+.tc-tier-likely { background: #7fc6a8; color: #0e3d2a; }
+.tc-tier-kmer   { background: #e6d3f7; color: #4a2078; }
+.tc-tier-ambig  { background: #ffd9a6; color: #6b3f00; }
+.tc-tier-weak   { background: #e6e6e6; color: #4a4a4a; }
+.tc-tier-obs    { background: #cfe0f7; color: #163a6b; }
+.tc-tier-rej    { background: #f0f0f0; color: #888888; font-weight: 500; }
 
 /* ======== cluster-overview scatter ======== */
 .tc-scatter-wrap {

@@ -1,42 +1,74 @@
 ## 1.10.0 (unreleased)
 - KITE step now runs [kitehor](https://github.com/kavonrtep/kitehor)
-  `0.10.0` (Rust) instead of the R `tarean/kite.R` script. Same k-mer
-  interval principle, plus an HOR verdict + multiplicity, SSR scan,
-  the unified `tandem_validate` subrepeat detector, and a single
-  `combined_class` per array — one of `hor`, `hor_with_ssr`, `tr`,
-  `tr_with_ssr`, `tr_with_subrepeat`, `pure_ssr`, `unresolved`.
-  kitehor's 6 per-stage TSVs plus a single `kitehor.periodogram`
-  bundle are written under `<prefix>_kite/`.
-- Report (v2): the per-array table on each TRC page now shows the
-  kitehor `combined_class` (friendly-named, colour-coded), the top-5
-  monomer-size estimates with scores, and a per-class "Structure"
-  cell (HOR base/unit/multiplicity, host monomer + subrepeat period,
-  or SSR coverage + top motifs). The KITE overview, the per-TRC
-  classification card, the merged TRC table, and the genome-distribution
-  ideograms are all driven by `combined_class` instead of the old
-  HOR strong/moderate/weak/none confidence bins.
-- `monomer_size_top3_estimats.csv` schema (consumed by
-  `tc_per_tra_consensus.py` and `tc_rerender_report.py`):
-  - HOR columns use kitehor's lowercase names (`hor_status`,
-    `hor_confidence`, `hor_founder`, `hor_tile`, `hor_multiplicity`).
-  - Top-5 monomer-size peaks (`monomer_size`..`monomer_size_5` +
-    matching `score*`), joined from `kitehor.kite.peaks.tsv`.
-  - Structural columns: `combined_class`, the `tandem_validate`
-    `tv_*` columns (`tv_decision`, `tv_host_period`,
-    `tv_best_candidate_period`, `tv_best_candidate_kind`, `tv_density`,
-    `tv_spatial_contrast`, `tv_phase_contrast`, `tv_n_windows_total`,
-    `tv_n_windows_present`, `tv_reason`), and the SSR columns
-    (`ssr_flag`, `ssr_dominant_motif`, `ssr_total_coverage_pct`,
+  `0.12.0` (Rust) instead of the R `tarean/kite.R` script. The slow
+  cascade (`rule-classify` → `tandem-validate` → `summary-merge`)
+  is dropped in favour of a leaner two-stage flow:
+    1. `kitehor kite-periodicity --periodogram --out-peaks` — k-mer
+       interval scan + periodogram bundle + long-format peaks TSV.
+    2. In parallel: `kitehor rescore` (banded semi-global alignment
+       per kite peak; appends `identity_med`, `identity_iqr`,
+       `phantom`, `subrepeat`, `coverage_frac`, `scan_*`,
+       `kmer_autocorr_founder`, `kmer_phase_contrast`, and a per-
+       record `founder_period`) and `kitehor ssr-scan`.
+  Two new CLI flags on `TideCluster.py run_all`/`tarean`:
+  `--kite-rescore-max-period` (default 10000) and `--kite-rescore-top-n`
+  (default 20).
+- Founder / Strongest / Multiplicity are now derived in TideCluster from
+  the rescored peaks. **Strongest** = rescore's `founder_period`
+  (highest-identity peak). **Founder** = the smallest peak P with
+  `identity_med(P) ≥ 0.7` whose period is an integer divisor of
+  Strongest (k = Strongest/P, 2 ≤ k ≤ 30, ±0.05 tolerance) — recovering
+  the v0.10-style HOR base / tile decomposition. When rescore returns
+  NA founder_period (no peak passes 0.7 or every peak above
+  `--kite-rescore-max-period`), TideCluster falls back to the
+  top-scored kite peak (rank 1) and marks the array as a fallback in
+  the report.
+- Subrepeat tiering is ported from kitehor's `docs/rule_proto.md`
+  cheat-sheet: per peak, tier ∈ `{HIGH, LIKELY, KMER_SUPPORT,
+  AMBIGUOUS, WEAK, OBSERVATIONAL, REJECT_*}`. The per-array
+  "Subrepeat" column surfaces the top 2 HIGH/LIKELY candidates by
+  `scan_occupancy_frac` desc; the Details child row labels every
+  non-rejected peak with its tier. Strict by design — subrepeats
+  are intentionally rare.
+- Report (v2) — per-TRA table redesigned:
+    ▸ # · seqid · start · end · length · Founder · Δid · Strongest
+    · ×k · Other periods · Subrepeat · SSR
+  Coloured tier pills mark subrepeat strength; a click on the ▸
+  control opens a Details child row with the full rescore diagnostic
+  table (every peak: rank, period, score, id_med, id_iqr, occ,
+  scan_n, cov_frac, spatial, autoF, phaseC, subrepeat, phantom,
+  tier). Founder cells get a red `*` when the rescore fallback fired.
+- Report (v2) — roll-ups updated: the per-TRC Classification card,
+  the index summary, and the KITE overview swap the old
+  `combined_class` distribution / Class mix columns for per-array
+  counters (HOR ×k≥2, Subrepeat, SSR, Fallback). Genome-distribution
+  ideograms colour by the dominant signal per array (HOR green,
+  subrepeat teal, SSR purple, fallback red, simple TR neutral grey).
+- `monomer_size_top3_estimats.csv` schema (still consumed by
+  `tc_per_tra_consensus.py` and the R consensus prototype):
+  - HOR columns (`hor_status`, `hor_confidence`) kept as empty cells
+    for the per-TRA consensus R script's `HOR_*` alias shim.
+  - Top-5 monomer-size peaks by score (`monomer_size` ..
+    `monomer_size_5` + `score*`), from the rescored peaks file.
+  - New columns: `founder_period`, `strongest_period`, `multiplicity`,
+    `delta_id_pp`, `founder_id_med`, `strongest_id_med`,
+    `founder_fallback`, `subrepeat_{1,2}_period`,
+    `subrepeat_{1,2}_occ`, `subrepeat_{1,2}_tier`, and the SSR
+    columns (`ssr_flag`, `ssr_dominant_motif`,
+    `ssr_dominant_motif_coverage_pct`, `ssr_total_coverage_pct`,
     `ssr_top_motifs`, `consensus_period_bp`).
-  - Rerender still reads the kitehor 0.9.x columns (`subrepeat_*`,
-    `tr_with_nested_tr`) and the legacy capitalised `HOR_*` schema, so
-    archival output directories from earlier versions still render.
+  - The full rescored peaks TSV (`kitehor.rescored.peaks.tsv`, 24
+    cols × every peak per array) is the source of truth for the
+    Details child row and stays alongside.
+  - Rerender still reads the kitehor 0.10.x (`combined_class` +
+    `tv_*`) and 0.9.x (`subrepeat_*` + `tr_with_nested_tr`) schemas
+    plus the legacy capitalised `HOR_*` schema, so archival output
+    directories from earlier versions still render with the
+    appropriate roll-ups.
 - Per-TRC heatmap PNGs (`profile_plots/profile_*.png`,
-  `profile_plots/profile_top3_*.png`) now rendered by
-  `tarean/kite_heatmaps.R` (base R only) from kitehor's
-  `--periodogram` bundle. `peaks_list.RDS` is no longer emitted; the
-  per-array spectra live in `<prefix>_kite/kitehor.periodogram`.
-- New conda runtime dependency: `kitehor=0.10.0` (requires
+  `profile_plots/profile_top3_*.png`) still rendered by
+  `tarean/kite_heatmaps.R` from kitehor's `--periodogram` bundle.
+- New conda runtime dependency: `kitehor=0.12.0` (requires
   `-c petrnovak`). No new Python plotting deps.
 - Removed: `tarean/kite.R` (736 lines).
 

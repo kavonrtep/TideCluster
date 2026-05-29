@@ -9,6 +9,7 @@ coordinates in the table must be recalculated to the original sequence
 import glob
 import json
 import os
+import subprocess
 import sys
 import tempfile
 from multiprocessing import Pool
@@ -126,10 +127,15 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
             for i in omitted_clusters:
                 f.write(F"{i[0]}\t{i[1]}\t{i[2]}\n")
 
-    # RUN kitehor (Rust HOR / SSR / subrepeat detector) + R heatmap renderer.
-    # Single `analyze --periodogram` call: kitehor emits the 9 per-stage
-    # TSVs plus the per-array H[d]/bg periodogram bundle. The R helper
-    # turns the bundle into per-TRC heatmap PNGs the v2 report embeds.
+    # RUN kitehor (Rust k-mer periodicity + rescore + SSR scan).
+    #
+    # Pipeline (kitehor >=0.12.0): kite-periodicity emits the kite top-3
+    # TSV + the long-format peaks TSV + the H[d]/bg periodogram bundle,
+    # then `rescore` and `ssr-scan` run **in parallel** against that
+    # peaks TSV. The slow `analyze` cascade (rule-classify + tandem-
+    # validate + summary-merge) is dropped — TideCluster derives the
+    # per-array founder / strongest / subrepeat-candidate structure
+    # itself from rescore's identity_med + scan_occupancy_frac etc.
     # See docs/kitehor_integration_plan.md for the full mapping.
     kite_dir = F"{prefix}_kite"
     os.makedirs(kite_dir, exist_ok=True)
@@ -139,16 +145,44 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
     if n_kite_records == 0:
         print("No arrays passed to kitehor; skipping KITE step.")
     else:
-        print(F"Running kitehor analyze on {n_kite_records} array(s).")
-        tc.run_cmd(F"kitehor analyze {multi_fa}"
-                   F" -o {kite_dir}/kitehor"
+        rescore_max_period = int(getattr(args, "kite_rescore_max_period", 10000))
+        rescore_top_n      = int(getattr(args, "kite_rescore_top_n",      20))
+        print(F"Running kitehor kite-periodicity on {n_kite_records} array(s).")
+        tc.run_cmd(F"kitehor kite-periodicity {multi_fa}"
+                   F" --out {kite_dir}/kitehor.kite.tsv"
+                   F" --out-peaks {kite_dir}/kitehor.kite.peaks.tsv"
                    F" --periodogram {kite_dir}/kitehor.periodogram"
                    F" --threads {cpu}")
+        # rescore + ssr-scan are independent — run them concurrently.
+        # rayon inside each binary still uses --threads, so we split the
+        # CPU budget between the two.
+        half = max(1, cpu // 2)
+        rescore_cmd = (
+            F"kitehor rescore"
+            F" --peaks {kite_dir}/kitehor.kite.peaks.tsv"
+            F" --out {kite_dir}/kitehor.rescored"
+            F" --max-period {rescore_max_period}"
+            F" --top-n {rescore_top_n}"
+            F" --threads {half} {multi_fa}")
+        ssr_cmd = (
+            F"kitehor ssr-scan"
+            F" --kite-peaks {kite_dir}/kitehor.kite.peaks.tsv"
+            F" --out {kite_dir}/kitehor {multi_fa}")
+        print(F"Running kitehor rescore (max-period {rescore_max_period},"
+              F" top-n {rescore_top_n}) || ssr-scan in parallel.")
+        rescore_proc = subprocess.Popen(rescore_cmd, shell=True)
+        ssr_proc     = subprocess.Popen(ssr_cmd,     shell=True)
+        rc1 = rescore_proc.wait()
+        rc2 = ssr_proc.wait()
+        if rc1 != 0:
+            raise RuntimeError(F"kitehor rescore failed (exit {rc1})")
+        if rc2 != 0:
+            raise RuntimeError(F"kitehor ssr-scan failed (exit {rc2})")
         tc.build_monomer_size_csv(
             kite_tsv=F"{kite_dir}/kitehor.kite.tsv",
-            summary_tsv=F"{kite_dir}/kitehor.summary.tsv",
-            out_csv=F"{kite_dir}/monomer_size_top3_estimats.csv",
-            peaks_tsv=F"{kite_dir}/kitehor.kite.peaks.tsv")
+            ssr_tsv=F"{kite_dir}/kitehor.ssr.tsv",
+            rescored_peaks_tsv=F"{kite_dir}/kitehor.rescored.peaks.tsv",
+            out_csv=F"{kite_dir}/monomer_size_top3_estimats.csv")
         print("Rendering per-TRC profile heatmaps.")
         tc.run_cmd(F"{script_path}/tarean/kite_heatmaps.R"
                    F" --periodogram {kite_dir}/kitehor.periodogram"
@@ -991,6 +1025,17 @@ if __name__ == "__main__":
                   "cluster, required for inclusion in TAREAN analysis."
                   "Default (%(default)s)")
             )
+    parser_tarean.add_argument(
+            "--kite_rescore_max_period", type=int, default=10000,
+            help=("kitehor `rescore --max-period` cap (bp). Peaks above this stay "
+                  "NA in rescore output; TideCluster falls back to the top-scored "
+                  "kite peak for those arrays. Default (%(default)s)")
+            )
+    parser_tarean.add_argument(
+            "--kite_rescore_top_n", type=int, default=20,
+            help=("kitehor `rescore --top-n` cap per array (number of kite peaks "
+                  "rescored). Default (%(default)s)")
+            )
 
     parser_run_all = subparsers.add_parser(
             'run_all', help='Run all steps of TideCluster'
@@ -1043,6 +1088,17 @@ if __name__ == "__main__":
             help=("Minimum combined length of tandem repeat arrays within a single "
                   "cluster, required for inclusion in TAREAN analysis."
                   "Default (%(default)s)")
+            )
+    parser_run_all.add_argument(
+            "--kite_rescore_max_period", type=int, default=10000,
+            help=("kitehor `rescore --max-period` cap (bp). Peaks above this stay "
+                  "NA in rescore output; TideCluster falls back to the top-scored "
+                  "kite peak for those arrays. Default (%(default)s)")
+            )
+    parser_run_all.add_argument(
+            "--kite_rescore_top_n", type=int, default=20,
+            help=("kitehor `rescore --top-n` cap per array (number of kite peaks "
+                  "rescored). Default (%(default)s)")
             )
 
     parser.description = """Wrapper of TideHunter

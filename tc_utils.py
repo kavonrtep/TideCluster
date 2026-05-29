@@ -2071,136 +2071,307 @@ def _kitehor_status(verdict, confidence):
     return "HOR strong"
 
 
-def build_monomer_size_csv(kite_tsv, summary_tsv, out_csv, peaks_tsv=None):
-    """Join kitehor's `<prefix>.kite.tsv` (top-3 monomer-size estimates
-    per array) and `<prefix>.summary.tsv` (structural verdict columns)
-    into the legacy-named `monomer_size_top3_estimats.csv` consumed by
-    tc_rerender_report.py and tc_per_tra_consensus.py.
+_FOUNDER_ID_MIN  = 0.7    # rescore --subrepeat-founder-id-min default
+_KMAX            = 30     # rescore --rule-k-max default
+_RATIO_TOL       = 0.05   # how close to integer multiplicity must be
+_SUBREP_RATIO    = 0.33   # period <= founder/3 ⇒ qualifies as candidate band
 
-    When `peaks_tsv` (`<prefix>.kite.peaks.tsv`) is given the join is
-    extended to the top-5 kept periodogram peaks per array
-    (`monomer_size_4/5`, `score_4/5`); kite.tsv itself only carries the
-    top-3. The report's "Monomer size estimates (Score)" column shows
-    these five ranked candidates.
 
-    Column casing follows kitehor (lowercase `hor_*`). The TRC_ID /
-    seqid / start / end columns are parsed back from the record_id
-    that build_kite_multifasta() encoded."""
+def _classify_subrepeat_tier(peak, founder_period):
+    """Per-peak subrepeat tier, ported from kitehor's decision tree
+    (docs/rule_proto.md). Reads only rescored peak columns:
+       HIGH               period<=founder/4, scan_occ>=0.15,
+                          AND (subrepeat=true OR phaseC>=0.10 OR autoF>=0.4)
+       LIKELY             period<=founder/4, scan_occ>=0.20, scan_n>=10
+       AMBIGUOUS          founder/4 < period <= founder/3 with mild support
+       OBSERVATIONAL      founder is NA but scan_occ >= 0.05
+       REJECT_*           any of the disqualifying rules (phantom,
+                          ratio > 1/3, founder-itself, no tandem run, ...)
+    The report's main 'Subrepeat' cell surfaces HIGH+LIKELY only; the
+    Details panel shows everything that wasn't rejected outright."""
+    def _num(v):
+        if v in (None, "", "NA"): return None
+        try: return float(v)
+        except (TypeError, ValueError): return None
+
+    if peak.get("phantom", "").strip() == "true":
+        return "REJECT_PHANTOM"
+    period = _num(peak.get("period"))
+    if period is None or period <= 0:
+        return "REJECT_BAD"
+    occ    = _num(peak.get("scan_occupancy_frac"))
+    if founder_period is None or founder_period <= 0:
+        # rule 4 — rescore over-flagged, no founder in record
+        if occ is None or occ < 0.05:
+            return "REJECT_NO_FOUNDER"
+        return "OBSERVATIONAL"
+    ratio = period / founder_period
+    idm    = _num(peak.get("identity_med"))
+    covf   = _num(peak.get("coverage_frac"))
+    scan_n = _num(peak.get("scan_n_intervals"))
+    phaseC = _num(peak.get("kmer_phase_contrast"))
+    autoF  = _num(peak.get("kmer_autocorr_founder"))
+    srflag = peak.get("subrepeat", "").strip() == "true"
+    # rule 1d — this peak IS a clean array-wide tandem at its own period
+    if (idm is not None and idm >= 0.85 and
+        covf is not None and covf >= 0.95 and
+        occ  is not None and occ  >= 0.95):
+        return "REJECT_IS_FOUNDER"
+    if ratio > _SUBREP_RATIO:
+        return "REJECT_TOO_LARGE"
+    if ratio <= 0.25:
+        # HIGH: per-base scan confirms tandem AND an independent signal
+        # (rescore subrepeat flag, phaseC, or autoF) agrees.
+        if (occ is not None and occ >= 0.15
+            and (srflag
+                 or (phaseC is not None and phaseC >= 0.10)
+                 or (autoF  is not None and autoF  >= 0.4))):
+            return "HIGH"
+        # LIKELY: per-base scan finds it even without alignment support.
+        if (occ is not None and occ >= 0.20
+            and scan_n is not None and scan_n >= 10):
+            return "LIKELY"
+        # KMER_SUPPORT: scan didn't catch it (e.g. interspersed not
+        # contiguous), but k-mer autocorrelation / phase contrast fires.
+        # Cheat-sheet calls this 'probably real'; we surface it in the
+        # Details panel rather than the main Subrepeat cell.
+        if ((phaseC is not None and phaseC >= 0.10)
+            or (autoF is not None and autoF  >= 0.4)):
+            return "KMER_SUPPORT"
+        return "WEAK"
+    # 0.25 < ratio <= 0.33 — ambiguous band
+    if ((occ is not None and occ >= 0.20)
+        or (phaseC is not None and phaseC >= 0.10)
+        or (autoF  is not None and autoF  >= 0.4)):
+        return "AMBIGUOUS"
+    return "REJECT_AMBIGUOUS_LOW"
+
+
+def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
+    """Build the per-array summary CSV (one row per array) from kitehor
+    >=0.12.0 outputs: the rescored peaks TSV (`<prefix>.rescored.peaks.tsv`,
+    24 cols = kite + 15 rescore) and the ssr-scan summary
+    (`<prefix>.ssr.tsv`). Filename stays `monomer_size_top3_estimats.csv`
+    so tc_per_tra_consensus.py + the R consensus prototype still find it.
+
+    Per array we compute:
+
+    - **founder period / strongest period / multiplicity**: rescore's
+      `founder_period` column is treated as the *strongest* (highest-
+      identity) period. The *founder* is reassigned by searching for the
+      smallest peak P whose period is an integer divisor of strongest
+      (k = strongest/P, 2 ≤ k ≤ 30, |k - round(k)| ≤ 0.05) with
+      `identity_med(P) ≥ 0.7`. If no qualifying divisor exists,
+      founder = strongest, multiplicity = 1.
+    - **founder_fallback**: true when rescore returned NA founder_period
+      (no peak passed the 0.7 identity gate, or every candidate sat
+      above --max-period). The report visually marks these.
+    - **delta_id_pp**: identity_med(strongest) − identity_med(founder),
+      in percentage points. NA when founder = strongest (tie).
+    - **top-5 monomer estimates by score** for the "Monomer size
+      estimates (Score)" report cell.
+    - **top-2 subrepeat candidates by scan_occupancy_frac** drawn from
+      peaks classified HIGH or LIKELY (see _classify_subrepeat_tier).
+      Every non-rejected peak is also tier-labelled for the Details
+      panel — the rerender re-reads the rescored peaks TSV directly
+      and re-runs the classifier so this CSV stays compact.
+    - **SSR fields** lifted from `<prefix>.ssr.tsv`.
+
+    The `kite_tsv` argument is currently unused but is kept on the
+    signature to keep the call site self-documenting (it pairs with the
+    rescored peaks file). Empty `hor_status` / `hor_confidence` cells
+    are emitted so the per-TRA consensus R script's HOR_* alias shim
+    doesn't choke on the missing columns."""
     import csv
+    import collections
 
-    summary_by_id = {}
-    with open(summary_tsv, newline="") as fh:
-        reader = csv.DictReader(fh, delimiter="\t")
-        for row in reader:
-            summary_by_id[row["record_id"]] = row
+    def _num(v):
+        if v in (None, "", "NA"): return None
+        try: return float(v)
+        except (TypeError, ValueError): return None
 
-    # Ranks 4-5 per array, lifted from the full peak list (kite.tsv stops
-    # at rank 3). Keyed by case_id; peaks.tsv is already score-ranked.
-    peaks_by_id = {}
-    if peaks_tsv and os.path.exists(peaks_tsv):
-        with open(peaks_tsv, newline="") as fh:
-            for pr in csv.DictReader(fh, delimiter="\t"):
-                try:
-                    rank = int(pr.get("rank", ""))
-                except (TypeError, ValueError):
+    def _fmt_bp(v):
+        if v is None: return ""
+        try:
+            iv = int(round(float(v)))
+            return str(iv) if abs(float(v) - iv) < 1e-6 else f"{float(v):g}"
+        except (TypeError, ValueError):
+            return ""
+
+    def _fmt_sc(v):
+        if v is None: return ""
+        return f"{float(v):.10f}".rstrip("0").rstrip(".")
+
+    def _fmt_id(v):
+        if v is None: return ""
+        return f"{float(v):.4f}".rstrip("0").rstrip(".")
+
+    def _fmt_pp(v):
+        if v is None: return ""
+        return f"{float(v):.2f}"
+
+    # ---- Read all rescored peaks, group by record_id, sort by rank ----
+    peaks_by_rec = collections.defaultdict(list)
+    with open(rescored_peaks_tsv, newline="") as fh:
+        for r in csv.DictReader(fh, delimiter="\t"):
+            peaks_by_rec[r["case_id"]].append(r)
+    for rs in peaks_by_rec.values():
+        rs.sort(key=lambda r: int(r.get("rank") or 0))
+
+    # ---- Read SSR scan summary keyed by record_id ----
+    ssr_by_rec = {}
+    if ssr_tsv and os.path.exists(ssr_tsv):
+        with open(ssr_tsv, newline="") as fh:
+            for r in csv.DictReader(fh, delimiter="\t"):
+                ssr_by_rec[r["record_id"]] = r
+
+    # ---- Per-array derivation ----
+    rows = []
+    for record_id, peaks in peaks_by_rec.items():
+        if ":" not in record_id:
+            continue
+        trc, rest = record_id.split(":", 1)
+        parts = rest.rsplit("_", 2)
+        if len(parts) != 3:
+            continue
+        seqid, start, end = parts
+        rank1 = peaks[0]                 # kite top-by-score
+        fp_raw = rank1.get("founder_period", "NA")
+        fp = _num(fp_raw)
+        fallback = False
+        if fp is None:
+            # Rescore couldn't tell us a founder — fall back to rank-1.
+            fallback        = True
+            strongest_peak  = rank1
+            strongest_period = _num(rank1.get("period"))
+            founder_peak    = rank1
+            founder_period  = strongest_period
+            multiplicity    = 1
+        else:
+            strongest_period = fp
+            strongest_peak   = next(
+                (p for p in peaks if _num(p.get("period")) == fp), rank1)
+            # Search for the smallest divisor with id_med >= 0.7.
+            candidates = []
+            for p in peaks:
+                P = _num(p.get("period"))
+                if P is None or P >= fp:
                     continue
-                if rank in (4, 5):
-                    peaks_by_id.setdefault(pr["case_id"], {})[rank] = (
-                        pr.get("period", ""), pr.get("score", ""))
+                idm = _num(p.get("identity_med"))
+                if idm is None or idm < _FOUNDER_ID_MIN:
+                    continue
+                k = fp / P
+                kr = round(k)
+                if not (2 <= kr <= _KMAX):
+                    continue
+                if abs(k - kr) > _RATIO_TOL:
+                    continue
+                candidates.append((P, idm, kr, p))
+            if candidates:
+                candidates.sort(key=lambda c: c[0])    # smallest period wins
+                founder_period, _id, multiplicity, founder_peak = candidates[0]
+            else:
+                founder_period = strongest_period
+                founder_peak   = strongest_peak
+                multiplicity   = 1
 
-    # Columns we lift verbatim from .summary.tsv into the joined CSV.
-    # kitehor 0.10.0 replaced the subrepeat-scan / hor-within-tile stages
-    # with the unified `tandem_validate` detector, so the structural
-    # subrepeat signal now lives in the tv_* columns (tv_host_period =
-    # host monomer, tv_best_candidate_period = subrepeat period).
-    summary_cols_out = [
-        "combined_class",
-        "tv_decision",
-        "tv_host_period",
-        "tv_best_candidate_period",
-        "tv_best_candidate_kind",
-        "tv_density",
-        "tv_spatial_contrast",
-        "tv_phase_contrast",
-        "tv_n_windows_total",
-        "tv_n_windows_present",
-        "tv_reason",
-        "ssr_flag",
-        "ssr_dominant_motif",
-        "ssr_total_coverage_pct",
-        "ssr_top_motifs",
-        "consensus_period_bp",
-    ]
+        founder_id   = _num(founder_peak.get("identity_med"))
+        strongest_id = _num(strongest_peak.get("identity_med"))
+        delta_id_pp = (
+            (strongest_id - founder_id) * 100.0
+            if (founder_id is not None and strongest_id is not None
+                and multiplicity > 1)
+            else None)
 
-    out_header = [
-        "TRC_ID", "seqid", "start", "end",
-        "monomer_size", "score", "array_length",
+        # Top-5 peaks by score (rescored peaks are emitted in rank order).
+        top5 = peaks[:5] + [None] * max(0, 5 - len(peaks))
+        ms_scores = [
+            (None, None) if p is None
+            else (_num(p.get("period")), _num(p.get("score")))
+            for p in top5]
+
+        # Subrepeat candidates: tier each peak, keep HIGH+LIKELY, sort by
+        # scan_occupancy_frac desc, take top 2.
+        sr_keep = []
+        for p in peaks:
+            t = _classify_subrepeat_tier(p, founder_period)
+            if t in ("HIGH", "LIKELY"):
+                sr_keep.append((
+                    _num(p.get("scan_occupancy_frac")) or 0.0,
+                    _num(p.get("period")),
+                    t))
+        sr_keep.sort(key=lambda c: -c[0])
+        sr1 = sr_keep[0] if len(sr_keep) > 0 else None
+        sr2 = sr_keep[1] if len(sr_keep) > 1 else None
+
+        ssr = ssr_by_rec.get(record_id, {})
+        rows.append({
+            "TRC_ID":            trc,
+            "seqid":             seqid,
+            "start":             start,
+            "end":               end,
+            "array_length":      rank1.get("array_length", ""),
+            "monomer_size":      _fmt_bp(ms_scores[0][0]),
+            "score":             _fmt_sc(ms_scores[0][1]),
+            "monomer_size_2":    _fmt_bp(ms_scores[1][0]),
+            "score_2":           _fmt_sc(ms_scores[1][1]),
+            "monomer_size_3":    _fmt_bp(ms_scores[2][0]),
+            "score_3":           _fmt_sc(ms_scores[2][1]),
+            "monomer_size_4":    _fmt_bp(ms_scores[3][0]),
+            "score_4":           _fmt_sc(ms_scores[3][1]),
+            "monomer_size_5":    _fmt_bp(ms_scores[4][0]),
+            "score_5":           _fmt_sc(ms_scores[4][1]),
+            # Legacy hor_* columns kept empty for the R consensus
+            # prototype's HOR_* alias shim (don't remove these keys).
+            "hor_status":        "",
+            "hor_confidence":    "",
+            "founder_period":    _fmt_bp(founder_period),
+            "strongest_period":  _fmt_bp(strongest_period),
+            "multiplicity":      str(multiplicity),
+            "delta_id_pp":       _fmt_pp(delta_id_pp),
+            "founder_id_med":    _fmt_id(founder_id),
+            "strongest_id_med":  _fmt_id(strongest_id),
+            "founder_fallback":  "true" if fallback else "false",
+            "subrepeat_1_period": _fmt_bp(sr1[1]) if sr1 else "",
+            "subrepeat_1_occ":    _fmt_id(sr1[0]) if sr1 else "",
+            "subrepeat_1_tier":   sr1[2] if sr1 else "",
+            "subrepeat_2_period": _fmt_bp(sr2[1]) if sr2 else "",
+            "subrepeat_2_occ":    _fmt_id(sr2[0]) if sr2 else "",
+            "subrepeat_2_tier":   sr2[2] if sr2 else "",
+            "ssr_flag":           ssr.get("ssr_flag", ""),
+            "ssr_dominant_motif": ssr.get("dominant_motif", ""),
+            "ssr_dominant_motif_coverage_pct":
+                                  ssr.get("dominant_motif_coverage_pct", ""),
+            "ssr_total_coverage_pct": ssr.get("total_ssr_coverage_pct", ""),
+            "ssr_top_motifs":     ssr.get("top_motifs", ""),
+            "consensus_period_bp":ssr.get("consensus_period_bp", ""),
+        })
+
+    def _sort_key(r):
+        try: return (0, int(r["TRC_ID"].split("_")[1]))
+        except (IndexError, ValueError): return (1, r["TRC_ID"])
+    rows.sort(key=_sort_key)
+
+    header = [
+        "TRC_ID", "seqid", "start", "end", "array_length",
+        "monomer_size",   "score",
         "monomer_size_2", "score_2",
         "monomer_size_3", "score_3",
         "monomer_size_4", "score_4",
         "monomer_size_5", "score_5",
         "hor_status", "hor_confidence",
-        "hor_founder", "hor_tile", "hor_multiplicity",
-    ] + summary_cols_out
-
-    def _trc_sort_key(row):
-        try:
-            return (0, int(row["TRC_ID"].split("_")[1]))
-        except (IndexError, ValueError):
-            return (1, row["TRC_ID"])
-
-    out_rows = []
-    with open(kite_tsv, newline="") as fh:
-        reader = csv.DictReader(fh, delimiter="\t")
-        for kr in reader:
-            record_id = kr["case_id"]
-            # record_id == "<TRC>:<seqid>_<start>_<end>"
-            if ":" not in record_id:
-                continue
-            trc, rest = record_id.split(":", 1)
-            parts = rest.rsplit("_", 2)
-            if len(parts) != 3:
-                continue
-            seqid, start, end = parts
-            sm = summary_by_id.get(record_id, {})
-            verdict = sm.get("hor_verdict", "")
-            confidence = sm.get("hor_confidence", "")
-            pk = peaks_by_id.get(record_id, {})
-            ms4, sc4 = pk.get(4, ("", ""))
-            ms5, sc5 = pk.get(5, ("", ""))
-            row = {
-                "TRC_ID":           trc,
-                "seqid":            seqid,
-                "start":            start,
-                "end":              end,
-                "monomer_size":     kr.get("monomer_size", ""),
-                "score":            kr.get("score", ""),
-                "array_length":     kr.get("array_length", ""),
-                "monomer_size_2":   kr.get("monomer_size_2", ""),
-                "score_2":          kr.get("score_2", ""),
-                "monomer_size_3":   kr.get("monomer_size_3", ""),
-                "score_3":          kr.get("score_3", ""),
-                "monomer_size_4":   ms4,
-                "score_4":          sc4,
-                "monomer_size_5":   ms5,
-                "score_5":          sc5,
-                "hor_status":       _kitehor_status(verdict, confidence),
-                "hor_confidence":   confidence,
-                "hor_founder":      sm.get("hor_founder", ""),
-                "hor_tile":         sm.get("hor_tile", ""),
-                "hor_multiplicity": sm.get("hor_multiplicity", ""),
-            }
-            for col in summary_cols_out:
-                row[col] = sm.get(col, "")
-            out_rows.append(row)
-
-    out_rows.sort(key=_trc_sort_key)
-
+        "founder_period", "strongest_period", "multiplicity",
+        "delta_id_pp", "founder_id_med", "strongest_id_med",
+        "founder_fallback",
+        "subrepeat_1_period", "subrepeat_1_occ", "subrepeat_1_tier",
+        "subrepeat_2_period", "subrepeat_2_occ", "subrepeat_2_tier",
+        "ssr_flag", "ssr_dominant_motif",
+        "ssr_dominant_motif_coverage_pct", "ssr_total_coverage_pct",
+        "ssr_top_motifs", "consensus_period_bp",
+    ]
     with open(out_csv, "w", newline="") as fh:
-        writer = csv.DictWriter(fh, fieldnames=out_header,
-                                delimiter="\t", lineterminator="\n",
-                                extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(out_rows)
-
-    return len(out_rows)
+        w = csv.DictWriter(fh, fieldnames=header, delimiter="\t",
+                           lineterminator="\n", extrasaction="ignore")
+        w.writeheader()
+        w.writerows(rows)
+    return len(rows)

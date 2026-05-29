@@ -348,3 +348,89 @@ Removed subcommands: `subrepeat-scan`, `hor-validate`.
 `load_kite_top3`), `tarean/assets/tidecluster.css` (add
 `hor_with_ssr`). The 0.9.x `subrepeat_*` / `tr_with_nested_tr` paths
 are kept as legacy fallbacks so old output dirs still rerender.
+
+## Addendum: kitehor 0.12.0 (TideCluster 1.10.0 shipped)
+
+After the 0.10.0 cut a second breaking change landed: the
+`combined_class` cascade was retired in TideCluster in favour of a
+leaner two-stage flow built directly on `kitehor rescore`. **kitehor
+0.12.0 is the pinned conda dep** in `conda-deps.txt`; v0.11.0 added
+the `hor_with_ssr` / `unresolved_with_ssr` classes and switched
+`pure_ssr` to read `ssr_raw_total_coverage_pct`, but TideCluster
+never shipped with it.
+
+**Pipeline change.** TideCluster.py runs
+`kitehor kite-periodicity --periodogram --out-peaks` first, then in
+parallel `kitehor rescore --max-period 10000 --top-n 20`
+and `kitehor ssr-scan`. No `analyze`, no `rule-classify`, no
+`tandem-validate`, no `summary-merge`. Two new CLI flags expose the
+rescore caps: `--kite-rescore-max-period` and `--kite-rescore-top-n`.
+
+**Founder reassignment.** rescore's `founder_period` column is the
+peak with the highest `identity_med` (gated at ≥ 0.7). On a real HOR
+record that's typically the *HOR tile* (e.g. 1512 bp on CEN6's
+classic 503/1512/×3 case), not the base monomer. TideCluster treats
+rescore's `founder_period` as the **strongest** period and reassigns
+**founder** to the smallest peak P such that
+`strongest ≈ k·P` (k integer, 2 ≤ k ≤ 30, ±0.05 tolerance) with
+`identity_med(P) ≥ 0.7`. When no qualifying divisor exists,
+founder = strongest, multiplicity = 1. When rescore returns NA
+`founder_period` (no peak passes 0.7, or every peak above
+`--max-period`), TideCluster falls back to the kite rank-1 peak and
+flags the array as a fallback.
+
+**Subrepeat tiering.** Per-peak classifier ported from kitehor's
+`docs/rule_proto.md` cheat-sheet:
+
+| tier | condition (period ≤ founder/4 unless noted) |
+|---|---|
+| `HIGH` | `scan_occupancy_frac ≥ 0.15` AND (`subrepeat=true` OR `phaseC ≥ 0.10` OR `autoF ≥ 0.4`) |
+| `LIKELY` | `scan_occupancy_frac ≥ 0.20` AND `scan_n_intervals ≥ 10` |
+| `KMER_SUPPORT` | `phaseC ≥ 0.10` OR `autoF ≥ 0.4` (no per-base scan support) |
+| `AMBIGUOUS` | `0.25 < ratio ≤ 0.33` with mild support |
+| `WEAK` | period ≤ founder/4 but no signal fires |
+| `OBSERVATIONAL` | founder NA but `scan_occupancy_frac ≥ 0.05` |
+| `REJECT_*` | phantom / `period > founder/3` / `scan_occ = 0` & founder known / founder-itself / weak ambiguous |
+
+Validated on the curated `test_data/IPIP200579_2026-04-14` corpus:
+40 / 3024 records carry HIGH+LIKELY (~1.3 %), including the
+cheat-sheet canonical TRC_104 (founder 180, sub 36, occ ~0.5) and
+TRC_666 (founder 250, sub 36, occ 0.46). Subrepeats are
+intentionally rare: a real nested subrepeat is a *short motif tiling
+inside the founder monomer but occupying only part of it* — full
+occupancy with integer multiplicity is HOR, not subrepeat.
+
+**Report (v2) — per-TRA table** is now:
+`▸ # · seqid · start · end · length · Founder · Δid · Strongest · ×k
+ · Other periods · Subrepeat · SSR`. Coloured tier pills mark
+subrepeat strength; the `▸` control opens a Details child row
+(DataTables `row().child()` + a small handler in `tidecluster.js`)
+showing the founder/strongest summary, the SSR scan, and a full
+table of every rescored peak with its tier and diagnostics. The
+`combined_class` driven roll-ups (per-TRC Classification card,
+index "Array classes", KITE overview class bar / class mix column,
+ideogram colours) are replaced by per-array counters: HOR (×k≥2),
+Subrepeat, SSR, Fallback founder. Genome-distribution ideograms
+colour by the dominant signal per array.
+
+**`monomer_size_top3_estimats.csv` schema (v0.12-derived).** New
+columns: `founder_period`, `strongest_period`, `multiplicity`,
+`delta_id_pp`, `founder_id_med`, `strongest_id_med`,
+`founder_fallback`, `subrepeat_{1,2}_period`/`occ`/`tier`. Empty
+`hor_status` / `hor_confidence` cells are kept for the per-TRA
+consensus R script's `HOR_*` alias shim. The legacy 0.10.x (`tv_*`,
+`combined_class`) and 0.9.x (`subrepeat_*`, `tr_with_nested_tr`)
+columns are still consumed by `tc_rerender_report.py` when present
+so old output dirs still rerender.
+
+**TideCluster code touched:** `TideCluster.py` (replace `analyze`
+call, expose two CLI flags, run rescore + ssr-scan as parallel
+subprocesses), `tc_utils.build_monomer_size_csv` (read rescored
+peaks + ssr.tsv, reassign founder, tier subrepeats, emit the new
+schema), `tc_rerender_report.py` (load the new CSV + the rescored
+peaks TSV; rewrite `_arrays_table` + add `_details_html` /
+`_other_periods_cell` / `_subrepeat_cell` / `_ssr_cell`; drop the
+class-driven roll-ups), `tarean/assets/tidecluster.js`
+(`initDetailsExpand` for the DataTables child rows; generalise the
+floating tooltip), `tarean/assets/tidecluster.css` (tier pills,
+details row, fallback marker).

@@ -131,10 +131,65 @@
     else { document.addEventListener('DOMContentLoaded', fn); }
   }
 
+  // ---------- per-array Details child row (DataTables row.child) ------------
+  // The arrays table on each TRC dashboard carries a `data-details`
+  // attribute per <tr> holding the HTML for the diagnostics panel. A
+  // click on the leading `.tc-details-control` cell toggles a child row
+  // via DataTables' row().child() API. Falls back to inserting a sibling
+  // <tr> when the table isn't a DataTable (legacy / static pages).
+  function initDetailsExpand() {
+    document.addEventListener('click', function (ev) {
+      var ctrl = ev.target.closest('.tc-details-control');
+      if (!ctrl || ctrl.classList.contains('tc-details-control-static')) return;
+      ev.preventDefault();
+      var tr = ctrl.closest('tr');
+      if (!tr) return;
+      var html = tr.getAttribute('data-details');
+      if (!html) return;
+      // Try the DataTables path first.
+      if (window.jQuery) {
+        var $tr = jQuery(tr);
+        var $table = $tr.closest('table.tc-datatable');
+        if ($table.length && jQuery.fn.DataTable.isDataTable($table[0])) {
+          var dt = $table.DataTable();
+          var row = dt.row($tr);
+          if (row.child.isShown()) {
+            row.child.hide();
+            tr.classList.remove('tc-details-open');
+            ctrl.classList.remove('open');
+          } else {
+            row.child(html, 'tc-details-row').show();
+            tr.classList.add('tc-details-open');
+            ctrl.classList.add('open');
+          }
+          return;
+        }
+      }
+      // Fallback: toggle a sibling <tr>.
+      var next = tr.nextElementSibling;
+      if (next && next.classList.contains('tc-details-row')) {
+        next.parentNode.removeChild(next);
+        tr.classList.remove('tc-details-open');
+        ctrl.classList.remove('open');
+      } else {
+        var nrow = document.createElement('tr');
+        nrow.className = 'tc-details-row';
+        var nc = document.createElement('td');
+        nc.colSpan = tr.children.length;
+        nc.innerHTML = html;
+        nrow.appendChild(nc);
+        tr.parentNode.insertBefore(nrow, tr.nextSibling);
+        tr.classList.add('tc-details-open');
+        ctrl.classList.add('open');
+      }
+    });
+  }
+
   ready(function () {
     initDataTables();
     initConsensusTools();
     initTrcJumper();
     initTraTooltip();
+    initDetailsExpand();
   });
 })();
