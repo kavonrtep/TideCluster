@@ -2623,9 +2623,14 @@ def _details_html(a):
 
     head_bits = []
     if fp is not None:
+        # Hoist the conditional out of the f-string expression: Python
+        # 3.11 (used by CI) rejects backslashes inside f-string `{...}`
+        # parts (PEP 701 relaxed this in 3.12, but the CI runner stays
+        # on 3.11 — see .github/workflows/tests.yml).
+        fb_sup = ('<sup title="rescore fallback to top-scored kite peak">*</sup>'
+                  if fb else '')
         head_bits.append(
-            f'<strong>Founder:</strong> {esc(fp)}'
-            f'{("<sup title=\"rescore fallback to top-scored kite peak\">*</sup>" if fb else "")}'
+            f'<strong>Founder:</strong> {esc(fp)}{fb_sup}'
             f' <span class="tc-dim">{_idstr(f_id)}</span>')
     else:
         head_bits.append('<strong>Founder:</strong> NA')
