@@ -613,7 +613,7 @@ def page_shell(title, active, run_meta, main_html, *,
 <link rel="stylesheet" href="{assets_href}tidecluster.css">
 {extra_head}
 </head>
-<body>
+<body class="tc-page-{esc(active)}">
 <nav class="tc-nav">
   <span class="tc-brand">TideCluster</span>
   {nav_html}
@@ -1843,12 +1843,14 @@ def render_index(model, out_path, run_meta, ctx):
 
 
 def _trc_type_label(t):
-    """Human-readable type label for the merged TAREAN table."""
+    """Human-readable type label for the merged TAREAN table. v0.12+:
+    only two values — SSR or TR. (The earlier
+    “TR (below threshold)” nuance is now implicit: rows with empty
+    TAREAN columns are below threshold; the Type column doesn't repeat
+    that.)"""
     if (t.get("repeat_type") or "").upper() == "SSR" or t.get("ssr_motif"):
         return "SSR"
-    if t.get("tarean"):
-        return "TR"
-    return "TR&nbsp;(below&nbsp;threshold)"
+    return "TR"
 
 
 def _array_size_cell(t):
@@ -1878,20 +1880,12 @@ def _render_tarean_row(t, ctx):
     up = ctx["up"]
     ta = t["tarean"] or {}
     kite = t["kite"] or {}
-    # v0.12 dropped combined_class. The structural-signal cell now shows
-    # a compact "H<n>/S<n>/X<n>" tally: HOR (mult≥2) / subrep (HIGH or
-    # LIKELY) / SSR arrays. Legacy dirs keep the class_mix pill row.
+    # v0.12: the H/S/X structural-signal column was dropped from this
+    # table; HOR / subrepeat / SSR counts live on the per-TRC dashboard
+    # instead. Legacy dirs (pre-v0.12) still get the class-mix pill row
+    # so older reports rerender unchanged.
     if ctx.get("is_v012"):
-        n_hor    = sum(1 for a in t["arrays"]
-                       if (a.get("multiplicity") or 1) > 1)
-        n_subrep = sum(1 for a in t["arrays"] if a.get("subrepeat_1_tier"))
-        n_ssr    = sum(1 for a in t["arrays"]
-                       if (a.get("ssr_dominant_motif") or "NA") != "NA")
-        bits = []
-        if n_hor:    bits.append(f'<span class="tc-meta">H</span>{n_hor}')
-        if n_subrep: bits.append(f'<span class="tc-meta">S</span>{n_subrep}')
-        if n_ssr:    bits.append(f'<span class="tc-meta">X</span>{n_ssr}')
-        class_cell = " ".join(bits) if bits else "—"
+        class_cell = None
     else:
         class_cell = (class_mix_cell(Counter(kite.get("combined_class_counts") or {}))
                       if kite else "")
@@ -1916,8 +1910,8 @@ def _render_tarean_row(t, ctx):
             f'{esc(round(ta["total_score"], 4)) if ta.get("total_score") is not None else ""}</td>'
         f'<td>{esc((t.get("ssr_motif") or "").replace("%25","%"))}</td>'
         f'<td>{esc(t.get("annotation") or "")}</td>'
-        f'<td>{class_cell}</td>'
-        f'<td>{sf_cell}</td>'
+        + (f'<td>{class_cell}</td>' if class_cell is not None else '')
+        + f'<td>{sf_cell}</td>'
         f'<td>{graph_thumb}</td>'
         f'<td>{logo_thumb}</td>'
         f'<td><code style="font-size:11px;">{cons_short}</code></td>'
@@ -1936,8 +1930,10 @@ def render_tarean(model, out_path, run_meta, ctx):
     n_tarean  = sum(1 for t in model["trcs"] if t["tarean"])
     n_ssr     = sum(1 for t in model["trcs"] if _trc_type_label(t) == "SSR")
     n_below   = n_total - n_tarean - n_ssr
-    signal_header = ("<th>H/S/X<br>(HOR&nbsp;/&nbsp;subrep&nbsp;/&nbsp;SSR)</th>"
-                     if model.get("is_v012") else "<th>Class mix</th>")
+    # v0.12: the H/S/X column is gone (HOR / subrep / SSR live on the
+    # per-TRC dashboard). Legacy dirs keep the class-mix column header.
+    signal_header = ("" if model.get("is_v012")
+                     else "<th>Class mix</th>")
     body = f"""
     <h1>Tandem repeat clusters (TAREAN)</h1>
     <section class="tc-prose">{load_section("tarean")}</section>
