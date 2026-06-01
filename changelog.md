@@ -1,3 +1,35 @@
+## 1.10.3 (2026-06-01)
+- Fix silent data loss in the comparative analysis
+  (`tc_comparative_analysis.R`). TRCs whose consensus sequences
+  produced no above-threshold MMseqs2 pair were never added as
+  vertices to the similarity graph and were therefore omitted from
+  every comparative output — `trc_satellite_families.tsv`, per-genome
+  TRC counts in the HTML report, and the `Satellite_family`
+  re-annotation of per-sample GFF3. The bias was toward genome-unique,
+  divergent, large-monomer or very-short-monomer satellites — the
+  cases a comparative analysis most needs to retain.
+- Validation on the manuscript's 11-genome *Solanum* set
+  (`set_1_2`): the union of `trc_satellite_families.tsv` and
+  `ssrs_groups.tsv` now matches `tc_clustering.gff3` per sample
+  (e.g. *S. lycopersicum* 53 → 73 TRCs in the satellite family table;
+  535 TRCs recovered across 11 samples in total).
+- New behaviour for pure-SSR TRCs: regrouped across genomes by
+  shared SSR pattern (via `cluster_ssrs_sequences` output) rather
+  than as isolated singletons, so a single SSR family spans every
+  sample that carries the motif. Implemented in a new helper
+  `apply_ssr_grouping()` which also keeps `trc_graph.rds` /
+  `trc_graph.graphml` in sync with the reassigned `group_id`s.
+- New post-condition check `check_trc_coverage()` warns at the end
+  of the run if any TRC from `tc_clustering.gff3` is missing from
+  both `trc_satellite_families.tsv` and `ssrs_groups.tsv`. Future
+  regressions of this silent-drop class will surface in the log.
+- Known follow-ups captured in
+  `docs/comparative_analysis_followups.md`: (a) threshold mismatch
+  between code (80 % identity / 0.8 max-coverage) and manuscript
+  (70 % / 0.2); (b) short-monomer (2–7 bp) satellites that fall
+  between the SSR and satellite classifiers. Neither is changed in
+  this release.
+
 ## 1.10.2 (2026-05-29)
 - Fix conda packaging: `kitehor=0.12.0` was missing from
   `conda/tidecluster/meta.yaml`'s `requirements.run`, so
