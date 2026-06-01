@@ -272,12 +272,33 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   cat("Building similarity graph...\n")
   cat(sprintf("Memory usage before graph creation: %.2f MB\n", memory_usage() / 1024^2))
   graph_start_time <- Sys.time()
-  
+
+  # Use the full input sequence set as the vertex universe, not just the
+  # endpoints of surviving similarity edges. Sequences that produced no
+  # above-threshold MMseqs2 pair become isolated vertices and (since each
+  # connected component is treated as its own community by fast_greedy /
+  # louvain / leiden) will end up as singleton TRC groups downstream.
+  # Without this, such TRCs were silently dropped from every comparative
+  # output (trc_satellite_families.tsv, family counts in the HTML report,
+  # GFF3 re-annotation) -- the bias was towards genome-unique, divergent,
+  # large-monomer or very-short-monomer satellites, i.e. the cases the
+  # comparative analysis most needs to retain. Reported against 1.10.0.
+  vertices_df <- data.frame(name = unique(names(th_tc_seq)),
+                            stringsAsFactors = FALSE)
+
   g <- igraph::simplify(
     igraph::graph_from_data_frame(df_pass[, c("query", "target", "weight")],
-                                  directed = FALSE)
+                                  directed = FALSE,
+                                  vertices = vertices_df)
   )
-  
+
+  isolated_count <- sum(igraph::degree(g) == 0)
+  message(sprintf(
+    "Similarity graph: %d vertices (%d isolated -> singleton communities), %d edges",
+    igraph::vcount(g), isolated_count, igraph::ecount(g)))
+
+  rm(vertices_df)
+
   graph_end_time <- Sys.time()
   cat(sprintf("Graph creation completed in %.2f seconds\n", as.numeric(difftime(graph_end_time, graph_start_time, units="secs"))))
   cat(sprintf("Memory usage after graph creation: %.2f MB\n", memory_usage() / 1024^2))
@@ -866,6 +887,184 @@ cluster_ssrs_sequences <- function(data_list, min_percentage = 10) {
   return(result_df)
 }
 
+# Regroup pure-SSR TRCs by shared SSR pattern.
+#
+# cluster_trc_sequences() groups TRCs by MMseqs2 similarity. Pure-SSR TRCs
+# (short tandem repeats whose monomer is essentially an SSR motif) often
+# fail to pair under the satellite-similarity thresholds and would end up
+# as singletons after the silent-drop fix. cluster_ssrs_sequences() already
+# clusters them by motif across genomes; this function reassigns the
+# satellite-family group_id of TRCs that appear in `ssrs_groups` so that
+# TRCs sharing an SSR pattern end up in the same family across genomes,
+# rather than each forming a singleton.
+#
+# Side effect: rewrites trc_graph.rds / trc_graph.graphml so the graph's
+# V(g)$group matches the reassigned data frame.
+apply_ssr_grouping <- function(trc_groups, ssrs_groups, prefix, output_directory) {
+
+  if (is.null(ssrs_groups) || !is.data.frame(ssrs_groups) || nrow(ssrs_groups) == 0) {
+    message("apply_ssr_grouping: no SSR groups to apply; leaving trc_groups unchanged")
+    return(trc_groups)
+  }
+
+  trc_cols <- paste0(prefix, "_trc_id")
+  trc_cols_present <- intersect(trc_cols, colnames(ssrs_groups))
+  if (length(trc_cols_present) == 0) {
+    message("apply_ssr_grouping: no per-sample SSR TRC columns found; skipping")
+    return(trc_groups)
+  }
+
+  # Each row of ssrs_groups defines one SSR pattern -> one shared family.
+  # Allocate fresh group_ids outside the range currently in trc_groups so
+  # they cannot collide with any similarity-based group.
+  base_gid <- if (nrow(trc_groups) > 0) max(trc_groups$group_id) else 0L
+  ssr_full_ids <- character(0)
+  ssr_gids     <- integer(0)
+  for (i in seq_len(nrow(ssrs_groups))) {
+    gid <- base_gid + i
+    for (col in trc_cols_present) {
+      sample <- sub("_trc_id$", "", col)
+      tid <- ssrs_groups[[col]][i]
+      if (is.na(tid) || !nzchar(tid)) next
+      ssr_full_ids <- c(ssr_full_ids, paste0(sample, ":", tid))
+      ssr_gids     <- c(ssr_gids, gid)
+    }
+  }
+
+  if (length(ssr_full_ids) == 0) {
+    return(trc_groups)
+  }
+
+  # Reassign existing rows; append rows for SSR TRCs that weren't in
+  # trc_groups at all (would happen pre-fix; should be empty post-fix).
+  existing_idx <- match(ssr_full_ids, trc_groups$trc_id)
+  has_row <- !is.na(existing_idx)
+  if (any(has_row)) {
+    trc_groups$group_id[existing_idx[has_row]] <- ssr_gids[has_row]
+  }
+  if (any(!has_row)) {
+    new_rows <- data.frame(
+      trc_id   = ssr_full_ids[!has_row],
+      group_id = ssr_gids[!has_row],
+      stringsAsFactors = FALSE
+    )
+    for (extra_col in setdiff(colnames(trc_groups), colnames(new_rows))) {
+      new_rows[[extra_col]] <- NA
+    }
+    trc_groups <- rbind(trc_groups, new_rows[, colnames(trc_groups), drop = FALSE])
+    message(sprintf(
+      "apply_ssr_grouping: added %d SSR-only TRC row(s) absent from similarity-based grouping",
+      sum(!has_row)))
+  }
+
+  reassigned <- sum(has_row)
+  ssr_families <- length(unique(ssr_gids))
+  message(sprintf(
+    "apply_ssr_grouping: reassigned %d TRC row(s) into %d SSR-pattern famil%s",
+    reassigned, ssr_families, if (ssr_families == 1) "y" else "ies"))
+
+  # Renumber group_ids consecutively from 1, preserving relative ordering.
+  unique_gids <- unique(trc_groups$group_id)
+  new_gids <- setNames(seq_along(unique_gids), as.character(unique_gids))
+  trc_groups$group_id <- as.integer(new_gids[as.character(trc_groups$group_id)])
+
+  # Keep the graph in sync. update_graph_satellite_families() later maps
+  # V(g)$group -> Satellite_family via the data frame, so we must mirror
+  # both the SSR reassignment and the renumbering here.
+  graph_rds <- file.path(output_directory, "trc_graph.rds")
+  if (file.exists(graph_rds)) {
+    g <- readRDS(graph_rds)
+    vertex_full_ids <- paste(V(g)$code, V(g)$trc_id, sep = ":")
+    cur_groups <- V(g)$group
+
+    # 1) override the group of any vertex whose TRC is in an SSR cluster
+    ssr_map <- setNames(ssr_gids, ssr_full_ids)
+    hit <- ssr_full_ids %in% vertex_full_ids
+    if (any(hit)) {
+      ssr_to_vid <- match(vertex_full_ids, ssr_full_ids)
+      affected <- !is.na(ssr_to_vid)
+      cur_groups[affected] <- ssr_gids[ssr_to_vid[affected]]
+    }
+
+    # 2) apply the same renumber mapping to the graph
+    cur_groups <- as.integer(new_gids[as.character(cur_groups)])
+    V(g)$group <- cur_groups
+
+    saveRDS(g, file = graph_rds)
+    write_graph(g, file = file.path(output_directory, "trc_graph.graphml"),
+                format = "graphml")
+    message("apply_ssr_grouping: updated trc_graph.rds / trc_graph.graphml")
+  } else {
+    message(sprintf(
+      "apply_ssr_grouping: %s not found; skipping graph sync", graph_rds))
+  }
+
+  return(trc_groups)
+}
+
+# Verify every per-sample TRC in tc_clustering.gff3 is accounted for either
+# in trc_satellite_families.tsv (similarity- or SSR-derived family) or in
+# ssrs_groups.tsv. Issues a warning -- not an error -- per missing TRC so a
+# regression of the silent-drop bug surfaces in the log.
+check_trc_coverage <- function(input_tc_dirs, prefix, tc_clust_path,
+                               grps_pivoted_df, ssrs_groups) {
+  if (length(tc_clust_path) == 1) {
+    tc_clust_path <- rep(tc_clust_path, length(prefix))
+  }
+  total_missing <- 0L
+  for (i in seq_along(prefix)) {
+    sample <- prefix[i]
+    gff_path <- file.path(input_tc_dirs[i], tc_clust_path[i])
+    if (!file.exists(gff_path)) {
+      message(sprintf("check_trc_coverage: GFF3 not found for %s (%s); skipping",
+                      sample, gff_path))
+      next
+    }
+    gff <- rtracklayer::import.gff3(gff_path)
+    all_trcs <- unique(as.character(gff$Name))
+    all_trcs <- all_trcs[!is.na(all_trcs)]
+
+    sf_trcs <- character(0)
+    if (sample %in% colnames(grps_pivoted_df)) {
+      raw <- grps_pivoted_df[[sample]]
+      raw <- raw[!is.na(raw) & nzchar(raw)]
+      sf_trcs <- unique(unlist(strsplit(raw, ",\\s*"), use.names = FALSE))
+    }
+
+    ssr_col <- paste0(sample, "_trc_id")
+    ssr_trcs <- if (!is.null(ssrs_groups) && ssr_col %in% colnames(ssrs_groups)) {
+      v <- ssrs_groups[[ssr_col]]
+      unique(v[!is.na(v) & nzchar(v)])
+    } else {
+      character(0)
+    }
+
+    covered <- union(sf_trcs, ssr_trcs)
+    missing <- setdiff(all_trcs, covered)
+    if (length(missing) > 0) {
+      total_missing <- total_missing + length(missing)
+      head_n <- min(10L, length(missing))
+      warning(sprintf(
+        "check_trc_coverage: sample '%s' has %d TRC(s) in %s missing from both trc_satellite_families and ssrs_groups: %s%s",
+        sample, length(missing), basename(gff_path),
+        paste(missing[seq_len(head_n)], collapse = ", "),
+        if (length(missing) > head_n) sprintf(" (+%d more)", length(missing) - head_n) else ""),
+        call. = FALSE)
+    } else {
+      message(sprintf(
+        "check_trc_coverage: sample '%s' OK -- all %d TRC(s) accounted for",
+        sample, length(all_trcs)))
+    }
+  }
+  if (total_missing == 0) {
+    message("check_trc_coverage: post-condition passed for all samples")
+  } else {
+    message(sprintf("check_trc_coverage: post-condition FAILED -- %d TRC(s) missing across samples",
+                    total_missing))
+  }
+  invisible(total_missing)
+}
+
 # Function to calculate total lengths from GFF3 files
 calculate_trc_lengths <- function(input_tc_dirs, prefix, tc_clust_path = "tc_clustering.gff3") {
   total_trc_length <- list()
@@ -1095,19 +1294,14 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
                                 input_tc_dirs = input_tc_dirs, prefix = prefix, tc_code = tc_code,
                                 clustering_algorithm = clustering_algorithm
   )
-  
+
   # Clean up large sequence objects after clustering
   rm(all_seq)
   gc(verbose = FALSE)
-  
-  grps_pivoted <- pivot_trc_data(grps, prefix)
-  
-  # Clean up clustering results after pivoting
-  rm(grps)
-  gc(verbose = FALSE)
 
-
-  # Load and process SSRS data
+  # Load and process SSRS data. We do this *before* pivoting so that
+  # apply_ssr_grouping() can reassign group_ids on the raw (trc_id, group_id)
+  # table and keep the graph in sync.
   message("Processing SSRS data...")
 
   ssrs_tables <- mapply(
@@ -1134,9 +1328,21 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
 
   names(ssrs_tables) <- prefix
   ssrs_groups <- cluster_ssrs_sequences(ssrs_tables, min_percentage = 10)
-  
+
   # Clean up SSRS tables after clustering
   rm(ssrs_tables)
+  gc(verbose = FALSE)
+
+  # Pure-SSR TRCs should be grouped across genomes by shared SSR pattern,
+  # not as isolated singletons. Reassigns group_ids on `grps` and rewrites
+  # the saved trc_graph.* so the graph's V(g)$group matches.
+  message("Applying SSR-pattern regrouping to TRC groups...")
+  grps <- apply_ssr_grouping(grps, ssrs_groups, prefix, output_directory)
+
+  grps_pivoted <- pivot_trc_data(grps, prefix)
+
+  # Clean up clustering results after pivoting
+  rm(grps)
   gc(verbose = FALSE)
 
   # Calculate lengths
@@ -1161,7 +1367,15 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
   # Update graph with renumbered satellite family IDs (before formatting removes group_id)
   message("Updating graph with final satellite family IDs...")
   update_graph_satellite_families(grps_pivoted_final$df, output_directory)
-  
+
+  # Post-condition: every TRC from tc_clustering.gff3 should appear in
+  # either trc_satellite_families.tsv (via grps_pivoted_final$df) or
+  # ssrs_groups.tsv. Warn on any gap so the silent-drop bug class is
+  # caught by future test runs.
+  message("Verifying per-sample TRC coverage in comparative output...")
+  check_trc_coverage(input_tc_dirs, prefix, tc_clust_path,
+                     grps_pivoted_final$df, ssrs_groups)
+
   # Clean up intermediate objects
   rm(grps_pivoted, annotation_dfs)
   gc(verbose = FALSE)
