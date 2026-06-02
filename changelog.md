@@ -1,3 +1,86 @@
+## 1.10.4 (2026-06-02)
+- Fix per-TRC annotation coverage in
+  `tc_utils.get_repeatmasker_annotation()`. An over-broad guard
+  (`if seqid not in seq_rm_info:`) collapsed multi-hit RepeatMasker
+  output to only the first hit per query, so multi-monomer consensus
+  sequences reported ~one-monomer's worth of reference coverage
+  (e.g. *A. thaliana* CEN180 15 %, 45S rDNA 0.2–42 %) instead of the
+  true ~95–99 %. The position-sorted nature of `.out` always picked
+  the left-most hit. Replace with per-(seqid, annotation) interval
+  collection and report the merged-interval (union) length / sequence
+  length, bounded to [0, 1], so tandem hits accumulate while
+  overlapping hits are not double-counted. Family assignment is
+  unchanged; only the reported proportion is corrected. Also fixes
+  `RepeatMaskerFeature.length` off-by-one (end − start + 1). Covered
+  by new synthetic tests `tests/test_annotation_coverage.py` wired
+  into `tests/unit.sh`.
+- Fix `%25` leaking through to HTML in the report-v2 renderer.
+  `tc_utils.get_repeatmasker_annotation()` and
+  `get_ssrs_description*()` emit percentages as `(N.N%25)` because
+  the strings are written into GFF3 column-9 attribute values (where
+  `%` must be URL-encoded per the GFF3 spec; `tarean_report.R`
+  already decodes `%25` → `%` for both Annotation and SSRs columns).
+  `tc_rerender_report.py` decoded `ssr_motif` but missed four other
+  render sites: the scatter-plot tooltip, the TRC table Annotation
+  column, the per-TRA arrays-table SSR column, and the TRC detail
+  card Annotation row. Add the same `.replace("%25","%")` at all
+  four. No change to GFF3 output — encoding stays spec-correct on
+  disk; only the HTML render decodes for display.
+- New **Pass 5 (peak-cluster fallback rescue)** in
+  `tc_utils.build_monomer_size_csv()`. When rescore returns
+  `founder_period=NA` the legacy Pass-1 fallback set founder =
+  rank-1 peak by single-peak kite score. On noisy centromeric
+  arrays this picks a spurious short-period peak (e.g. 310 bp) over
+  the real ~10 kb HOR signal, which gets fragmented across many
+  adjacent rescored periods (9383, 9386, 10461, 10466, 10468,
+  10689, ...): each individual peak's score is small and its
+  `identity_med` fails rescore's 0.7 threshold, but collectively
+  they dominate the array with high `coverage_frac` (~0.4) and
+  `spatial_contrast` (~1.0). Pass 5 clusters the rescored peaks by
+  period (single-link, mixed ±5 % / ±100 bp window), sums their
+  kite scores, and accepts the dominant cluster as founder iff
+  `n_peaks ≥ 2 AND max(coverage_frac) ≥ 0.20 AND
+  max(spatial_contrast) ≥ 0.5 AND score_sum ≥ rank-1 peak score`.
+  Fires only on `fallback=true && !ssr_override` rows — Pass-1
+  successes, Pass-2/3 rescues, and SSR overrides are not touched.
+  Covered by `tests/test_cluster_rescue.py` (9 synthetic cases).
+- New CSV columns in `monomer_size_top3_estimats.csv` (all
+  additive; every consumer — `tc_per_tra_consensus.py`, the R
+  consensus prototype, `kite_heatmaps.R`, `extract_consensus.R`,
+  `tc_rerender_report.py` — reads by column name):
+    - `founder_method` enum {`strict` | `none` | `pass2` | `pass3`
+      | `ssr` | `cluster` | `fallback`}, recording which pass
+      produced the final founder.
+    - `cluster_rescue` boolean counterpart of
+      `founder_method = cluster`.
+    - `alt_cluster_1..2_{period,score_sum,n_peaks,cov_frac_max}` —
+      the top-2 period clusters that are NOT the founder's, so the
+      report can surface secondary signals (e.g. a 310 bp peak
+      that Pass 5 correctly demoted but remains real biology).
+- HTML report surfaces Pass 5: a `‡` Dagger sup-tag on cluster-
+  rescued founders in the per-array Details summary; an "Other
+  periodicities: 310 bp (Σ 0.027 · n=1) · …" line below the founder
+  cell listing the top-2 alt clusters; a new "Arrays rescued by
+  cluster (Pass 5)" counter on the TRC dashboard Classification
+  card. Cluster-rescue clears `founder_fallback`, so the red `*`
+  fallback marker and the `‡` rescue badge are mutually exclusive.
+- Cluster-overview bubble chart on `<prefix>_index.html` now uses
+  the median per-array `founder_period` for the x-axis (was: median
+  rank-1 kite peak `m1`), falling back to `m1` only on legacy CSVs
+  that lack the column. On *A. thaliana* centromeres TRC_2 and
+  TRC_4 — both rescued by Pass 5 — move from x ≈ 310 bp to
+  x ≈ 10.4 kb, matching the rest of the report (which already
+  surfaces `founder_period` as the canonical monomer size). TRCs
+  whose founder already matched `m1` (the majority — Pass-1
+  successes on clean tandem repeats) are unaffected.
+- Validation on `tmp/analysis_kite15k/Arabidopsis_thaliana`
+  (*A. thaliana* centromeres, kitehor v0.12): 3 of 4 NA-founder
+  rows flipped to cluster rescue (the TRC_2 and TRC_4 cases —
+  founders 310/312 → 9384 / 10346 / 10464 with
+  `founder_method=cluster`); the remaining 1 stayed fallback
+  because no cluster passed the gate (truly no signal). 0 Pass-1-
+  success rows had their founder period change.
+
 ## 1.10.3 (2026-06-01)
 - Fix silent data loss in the comparative analysis
   (`tc_comparative_analysis.R`). TRCs whose consensus sequences
