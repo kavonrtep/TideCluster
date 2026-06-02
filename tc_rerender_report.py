@@ -1716,7 +1716,7 @@ def render_cluster_overview(model, ctx):
         sf_line = (f'<br>superfamily: SF {esc(p["sf"])}' if p["sf"]
                    else '<br>superfamily: unassigned')
         cls_line = f'<br>class: {esc(class_label(p["cls"]))}' if p["cls"] else ''
-        ann_line = f'<br>annotation: {esc(p["ann"])}' if p.get("ann") else ''
+        ann_line = f'<br>annotation: {esc(p["ann"].replace("%25","%"))}' if p.get("ann") else ''
         title = (f'<strong>{esc(p["id"])}</strong>'
                  f'<br>median monomer: {esc(int(round(p["x"])))} bp'
                  f'<br>coverage: {p["y"]:.3g} Mbp ({p["cov"]:,} bp)'
@@ -1963,7 +1963,7 @@ def _render_tarean_row(t, ctx):
         f'<td data-order="{ta.get("total_score") or 0}">'
             f'{esc(round(ta["total_score"], 4)) if ta.get("total_score") is not None else ""}</td>'
         f'<td>{esc((t.get("ssr_motif") or "").replace("%25","%"))}</td>'
-        f'<td>{esc(t.get("annotation") or "")}</td>'
+        f'<td>{esc((t.get("annotation") or "").replace("%25","%"))}</td>'
         + (f'<td>{class_cell}</td>' if class_cell is not None else '')
         + f'<td>{sf_cell}</td>'
         f'<td>{graph_thumb}</td>'
@@ -2782,7 +2782,7 @@ def _arrays_table(arrays, include_hor=True):
                 f'<td data-order="{a.get("start") or 0}">{esc(a.get("start"))}</td>'
                 f'<td data-order="{a.get("end") or 0}">{esc(a.get("end"))}</td>'
                 f'<td data-order="{a.get("length") or 0}">{fmt_bp(a.get("length"))}</td>'
-                f'<td>{esc(a.get("ssr") or "")}</td>'
+                f'<td>{esc((a.get("ssr") or "").replace("%25","%"))}</td>'
                 "</tr>")
     return "".join(rows)
 
@@ -2904,7 +2904,7 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
         ("Total size",   fmt_bp(trc["total_size"])),
         ("Array size",
          f'min {fmt_bp(trc.get("min_array"))} · max {fmt_bp(trc.get("max_array"))}'),
-        ("Annotation",   trc.get("annotation") or "—"),
+        ("Annotation",   (trc.get("annotation") or "—").replace("%25","%")),
     ]
     stats_html = "".join(f'<dt>{esc(k)}</dt><dd>{esc(v)}</dd>' for k, v in stats_kv)
 
