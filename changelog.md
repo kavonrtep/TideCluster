@@ -1,3 +1,59 @@
+## 1.10.5 (2026-06-02)
+- New **below-TAREAN-threshold superfamily fallback rescue** in
+  `tarean/compare_trc_by_blast.R`. TRCs whose array total length
+  falls below TAREAN's `min_total_length` gate (default 50 kb) are
+  skipped by `tarean.R` and so produce no consensus dimer — they are
+  absent from `<prefix>_consensus_dimer_library.fasta` and never
+  enter the main BLAST clustering step. On real datasets this leaves
+  small TRCs unlinked from their biological superfamily even when
+  RepeatMasker annotates them identically to a larger member (on
+  *A. thaliana* `analysis_kite15k`: the 14 kb 5S_rDNA TRC_27 was
+  stranded as a singleton despite TRC_3 also being 5S_rDNA at ≥ 98 %
+  coverage).
+- The fallback runs *after* the main BLAST clustering and uses the
+  **raw TideHunter per-array consensus dimers** (preserved by the
+  `clustering` step under `<prefix>_consensus/<TRC>_dimers.fasta`)
+  as the query against the existing dimer-library DB. Same BLAST
+  parameters, same score formula
+  `(length * pident - gapopen) / max(qlen, slen)`, same threshold
+  (20) as the main clustering — no new knobs. For each
+  below-threshold TRC, the single best-scoring big-TRC hit becomes
+  the attachment target:
+    - if the target big-TRC already belongs to a multi-TRC SF, the
+      small TRC joins that SF;
+    - if the target is a singleton (had no above-threshold big-big
+      match), the (big, small) pair is promoted to a brand-new
+      size-2 SF.
+- The specific small-TRC raw dimer that produced the best BLAST hit
+  is added to the SF's dotplot input set, so the per-SF pairwise
+  dotplot naturally renders the similarity that triggered the
+  attachment.
+- Optional belt-and-braces safety: `--annotation_tsv
+  <prefix>_annotation.tsv` (passed by default from `TideCluster.py`)
+  rejects (small, big) merges where both TRCs have a non-NA
+  annotation and the annotations disagree. Zero rejections on the
+  validation dataset.
+- New CSV column `fallback` (boolean) on
+  `<prefix>_trc_superfamilies.csv`. TRUE for rescue-attached TRCs;
+  FALSE for native SF members. Older CSVs without the column are
+  still read correctly by the v2 report.
+- `tc_rerender_report.py` surfaces the new flag: per-TRC dashboard
+  "Superfamily" stats row carries a `‡ via fallback` annotation on
+  rescue-attached TRCs; the superfamilies page adds a top-level
+  callout count plus per-SF `‡` daggers with provenance tooltip
+  next to each fallback member.
+- Validation on `tmp/analysis_kite15k/Arabidopsis_thaliana`:
+    - SF1 unchanged (8 TRCs, satellite group)
+    - SF2 augmented with TRC_26 (AthSat500, attach to existing) score=22.08
+    - SF3 NEW {TRC_12, TRC_21} (uncharacterized, singleton-promotion) score=34.10
+    - SF4 NEW {TRC_3, TRC_27} (5S_rDNA, singleton-promotion) score=47.86
+- Runtime cost is negligible: the fallback BLAST is **0.15 s** in
+  isolation on the validation set (21 small-TRC dimer records vs
+  389 big-TRC dimer records, 4 threads). End-to-end
+  `compare_trc_by_blast.R` is within filesystem-cache noise of the
+  1.10.4 baseline (~4 min on this dataset; fallback overhead
+  < 0.07 % of the clustering step, < 0.01 % of the full pipeline).
+
 ## 1.10.4 (2026-06-02)
 - Fix per-TRC annotation coverage in
   `tc_utils.get_repeatmasker_annotation()`. An over-broad guard
