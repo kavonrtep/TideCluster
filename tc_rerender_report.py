@@ -1219,19 +1219,29 @@ def load_superfamilies(paths, input_dir):
     """TRC-to-superfamily mapping + dotplot path (None if no SF analysis).
 
     Dotplot path is emitted RELATIVE to input_dir so the HTML side only
-    needs to prepend "../" to resolve it from report_v2/."""
+    needs to prepend "../" to resolve it from report_v2/.
+
+    Reads the optional `fallback` column (compare_trc_by_blast.R 1.10.5+)
+    so the renderer can mark TRCs attached via the below-TAREAN-threshold
+    rescue step distinctly from native SF members. Older CSVs without
+    that column produce `fallback_trcs = []` and render unchanged."""
     p = paths["superfamilies_csv"]
     if not p:
         return []
-    # CSV format: "Superfamily","TRC"
+    # CSV format: "Superfamily","TRC" (+ optional "fallback" boolean)
     groups = {}
+    fallback_set = set()
     for row in _read_rows(p, ","):
         sf = row.get("Superfamily")
         trc = row.get("TRC")
         if not sf or not trc: continue
         try: sf_id = int(sf)
         except ValueError: continue
-        groups.setdefault(sf_id, []).append(trc.strip())
+        trc = trc.strip()
+        groups.setdefault(sf_id, []).append(trc)
+        # The R script writes booleans as "TRUE" / "FALSE".
+        if (row.get("fallback") or "").strip().upper() == "TRUE":
+            fallback_set.add(trc)
     out = []
     dotdir = paths["dotplots_dir"]
     for sf_id in sorted(groups):
@@ -1243,7 +1253,9 @@ def load_superfamilies(paths, input_dir):
             candidate = dotdir / fname
             if candidate.exists():
                 dotplot = str(candidate.relative_to(input_dir))
-        out.append({"id": sf_id, "trcs": members, "dotplot": dotplot})
+        fb_members = [t for t in members if t in fallback_set]
+        out.append({"id": sf_id, "trcs": members, "dotplot": dotplot,
+                    "fallback_trcs": fb_members})
     return out
 
 
@@ -1271,6 +1283,9 @@ def build_model(input_dir: Path, prefix: str):
     sf_by_trc = {trc: sf["id"] for sf in superfams for trc in sf["trcs"]}
     sf_peers  = {trc: [t for t in sf["trcs"] if t != trc]
                  for sf in superfams for trc in sf["trcs"] if len(sf["trcs"]) > 1}
+    # Per-TRC flag: True iff this TRC was attached to its SF by the
+    # below-threshold rescue rather than by the main BLAST clustering.
+    sf_fallback = {trc: True for sf in superfams for trc in sf.get("fallback_trcs", [])}
     sf_dotplot_by_trc = {trc: sf["dotplot"]
                          for sf in superfams for trc in sf["trcs"] if sf["dotplot"]}
 
@@ -1396,6 +1411,7 @@ def build_model(input_dir: Path, prefix: str):
             "superfamily":  sf_by_trc.get(trc_id),
             "sf_peers":     sf_peers.get(trc_id, []),
             "sf_dotplot":   sf_dotplot_by_trc.get(trc_id),
+            "sf_fallback":  sf_fallback.get(trc_id, False),
         })
 
     # kitehor >=0.12.0 produces founder_period per array; the cascade-
@@ -2198,20 +2214,47 @@ def render_superfamilies(model, out_path, run_meta, ctx):
         return
     src_prefix = ctx["src_prefix"]
     sections = []
+    n_fallback_total = 0
     for sf in model["superfamilies"]:
-        peers = ", ".join(_trc_link(t, prefix=ctx["trc_link_prefix"]) for t in sf["trcs"])
+        fb_set = set(sf.get("fallback_trcs") or [])
+        # Annotate fallback-attached TRCs with a ‡ Dagger sup-tag so the
+        # peer list distinguishes them from native SF members. Tooltip
+        # explains the provenance.
+        def _peer_link(t):
+            link = _trc_link(t, prefix=ctx["trc_link_prefix"])
+            if t in fb_set:
+                return (link + '<sup class="tc-sf-fb" '
+                        'title="attached via below-TAREAN-threshold rescue '
+                        '(raw TideHunter consensus BLAST against this SF\'s '
+                        'dimer library)">&Dagger;</sup>')
+            return link
+        peers = ", ".join(_peer_link(t) for t in sf["trcs"])
         img = (f'<div class="tc-fig"><a href="{src_prefix}{esc(sf["dotplot"])}">'
                f'<img src="{src_prefix}{esc(sf["dotplot"])}" width="500" alt="dotplot"></a>'
                f'<div class="tc-fig-caption">pairwise dotplot of superfamily '
                f'{sf["id"]} consensus sequences</div></div>'
                if sf["dotplot"] else "")
+        fb_note = ""
+        if fb_set:
+            fb_note = (f'<p class="tc-meta">&Dagger; {len(fb_set)} TRC(s) '
+                       f'attached via fallback rescue — see callout above.</p>')
+            n_fallback_total += len(fb_set)
         sections.append(
             f'<section id="sf-{sf["id"]}">'
             f'<h2>Superfamily {sf["id"]} ({len(sf["trcs"])} TRCs)</h2>'
-            f'<p>{peers}</p>{img}</section>')
+            f'<p>{peers}</p>{fb_note}{img}</section>')
+    callout = ""
+    if n_fallback_total:
+        callout = (f'<p class="tc-callout">{n_fallback_total} TRC(s) across '
+                   f'all superfamilies were attached via the fallback rescue '
+                   f'step (marked &Dagger;): TRCs below TAREAN\'s '
+                   f'<code>min_total_length</code> threshold whose raw '
+                   f'TideHunter consensus matched an existing dimer library '
+                   f'sequence above the BLAST score gate.</p>')
     body = (f'<h1>TRC superfamilies</h1>'
             f'<section class="tc-prose">{load_section("superfamilies")}</section>'
             f'<p>{len(model["superfamilies"])} superfamilies identified.</p>'
+            f'{callout}'
             + "".join(sections))
     out_path.write_text(_shell(ctx, "Superfamilies", "sf", run_meta, body))
 
@@ -3038,10 +3081,19 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
         if n_fb:
             class_rows.append(("Arrays with fallback founder", str(n_fb)))
     if trc.get("superfamily"):
+        # If this TRC was attached via the below-threshold fallback rescue
+        # rather than the main BLAST clustering, annotate the SF row so
+        # the membership provenance is visible at a glance.
+        fb_note = (' <span class="tc-meta tc-dim" '
+                   'title="this TRC was attached via the below-TAREAN-'
+                   'threshold fallback rescue (raw TideHunter consensus '
+                   'BLAST against the SF dimer library)">'
+                   '&Dagger; via fallback</span>'
+                   if trc.get("sf_fallback") else '')
         class_rows.append(
             ("Superfamily",
              f'<a href="{SITE}superfamilies.html#sf-{trc["superfamily"]}">SF {trc["superfamily"]}</a>'
-             f' ({len(trc.get("sf_peers", []))} peers)'))
+             f' ({len(trc.get("sf_peers", []))} peers){fb_note}'))
     else:
         class_rows.append(("Superfamily", "—"))
     class_html = "".join(
