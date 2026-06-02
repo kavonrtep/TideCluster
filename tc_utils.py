@@ -2193,6 +2193,26 @@ _RELAXED_RATIO_TOL        = 0.20   # solo-TRA fallback: relaxed k tolerance
 _SSR_OVERRIDE_COVERAGE    = 95.0   # ssr_total_coverage_pct threshold
 _RELAXED_ID_MIN           = 0.7    # solo-TRA fallback: keeps strict id_med gate
 
+# Pass 5 — peak-cluster fallback rescue (kitehor.rescored.peaks.tsv).
+# When rescore returns founder_period=NA the legacy fallback set
+# founder = rank-1 peak by single-peak score. On noisy centromeric
+# arrays this can pick a spurious short-period peak (an SSR-like
+# sub-monomer or off-target alignment hit) over the real ~10 kb HOR
+# signal that is fragmented across many adjacent rescored periods
+# (e.g. 9383, 9386, 10461, 10466, 10468, 10689). Pass 5 clusters
+# nearby periods, sums their kite scores, and accepts the dominant
+# cluster as founder when it also passes coverage / spatial-contrast
+# gates. Fires only on rows where rescore returned NA (fallback=True)
+# and no SSR override applied — Pass-1 successes / Pass-2/3 rescues
+# are not touched.
+_CLUSTER_WINDOW_PCT       = 0.05   # ±5 % single-link relative window
+_CLUSTER_WINDOW_BP_MIN    = 100    # ... or ±100 bp, whichever is larger
+_CLUSTER_COV_FRAC_MIN     = 0.20   # max(coverage_frac) over cluster members
+_CLUSTER_SPATIAL_MIN      = 0.50   # max(spatial_contrast) over cluster members
+_CLUSTER_SCORE_MARGIN     = 1.0    # cluster.score_sum >= rank1.score × this
+_CLUSTER_MIN_PEAKS        = 2      # singleton clusters do not qualify
+_ALT_CLUSTERS_REPORTED    = 2      # alt_cluster_1, alt_cluster_2 in CSV
+
 
 def _num_or_none(v):
     if v in (None, "", "NA"):
@@ -2276,6 +2296,116 @@ def _relaxed_individual_founder(peaks, strongest, kmax=_KMAX):
     return peak, P, kr, k
 
 
+def _cluster_peaks_by_period(peaks):
+    """Greedy single-link clustering of rescored peaks by period.
+
+    A peak joins an existing cluster iff its period is within
+    ``max(member_period * _CLUSTER_WINDOW_PCT, _CLUSTER_WINDOW_BP_MIN)``
+    of *any* member already in the cluster. Peaks are processed in
+    descending kite ``score`` order so the highest-scoring peak in
+    each cluster anchors it (used as `highest_score_peak` for the
+    Pass-5 rescue to point founder_peak/strongest_peak at).
+
+    Returns clusters sorted by ``score_sum`` desc. Each cluster dict::
+
+        {
+          "median_period":    float (median of member periods),
+          "score_sum":        float (Σ of member kite scores),
+          "n_peaks":          int,
+          "cov_frac_max":     float | None,
+          "spatial_max":      float | None,
+          "id_med_max":       float | None,
+          "members":          [peak dict, ...],
+          "highest_score":    float,
+          "highest_score_peak": peak dict,
+        }
+    """
+    enriched = []
+    for p in peaks:
+        period = _num_or_none(p.get("period"))
+        score  = _num_or_none(p.get("score"))
+        if period is None or period <= 0 or score is None:
+            continue
+        enriched.append((score, period, p))
+    # Score descending; ties broken by period ascending to keep deterministic.
+    enriched.sort(key=lambda t: (-t[0], t[1]))
+    clusters = []
+    for score, period, p in enriched:
+        joined = False
+        for c in clusters:
+            for q_period in c["_periods"]:
+                window = max(q_period * _CLUSTER_WINDOW_PCT,
+                             _CLUSTER_WINDOW_BP_MIN)
+                if abs(period - q_period) <= window:
+                    c["members"].append(p)
+                    c["_periods"].append(period)
+                    c["score_sum"] += score
+                    joined = True
+                    break
+            if joined:
+                break
+        if not joined:
+            clusters.append({
+                "members":            [p],
+                "_periods":           [period],
+                "score_sum":          score,
+                "highest_score":      score,
+                "highest_score_peak": p,
+            })
+    # Finalize per-cluster aggregates
+    for c in clusters:
+        c["n_peaks"]       = len(c["members"])
+        c["median_period"] = statistics.median(c["_periods"])
+        cov  = [_num_or_none(m.get("coverage_frac"))    for m in c["members"]]
+        spat = [_num_or_none(m.get("spatial_contrast")) for m in c["members"]]
+        idm  = [_num_or_none(m.get("identity_med"))     for m in c["members"]]
+        c["cov_frac_max"] = max((v for v in cov  if v is not None), default=None)
+        c["spatial_max"]  = max((v for v in spat if v is not None), default=None)
+        c["id_med_max"]   = max((v for v in idm  if v is not None), default=None)
+        del c["_periods"]
+    clusters.sort(key=lambda c: -c["score_sum"])
+    return clusters
+
+
+def _cluster_rescue_founder(peaks):
+    """Pass 5 — peak-cluster fallback rescue.
+
+    Aggregates the rescored peaks into period clusters (single-link,
+    mixed ±5 % / ±100 bp window) and accepts the highest-``score_sum``
+    cluster as founder iff *all* of:
+
+    - ``n_peaks >= _CLUSTER_MIN_PEAKS`` (singleton clusters skipped)
+    - ``max(coverage_frac)    >= _CLUSTER_COV_FRAC_MIN``
+    - ``max(spatial_contrast) >= _CLUSTER_SPATIAL_MIN``
+    - ``score_sum >= rank-1 peak score * _CLUSTER_SCORE_MARGIN``
+
+    Returns ``(cluster_dict, founder_period)`` on success, ``None``
+    otherwise. ``founder_period`` is the rounded median period of the
+    chosen cluster.
+    """
+    if not peaks:
+        return None
+    rank1_score = _num_or_none(peaks[0].get("score"))
+    if rank1_score is None:
+        return None
+    clusters = _cluster_peaks_by_period(peaks)
+    if not clusters:
+        return None
+    best = clusters[0]   # already sorted by score_sum desc
+    if best["n_peaks"] < _CLUSTER_MIN_PEAKS:
+        return None
+    if (best["cov_frac_max"] is None
+        or best["cov_frac_max"] < _CLUSTER_COV_FRAC_MIN):
+        return None
+    if (best["spatial_max"] is None
+        or best["spatial_max"] < _CLUSTER_SPATIAL_MIN):
+        return None
+    if best["score_sum"] < rank1_score * _CLUSTER_SCORE_MARGIN:
+        return None
+    founder_period = int(round(best["median_period"]))
+    return best, founder_period
+
+
 def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
     """Build the per-array summary CSV (one row per array) from kitehor
     >=0.12.0 outputs: the rescored peaks TSV (`<prefix>.rescored.peaks.tsv`,
@@ -2283,7 +2413,7 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
     (`<prefix>.ssr.tsv`). Filename stays `monomer_size_top3_estimats.csv`
     so tc_per_tra_consensus.py + the R consensus prototype still find it.
 
-    Per array we compute, in three passes:
+    Per array we compute, in five passes:
 
     - **Pass 1 (per-TRA strict)**: rescore's `founder_period` column is
       the *strongest* (highest-identity) period. The *founder* is
@@ -2304,15 +2434,35 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
       (no TRC consensus, or no peak near it), relax the per-array
       multiplicity tolerance to ±0.20 (still id_med ≥ 0.7), flagging
       success as irregular_multiplicity = true.
+    - **Pass 4 (SSR-founder override)**: see inline comment — forces
+      founder = rank-1 kite peak on SSR-pure (≥ 95 %) arrays.
+    - **Pass 5 (peak-cluster fallback rescue)**: when rescore returned
+      NA *and* no SSR override applied, cluster the rescored peaks by
+      period (single-link, ±5 % / ±100 bp) and accept the highest-
+      `score_sum` cluster as founder when it has ≥ 2 peaks AND
+      `max(coverage_frac) ≥ 0.20` AND `max(spatial_contrast) ≥ 0.5`
+      AND `score_sum ≥ rank-1 peak score`. This recovers the real
+      ~10 kb HOR signal on arrays where rescore's identity threshold
+      filtered out every individual long-period peak but the
+      fragmented evidence is collectively dominant. See
+      `_cluster_rescue_founder()` for the gate logic.
 
     Other columns:
-    - **founder_fallback**: true when rescore returned NA founder_period
-      (separate concept from irregular_multiplicity).
+    - **founder_fallback**: true when rescore returned NA *and* Pass 5
+      did not rescue (i.e. truly no signal). Cleared on cluster rescue.
+    - **founder_method**: enum recording which pass produced the final
+      founder — `strict` / `none` / `pass2` / `pass3` / `ssr` /
+      `cluster` / `fallback`.
+    - **cluster_rescue**: true when Pass 5 promoted a cluster median
+      to founder. Diagnostic counterpart of `founder_method = cluster`.
     - **delta_id_pp**: identity_med(strongest) − identity_med(founder)
       in percentage points; NA when founder = strongest.
     - **top-5 monomer estimates by score**.
     - **top-2 subrepeat candidates** drawn from peaks classified HIGH
       or LIKELY (see _classify_subrepeat_tier).
+    - **alt_cluster_1..2_***: top-2 period clusters that are *not* the
+      founder's, surfaced so the report can show secondary signals
+      (e.g. a spurious 310-bp peak that was correctly demoted).
     - **SSR fields** lifted from `<prefix>.ssr.tsv`.
 
     `kite_tsv` is currently unused but kept on the signature to keep
@@ -2429,6 +2579,13 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
             "multiplicity_raw":  multiplicity_raw,
             "fallback":          fallback,
             "irregular":         False,
+            # rescue_method records which Pass produced the final founder.
+            # Default reflects Pass 1's outcome: "strict" when multiplicity
+            # >= 2 (real HOR call), "none" when mult=1 (rescore returned a
+            # founder but no smaller-period subrepeat passed), "fallback"
+            # when rescore returned NA. Passes 2/3/4/5 overwrite as needed.
+            "rescue_method":     ("strict" if (not fallback and multiplicity > 1)
+                                  else ("fallback" if fallback else "none")),
         })
 
     # ---- Pass 2 prep: TRC consensus founder from Pass-1 successes ----
@@ -2466,6 +2623,7 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
                 e["multiplicity_raw"] = raw
                 e["multiplicity"]     = kr
                 e["irregular"]        = True
+                e["rescue_method"]    = "pass2"
                 continue
         # Pass 3 — solo / no-consensus relaxed individual fallback
         relaxed = _relaxed_individual_founder(e["peaks"], e["strongest_period"])
@@ -2476,6 +2634,7 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
             e["multiplicity"]     = kr
             e["multiplicity_raw"] = k_raw
             e["irregular"]        = True
+            e["rescue_method"]    = "pass3"
 
     # ---- Pass 4: SSR-founder override ----
     # On SSR-pure (≥95 %) arrays rescore's identity-driven founder pick
@@ -2513,6 +2672,35 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
         e["founder_peak"]   = e["rank1"]
         e["strongest_peak"] = e["rank1"]
         e["ssr_override"]   = True
+        e["rescue_method"]  = "ssr"
+
+    # ---- Pass 5: peak-cluster fallback rescue ----
+    # Fires only when rescore returned NA (fallback=True) AND no SSR
+    # override applied. Pass-1 successes, Pass-2/3 rescues, and SSR
+    # override rows are not entered. See _cluster_rescue_founder() for
+    # the cluster + gating logic. On success: clear `fallback`, point
+    # founder/strongest at the cluster's highest-score peak, mark
+    # rescue_method="cluster". `multiplicity=1` because the rescue
+    # makes no claim about a smaller-period subrepeat (and Pass 2/3
+    # already had the opportunity to find one if rescore's founder
+    # had been usable in the first place).
+    for e in pass1:
+        e["cluster_rescue"] = False
+        if not e["fallback"] or e.get("ssr_override"):
+            continue
+        rescued = _cluster_rescue_founder(e["peaks"])
+        if rescued is None:
+            continue
+        cluster, founder_period = rescued
+        e["founder_period"]     = founder_period
+        e["strongest_period"]   = founder_period
+        e["founder_peak"]       = cluster["highest_score_peak"]
+        e["strongest_peak"]     = cluster["highest_score_peak"]
+        e["multiplicity"]       = 1
+        e["multiplicity_raw"]   = 1.0
+        e["fallback"]           = False     # cluster rescue clears the badge
+        e["cluster_rescue"]     = True
+        e["rescue_method"]      = "cluster"
 
     # ---- Build output rows ----
     rows = []
@@ -2547,6 +2735,29 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
         sr1 = sr_keep[0] if len(sr_keep) > 0 else None
         sr2 = sr_keep[1] if len(sr_keep) > 1 else None
 
+        # Alternative periodicities: cluster every row's rescored peaks
+        # and report the top-N clusters that are *not* the founder's.
+        # This surfaces secondary monomer signals (e.g. the spurious
+        # short-period peak that fallback rescue rejected, or genuine
+        # sub-monomer evidence on Pass-1 successes). The same clustering
+        # is used by Pass 5's rescue but is recomputed here cheaply.
+        fp_pick = e["founder_period"]
+        clusters_all = _cluster_peaks_by_period(peaks)
+        if fp_pick is None:
+            alt_clusters = clusters_all
+        else:
+            fp_window = max(fp_pick * _CLUSTER_WINDOW_PCT,
+                            _CLUSTER_WINDOW_BP_MIN)
+            def _is_founder_cluster(c):
+                for m in c["members"]:
+                    mp = _num(m.get("period"))
+                    if mp is not None and abs(mp - fp_pick) <= fp_window:
+                        return True
+                return False
+            alt_clusters = [c for c in clusters_all if not _is_founder_cluster(c)]
+        alt1 = alt_clusters[0] if len(alt_clusters) > 0 else None
+        alt2 = alt_clusters[1] if len(alt_clusters) > 1 else None
+
         ssr = ssr_by_rec.get(e["record_id"], {})
         rows.append({
             "TRC_ID":            e["trc"],
@@ -2577,12 +2788,25 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
             "strongest_id_med":  _fmt_id(strongest_id),
             "founder_fallback":  "true" if e["fallback"] else "false",
             "ssr_founder_override": "true" if e.get("ssr_override") else "false",
+            # Cluster-rescue diagnostics + founder_method enum
+            # (strict | none | pass2 | pass3 | ssr | cluster | fallback).
+            "founder_method":     e.get("rescue_method") or "",
+            "cluster_rescue":     "true" if e.get("cluster_rescue") else "false",
             "subrepeat_1_period": _fmt_bp(sr1[1]) if sr1 else "",
             "subrepeat_1_occ":    _fmt_id(sr1[0]) if sr1 else "",
             "subrepeat_1_tier":   sr1[2] if sr1 else "",
             "subrepeat_2_period": _fmt_bp(sr2[1]) if sr2 else "",
             "subrepeat_2_occ":    _fmt_id(sr2[0]) if sr2 else "",
             "subrepeat_2_tier":   sr2[2] if sr2 else "",
+            # Alternative periodicities (top-N clusters that aren't the founder).
+            "alt_cluster_1_period":       _fmt_bp(alt1["median_period"])  if alt1 else "",
+            "alt_cluster_1_score_sum":    _fmt_sc(alt1["score_sum"])      if alt1 else "",
+            "alt_cluster_1_n_peaks":      str(alt1["n_peaks"])            if alt1 else "",
+            "alt_cluster_1_cov_frac_max": _fmt_id(alt1["cov_frac_max"])   if alt1 else "",
+            "alt_cluster_2_period":       _fmt_bp(alt2["median_period"])  if alt2 else "",
+            "alt_cluster_2_score_sum":    _fmt_sc(alt2["score_sum"])      if alt2 else "",
+            "alt_cluster_2_n_peaks":      str(alt2["n_peaks"])            if alt2 else "",
+            "alt_cluster_2_cov_frac_max": _fmt_id(alt2["cov_frac_max"])   if alt2 else "",
             "ssr_flag":           ssr.get("ssr_flag", ""),
             "ssr_dominant_motif": ssr.get("dominant_motif", ""),
             "ssr_dominant_motif_coverage_pct":
@@ -2609,8 +2833,13 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
         "multiplicity_raw", "irregular_multiplicity",
         "delta_id_pp", "founder_id_med", "strongest_id_med",
         "founder_fallback", "ssr_founder_override",
+        "founder_method", "cluster_rescue",
         "subrepeat_1_period", "subrepeat_1_occ", "subrepeat_1_tier",
         "subrepeat_2_period", "subrepeat_2_occ", "subrepeat_2_tier",
+        "alt_cluster_1_period", "alt_cluster_1_score_sum",
+        "alt_cluster_1_n_peaks", "alt_cluster_1_cov_frac_max",
+        "alt_cluster_2_period", "alt_cluster_2_score_sum",
+        "alt_cluster_2_n_peaks", "alt_cluster_2_cov_frac_max",
         "ssr_flag", "ssr_dominant_motif",
         "ssr_dominant_motif_coverage_pct", "ssr_total_coverage_pct",
         "ssr_top_motifs", "consensus_period_bp",
