@@ -22,18 +22,20 @@ if command -v conda >/dev/null 2>&1 && [ -z "${CONDA_DEFAULT_ENV:-}" ]; then
 fi
 
 case "$LEVEL" in
+  unit)     bash "$ROOT/tests/unit.sh" ;;
   smoke)    bash "$ROOT/tests/smoke.sh" ;;
   short)    bash "$ROOT/tests/short.sh" ;;
   long)     bash "$ROOT/tests/long.sh"  ;;
   rerender) bash "$ROOT/tests/rerender.sh" ;;
   all)
+    bash "$ROOT/tests/unit.sh"
     bash "$ROOT/tests/smoke.sh"
     bash "$ROOT/tests/short.sh"
     bash "$ROOT/tests/rerender.sh"
     bash "$ROOT/tests/long.sh"
     ;;
   *)
-    echo "usage: $0 {smoke|short|long|rerender|all|<NCPU>}" >&2
+    echo "usage: $0 {unit|smoke|short|long|rerender|all|<NCPU>}" >&2
     exit 2
     ;;
 esac

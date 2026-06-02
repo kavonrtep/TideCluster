@@ -392,7 +392,7 @@ class RepeatMaskerFeature:
         self.seqid = items[4]
         self.start = int(items[5])
         self.end = int(items[6])
-        self.length = self.end - self.start
+        self.length = self.end - self.start + 1
         self.strand = items[8]
         self.annot = items[10]
         self.refid = items[9]
@@ -408,7 +408,27 @@ def get_repeatmasker_annotation(rm_file, seq_lengths, prefix, parse_id=True):
     :param parse_id: if True, parse ID from repeatmasker output, if False, use as it is
     :return:
     """
-    seq_rm_info = {}
+    # Collect, for every consensus sequence and every reference annotation, the
+    # set of query intervals covered by RepeatMasker hits. The coverage of an
+    # annotation is the length of the UNION of its hit intervals divided by the
+    # sequence length, so multiple monomer hits along a tandem consensus
+    # accumulate (rather than only the first hit being counted) while
+    # overlapping hits are not double-counted (each annotation stays in [0, 1]).
+    def _merged_interval_length(intervals):
+        total = 0
+        cur_start = cur_end = None
+        for start, end in sorted(intervals):
+            if cur_end is None or start > cur_end + 1:
+                if cur_end is not None:
+                    total += cur_end - cur_start + 1
+                cur_start, cur_end = start, end
+            else:
+                cur_end = max(cur_end, end)
+        if cur_end is not None:
+            total += cur_end - cur_start + 1
+        return total
+
+    seq_annot_intervals = {}
     with open(rm_file, 'r') as f:
         # parse repeatmasker output, first three lines are header
         for i in range(3):
@@ -419,12 +439,17 @@ def get_repeatmasker_annotation(rm_file, seq_lengths, prefix, parse_id=True):
                 return {}
         for line in f:
             rm_feature = RepeatMaskerFeature(line)
-            if rm_feature.seqid not in seq_rm_info:
-                seq_rm_info[rm_feature.seqid] = {}
-                if rm_feature.annot not in seq_rm_info[rm_feature.seqid]:
-                    seq_rm_info[rm_feature.seqid][rm_feature.annot] = 0
-                prop = rm_feature.length / seq_lengths[rm_feature.seqid]
-                seq_rm_info[rm_feature.seqid][rm_feature.annot] += prop
+            interval = (min(rm_feature.start, rm_feature.end),
+                        max(rm_feature.start, rm_feature.end))
+            seq_annot_intervals.setdefault(
+                rm_feature.seqid, {}).setdefault(
+                rm_feature.annot, []).append(interval)
+    seq_rm_info = {}
+    for seqid, annot_intervals in seq_annot_intervals.items():
+        seq_rm_info[seqid] = {
+            annot: _merged_interval_length(intervals) / seq_lengths[seqid]
+            for annot, intervals in annot_intervals.items()
+        }
     # for each TRC calculate mean value for each annotation
     # not all sequences are necessarily annotated
     annot_summary = {}
