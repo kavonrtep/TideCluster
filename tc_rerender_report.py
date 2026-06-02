@@ -1649,7 +1649,8 @@ def render_index_distribution(model, ctx):
 
 def render_cluster_overview(model, ctx):
     """Interactive (hover + click) bubble chart summarising the whole run:
-    x = median per-array KITE monomer size (log bp), y = TRC coverage
+    x = median per-array founder period (log bp) — falls back to KITE m₁
+    on legacy CSVs that lack the founder_period column; y = TRC coverage
     (log Mbp), dot radius ∝ number of arrays, dot colour = superfamily.
     Hand-rolled inline SVG; the floating tooltip is the same one the
     genome-distribution ideograms use (see tidecluster.js)."""
@@ -1657,16 +1658,23 @@ def render_cluster_overview(model, ctx):
     trc_prefix = ctx["trc_link_prefix"]
     pts, n_excluded = [], 0
     for t in model["trcs"]:
-        m1s = [a["m1"] for a in t["arrays"] if a.get("m1")]
+        # Prefer the per-array founder_period (rescore + Pass 1-5 result)
+        # over the rank-1 kite peak (m1). m1 can be a spurious short-
+        # period peak on noisy arrays where Pass 5 promoted the real
+        # ~10 kb founder; using m1 would misplace those TRCs at the
+        # left of the x-axis. Fall back to m1 only when founder_period
+        # is unavailable (legacy CSVs predating kitehor v0.12).
+        xs = [a.get("founder_period") or a.get("m1") for a in t["arrays"]
+              if (a.get("founder_period") or a.get("m1"))]
         cov_bp = t.get("total_size") or 0
-        if not m1s or cov_bp <= 0:
+        if not xs or cov_bp <= 0:
             n_excluded += 1
             continue
         kite = t.get("kite") or {}
         cc = kite.get("combined_class_counts") or {}
         pts.append({
             "id":   t["id"],
-            "x":    statistics.median(m1s),
+            "x":    statistics.median(xs),
             "y":    cov_bp / 1e6,
             "n":    t["n_arrays"],
             "cov":  cov_bp,
@@ -1721,7 +1729,7 @@ def render_cluster_overview(model, ctx):
     # Axis titles
     parts.append(f'<text x="{(px0 + px1) / 2:.0f}" y="{H - 6}" '
                  f'text-anchor="middle" class="tc-axis-title">'
-                 f'Median monomer size per TRC (bp, log)</text>')
+                 f'Median founder period per TRC (bp, log)</text>')
     parts.append(f'<text x="16" y="{(py0 + py1) / 2:.0f}" '
                  f'text-anchor="middle" class="tc-axis-title" '
                  f'transform="rotate(-90 16 {(py0 + py1) / 2:.0f})">'
@@ -1735,7 +1743,7 @@ def render_cluster_overview(model, ctx):
         cls_line = f'<br>class: {esc(class_label(p["cls"]))}' if p["cls"] else ''
         ann_line = f'<br>annotation: {esc(p["ann"].replace("%25","%"))}' if p.get("ann") else ''
         title = (f'<strong>{esc(p["id"])}</strong>'
-                 f'<br>median monomer: {esc(int(round(p["x"])))} bp'
+                 f'<br>median founder: {esc(int(round(p["x"])))} bp'
                  f'<br>coverage: {p["y"]:.3g} Mbp ({p["cov"]:,} bp)'
                  f'<br>arrays (TRA): {esc(p["n"])}'
                  f'<br>HOR arrays: {esc(p["hor"])}'
@@ -1771,8 +1779,9 @@ def render_cluster_overview(model, ctx):
     <section>
       <h2>Cluster overview</h2>
       <p style="font-size:12px;color:var(--fg-muted)">
-        Each dot is a TRC. <strong>x</strong> = median per-array monomer
-        size (KITE m₁, log); <strong>y</strong> = TRC coverage (log Mbp);
+        Each dot is a TRC. <strong>x</strong> = median per-array founder
+        period (log bp; falls back to KITE m₁ on legacy CSVs);
+        <strong>y</strong> = TRC coverage (log Mbp);
         <strong>dot size</strong> ∝ number of arrays (TRA);
         <strong>colour</strong> = superfamily (grey = unassigned). Hover a
         dot for details, click to open the TRC.{excl}
