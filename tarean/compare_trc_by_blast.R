@@ -314,7 +314,23 @@ option_list <- list(
   make_option(c("-t", "--threads"), type="numeric", default=4,
               help="Number of threads"),
   make_option(c("-d", "--debug"), type="logical", default=FALSE,
-              help="Save debug information")
+              help="Save debug information"),
+  # ----- Fallback (below-TAREAN-threshold rescue) -----
+  # Directory holding <TRC>_dimers.fasta files produced by the
+  # `clustering` step (= <prefix>_consensus). Used by the fallback to
+  # find TRCs whose array total length fell below TAREAN's
+  # min_total_length gate; those TRCs have no TAREAN consensus and
+  # so are absent from --input, but their raw TideHunter consensus
+  # is available here and can be BLASTed against the TAREAN dimer
+  # library to attach them to an existing superfamily (or promote a
+  # singleton big-TRC to a new SF).
+  make_option(c("--consensus_dir"), type="character", default=NULL,
+              help="Per-TRC dimer directory (<prefix>_consensus); enables fallback rescue"),
+  # Optional annotation TSV (<prefix>_annotation.tsv). When supplied,
+  # the fallback rejects (small, big) merges if both TRCs have an
+  # annotation and the annotations disagree.
+  make_option(c("--annotation_tsv"), type="character", default=NULL,
+              help="<prefix>_annotation.tsv (optional fallback consistency gate)")
 )
 
 
@@ -391,6 +407,163 @@ if (all(sapply(cls, length) == 1)) {
 ord <- order(sapply(cls, length), decreasing=TRUE)
 cls <- cls[ord]
 fasta_repr_cls <- split(fasta_repr, gcls$membership[TRC_id])[ord]
+
+# ----------------------------------------------------------------------
+# FALLBACK: attach below-TAREAN-threshold TRCs to superfamilies.
+# ----------------------------------------------------------------------
+# A TRC is "below threshold" when its array total length fell below
+# TAREAN's `min_total_length` gate (default 50 kb). Such TRCs have no
+# TAREAN consensus and are absent from --input, so the main BLAST step
+# above never sees them. Their RAW TideHunter consensus dimer is still
+# available under <prefix>_consensus/<TRC>_dimers.fasta (preserved by
+# the `clustering` step). The fallback BLASTs those raw dimers against
+# the same dimer-library DB used above and applies the same score gate
+# (`score_threshold` = 20). For each below-threshold TRC, the single
+# best-scoring big-TRC hit becomes the attachment target:
+#
+#   * if the target big-TRC is already in a multi-TRC superfamily,
+#     the small TRC joins that SF.
+#   * if the target big-TRC was previously a singleton (had no
+#     above-threshold big-big match), the (big, small) pair is
+#     promoted to a brand-new SF of size 2.
+#
+# To keep the per-SF dotplots informative, only the small TRC's
+# specific raw dimer that produced the best BLAST hit is added to
+# fasta_repr_cls -- not all of its dimer copies.
+#
+# Optional --annotation_tsv adds a belt-and-braces safety gate:
+# if both TRCs have a non-NA annotation and the annotations differ,
+# the merge is rejected.
+fallback_attached <- character()
+if (!is.null(opt$consensus_dir) && dir.exists(opt$consensus_dir)) {
+  big_trcs <- unique(gsub("#.*", "", names(fasta_repr)))
+  all_dimer_files <- list.files(opt$consensus_dir,
+                                pattern = "^TRC_[0-9]+_dimers\\.fasta$",
+                                full.names = TRUE)
+  small_fasta_paths <- list()
+  for (f in all_dimer_files) {
+    trc_id <- sub("_dimers\\.fasta$", "", basename(f))
+    if (!(trc_id %in% big_trcs)) {
+      small_fasta_paths[[trc_id]] <- f
+    }
+  }
+  small_trcs <- names(small_fasta_paths)
+
+  if (length(small_trcs) > 0) {
+    message(sprintf("Fallback: testing %d below-threshold TRC(s) against %d big-TRC dimer record(s).",
+                    length(small_trcs), length(big_trcs)))
+    # Build a single query FASTA. Each dimer keeps its TRC id in the
+    # name so trc_of-style split-on-# logic still recovers the source.
+    small_query <- DNAStringSet()
+    for (trc_id in small_trcs) {
+      seqs <- readDNAStringSet(small_fasta_paths[[trc_id]])
+      if (length(seqs) == 0) next
+      names(seqs) <- paste0(trc_id, "#", names(seqs))
+      small_query <- c(small_query, seqs)
+    }
+    if (length(small_query) > 0) {
+      # Unique suffix per record so BLAST does not reject duplicates.
+      names(small_query) <- paste0(names(small_query), "_q", seq_along(small_query))
+      small_q_path <- paste0(workdir, "/small_q.fasta")
+      writeXStringSet(small_query, small_q_path)
+      bl_fb <- run_blast(small_q_path, db, opt$threads, 1e-5)
+      bl_fb$ID1 <- gsub("#.+", "", bl_fb$qseqid)   # small TRC id
+      bl_fb$ID2 <- gsub("#.+", "", bl_fb$sseqid)   # big   TRC id
+      bl_fb <- bl_fb[bl_fb$ID1 != bl_fb$ID2, ]
+      bl_fb <- bl_fb[order(bl_fb$bitscore, decreasing = TRUE), ]
+      # Best HSP per (small, big) pair, scored with the same formula
+      # the main path uses (see line ~365 above).
+      bl_fb2 <- bl_fb[!duplicated(bl_fb[, c("ID1", "ID2")]), ]
+      if (nrow(bl_fb2) > 0) {
+        bl_fb2$score <- (bl_fb2$length * bl_fb2$pident - bl_fb2$gapopen) /
+                         ifelse(bl_fb2$qlen > bl_fb2$slen, bl_fb2$qlen, bl_fb2$slen)
+        bl_fb2 <- bl_fb2[bl_fb2$score >= score_threshold, ]
+      }
+
+      # Optional annotation-consistency gate.
+      if (nrow(bl_fb2) > 0 && !is.null(opt$annotation_tsv) &&
+          file.exists(opt$annotation_tsv)) {
+        ann <- tryCatch(
+          read.table(opt$annotation_tsv, header = TRUE, sep = "\t",
+                     stringsAsFactors = FALSE, comment.char = "",
+                     quote = ""),
+          error = function(e) NULL)
+        if (!is.null(ann) && all(c("TRC", "annotation") %in% colnames(ann))) {
+          ann <- ann[!is.na(ann$annotation) & ann$annotation != "NA" &
+                     nzchar(ann$annotation), ]
+          ann_of <- setNames(ann$annotation, ann$TRC)
+          a1 <- ann_of[bl_fb2$ID1]
+          a2 <- ann_of[bl_fb2$ID2]
+          reject <- !is.na(a1) & !is.na(a2) & a1 != a2
+          if (any(reject)) {
+            message(sprintf("Fallback: rejecting %d (small, big) pair(s) on annotation mismatch.",
+                            sum(reject)))
+          }
+          bl_fb2 <- bl_fb2[!reject, ]
+        }
+      }
+
+      if (nrow(bl_fb2) > 0) {
+        bl_fb2 <- bl_fb2[order(bl_fb2$ID1, -bl_fb2$score), ]
+        bl_fb_top <- bl_fb2[!duplicated(bl_fb2$ID1), ]   # best big per small
+
+        # Map big_TRC -> current SF index in cls.
+        big_to_sf <- integer(0)
+        for (sf_idx in seq_along(cls)) {
+          for (trc in cls[[sf_idx]]) big_to_sf[trc] <- sf_idx
+        }
+
+        for (k in seq_len(nrow(bl_fb_top))) {
+          small  <- bl_fb_top$ID1[k]
+          big    <- bl_fb_top$ID2[k]
+          bestq  <- bl_fb_top$qseqid[k]
+          scorek <- bl_fb_top$score[k]
+          # The small TRC's specific dimer that produced the best hit;
+          # used in the dotplot so the SF panel actually shows the
+          # similarity that triggered the attachment.
+          small_dimer <- small_query[bestq]
+          names(small_dimer) <- small
+
+          if (!is.na(big_to_sf[big])) {
+            sf_idx <- big_to_sf[big]
+            cls[[sf_idx]] <- c(cls[[sf_idx]], small)
+            fasta_repr_cls[[sf_idx]] <- c(fasta_repr_cls[[sf_idx]], small_dimer)
+            message(sprintf("Fallback: %s -> %s (SF %d, attach) score=%.2f",
+                            small, big, sf_idx, scorek))
+          } else {
+            # Promote a singleton big to a new 2-TRC SF.
+            big_dimer <- fasta_repr[big]
+            new_sf_dimers <- c(big_dimer, small_dimer)
+            cls <- c(cls, list(c(big, small)))
+            fasta_repr_cls <- c(fasta_repr_cls, list(new_sf_dimers))
+            new_idx <- length(cls)
+            big_to_sf[big] <- new_idx
+            message(sprintf("Fallback: %s + %s -> new SF %d (singleton-promotion) score=%.2f",
+                            big, small, new_idx, scorek))
+          }
+          fallback_attached <- c(fallback_attached, small)
+        }
+
+        # Re-sort by SF size desc (mirrors the main-path sort).
+        ord2 <- order(sapply(cls, length), decreasing = TRUE)
+        cls <- cls[ord2]
+        fasta_repr_cls <- fasta_repr_cls[ord2]
+      } else {
+        message("Fallback: no qualifying matches.")
+      }
+    }
+  } else {
+    message("Fallback: no below-threshold TRCs found in consensus dir.")
+  }
+} else {
+  if (is.null(opt$consensus_dir)) {
+    message("Fallback: --consensus_dir not provided; skipping.")
+  } else {
+    message(sprintf("Fallback: consensus dir '%s' does not exist; skipping.",
+                    opt$consensus_dir))
+  }
+}
+
 table_data_for_output <- create_table_data(cls)
 
 
@@ -452,9 +625,12 @@ for (i in seq_along(cls)) {
 
 # Close the HTML file
 closePage(page)
-# export superfamily assignments to csv table
+# export superfamily assignments to csv table.
+# `fallback` column flags TRCs attached via the below-threshold rescue
+# step (vs. native SF members produced by the main BLAST clustering).
 tbl_out <- data.frame(Superfamily=rep(seq_along(cls), sapply(cls, length), stringsAsFactors = FALSE),
                       TRC=unlist(cls, use.names = FALSE), stringsAsFactors = FALSE)
+tbl_out$fallback <- tbl_out$TRC %in% fallback_attached
 write.csv(tbl_out, paste(opt$prefix, "_trc_superfamilies.csv", sep = ""), row.names = FALSE)
 
 if (opt$debug) {
