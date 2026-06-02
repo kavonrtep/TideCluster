@@ -996,6 +996,23 @@ def load_kite_top3(paths):
                 "founder_fallback": (row.get("founder_fallback") or "").strip() == "true",
                 "ssr_founder_override":
                                     (row.get("ssr_founder_override") or "").strip() == "true",
+                # Pass 5 cluster rescue + founder_method enum. The columns
+                # are written by tc_utils >= 1.10.4; older v012 CSVs lack
+                # them and get None / False here.
+                "founder_method":   (row.get("founder_method") or "").strip() or None,
+                "cluster_rescue":   (row.get("cluster_rescue") or "").strip() == "true",
+                # Alternative-periodicity clusters (top-2 by score_sum,
+                # excluding the founder's cluster). Used to surface the
+                # secondary signal (e.g. a 310 bp peak that the cluster
+                # rescue correctly demoted but remains real).
+                "alt_cluster_1_period":       ni(row.get("alt_cluster_1_period")),
+                "alt_cluster_1_score_sum":    num(row.get("alt_cluster_1_score_sum")),
+                "alt_cluster_1_n_peaks":      ni(row.get("alt_cluster_1_n_peaks")),
+                "alt_cluster_1_cov_frac_max": num(row.get("alt_cluster_1_cov_frac_max")),
+                "alt_cluster_2_period":       ni(row.get("alt_cluster_2_period")),
+                "alt_cluster_2_score_sum":    num(row.get("alt_cluster_2_score_sum")),
+                "alt_cluster_2_n_peaks":      ni(row.get("alt_cluster_2_n_peaks")),
+                "alt_cluster_2_cov_frac_max": num(row.get("alt_cluster_2_cov_frac_max")),
                 # Top-2 subrepeat candidates (main column)
                 "subrepeat_1_period": ni(row.get("subrepeat_1_period")),
                 "subrepeat_1_occ":    num(row.get("subrepeat_1_occ")),
@@ -2617,6 +2634,8 @@ def _details_html(a):
     f_id = a.get("founder_id_med")
     s_id = a.get("strongest_id_med")
     fb   = a.get("founder_fallback")
+    crescue = a.get("cluster_rescue")
+    fmethod = a.get("founder_method")
 
     def _idstr(v):
         return f"id_med {v:.3f}" if v is not None else ""
@@ -2629,8 +2648,15 @@ def _details_html(a):
         # on 3.11 — see .github/workflows/tests.yml).
         fb_sup = ('<sup title="rescore fallback to top-scored kite peak">*</sup>'
                   if fb else '')
+        # Pass 5 cluster-rescue provenance: a dagger sup tag advertises
+        # that the founder is the median of a summed-score peak cluster
+        # rather than a rescore-passing peak. The `*` and `‡` cannot
+        # both appear because Pass 5 clears fb on success.
+        cr_sup = ('<sup title="founder = median of summed-score peak cluster '
+                  '(Pass 5 rescue; rescore returned NA)">&Dagger;</sup>'
+                  if crescue else '')
         head_bits.append(
-            f'<strong>Founder:</strong> {esc(fp)}{fb_sup}'
+            f'<strong>Founder:</strong> {esc(fp)}{fb_sup}{cr_sup}'
             f' <span class="tc-dim">{_idstr(f_id)}</span>')
     else:
         head_bits.append('<strong>Founder:</strong> NA')
@@ -2652,6 +2678,36 @@ def _details_html(a):
     header = ('<div class="tc-details-summary">'
               + ' &nbsp;·&nbsp; '.join(head_bits)
               + '</div>')
+
+    # Alternative periodicities (top-N period clusters that are NOT the
+    # founder's). Each cluster = a "score-summed family" of nearby peaks
+    # — e.g. on TRC_2/TRC_4 fallback rows where Pass 5 promotes the
+    # ~10 kb cluster to founder, the 310 bp peak shows up here so the
+    # secondary signal is still surfaced. Only emit the line when at
+    # least one alt cluster is populated (older CSVs lack the columns).
+    alt_bits = []
+    for n in (1, 2):
+        period   = a.get(f"alt_cluster_{n}_period")
+        score    = a.get(f"alt_cluster_{n}_score_sum")
+        n_peaks  = a.get(f"alt_cluster_{n}_n_peaks")
+        if period is None:
+            continue
+        meta = []
+        if score is not None:
+            meta.append(f"&Sigma;&nbsp;{score:.4f}")
+        if n_peaks is not None:
+            meta.append(f"n={n_peaks}")
+        meta_str = (' <span class="tc-meta">(' + ' &middot; '.join(meta) + ')</span>'
+                    if meta else '')
+        alt_bits.append(f'{esc(period)}&nbsp;bp{meta_str}')
+    alt_html = ''
+    if alt_bits:
+        alt_html = ('<div class="tc-details-alt tc-dim" '
+                    'style="margin-top:2px;font-size:0.9em">'
+                    'Other periodicities: '
+                    + ' &nbsp;&middot;&nbsp; '.join(alt_bits)
+                    + '</div>')
+    header = header + alt_html
 
     # SSR
     ssr_html = ""
@@ -2934,6 +2990,11 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
         n_ssr    = sum(1 for a in trc["arrays"]
                        if (a.get("ssr_dominant_motif") or "NA") != "NA")
         n_fb     = sum(1 for a in trc["arrays"] if a.get("founder_fallback"))
+        # Pass 5 (peak-cluster rescue) clears fallback on success, so
+        # n_fb above counts only rows where rescore returned NA *and*
+        # Pass 5 failed (or the CSV predates Pass 5). n_crescue counts
+        # the Pass-5 successes separately so both signals are visible.
+        n_crescue = sum(1 for a in trc["arrays"] if a.get("cluster_rescue"))
         # TRC-level aggregates from build_model: prevalent founder and
         # multiplicity distribution across the TRC's HOR arrays.
         prev_f   = kite.get("prevalent_founder")
@@ -2960,6 +3021,11 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
                  f'founder taken from TRC consensus)</span>'))
         class_rows.append(("Arrays with subrepeat",       str(n_subrep)))
         class_rows.append(("Arrays with SSR",             str(n_ssr)))
+        if n_crescue:
+            class_rows.append(
+                ("Arrays rescued by cluster (Pass 5)",
+                 f'{n_crescue} <span class="tc-dim">(founder = median of '
+                 f'summed-score peak cluster)</span>'))
         if n_fb:
             class_rows.append(("Arrays with fallback founder", str(n_fb)))
     if trc.get("superfamily"):
