@@ -162,6 +162,7 @@ mmseqs2_search <- function(sequences,
 
 cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
                                   min_coverage = 0.2, min_identity = 70,
+                                  coverage_mode = "max",
                                   output_directory = NULL, ncpu = 5,
                                   input_tc_dirs = NULL, prefix = NULL, tc_code = NULL,
                                   clustering_algorithm = "fast_greedy"
@@ -180,6 +181,12 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
   if (!is.numeric(min_identity) || min_identity < 0 || min_identity > 100) {
     stop("min_identity must be numeric between 0 and 100")
   }
+  # Validate coverage mode. "max" = max(qcov, tcov) >= min_coverage (a hit
+  # covering most of EITHER sequence survives; lets a short monomer attach to a
+  # long one as a subset). "min" = min(qcov, tcov) >= min_coverage (bidirectional
+  # coverage; both sequences must be well covered, so short-vs-long subset hits
+  # are rejected).
+  coverage_mode <- match.arg(coverage_mode, c("max", "min"))
   # Validate clustering algorithm
   valid_algorithms <- c("fast_greedy", "louvain", "leiden")
   if (!clustering_algorithm %in% valid_algorithms) {
@@ -252,8 +259,13 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
     write.table(df, mmseqs2_tsv_file, sep = "\t", row.names = FALSE, quote = FALSE)
     cat("MMseqs2 results saved to:", mmseqs2_rds_file, "and", mmseqs2_tsv_file, "\n")
   }
-  # Calculate maximum coverage
+  # Calculate coverage metrics. max_cov/min_cov are both retained for
+  # inspection; sel_cov is the one the chosen coverage_mode acts on.
   df$max_cov <- pmax(df$qcov, df$tcov)
+  df$min_cov <- pmin(df$qcov, df$tcov)
+  df$sel_cov <- if (coverage_mode == "min") df$min_cov else df$max_cov
+  message("Coverage mode: ", coverage_mode,
+          " (edge requires ", coverage_mode, "(qcov, tcov) >= ", min_coverage, ")")
 
   # Extract  IDs from query and target
   df$trc_q <- gsub("_rep.+", "", gsub("#.+", "", df$query))
@@ -261,12 +273,12 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
 
   # Filter based on coverage and identity thresholds, or same transcript ID
   message("MMseqs2 output before filtering: ", nrow(df), " rows")
-  df_pass <- df[(df$max_cov >= min_coverage & df$pident >= min_identity) |
+  df_pass <- df[(df$sel_cov >= min_coverage & df$pident >= min_identity) |
                 df$trc_q == df$trc_t, ]
   message("MMseqs2 output after filtering: ", nrow(df_pass), " rows")
 
   # Calculate edge weights
-  df_pass$weight <- df_pass$max_cov * df_pass$pident
+  df_pass$weight <- df_pass$sel_cov * df_pass$pident
 
   # Build graph and perform community detection
   cat("Building similarity graph...\n")
@@ -1276,7 +1288,9 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
                                  mmseqs2_path = NULL,
                                  output_directory = "tc_comparative_analysis",
                                  ncpu = opt$cpu,
-                                 clustering_algorithm = "fast_greedy"
+                                 clustering_algorithm = "fast_greedy",
+                                 min_coverage = 0.8, min_identity = 80,
+                                 coverage_mode = "max"
 ) {
 
   tc_clust_path <- paste0(tc_code, "_clustering.gff3")
@@ -1290,7 +1304,8 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
   message("Clustering sequences...")
   grps <- cluster_trc_sequences(all_seq$tc, all_seq$th, mmseqs2_path = mmseqs2_path,
                                 output_directory = output_directory, ncpu = ncpu,
-                                min_identity = 80, min_coverage = 0.8,
+                                min_identity = min_identity, min_coverage = min_coverage,
+                                coverage_mode = coverage_mode,
                                 input_tc_dirs = input_tc_dirs, prefix = prefix, tc_code = tc_code,
                                 clustering_algorithm = clustering_algorithm
   )
@@ -1705,7 +1720,10 @@ main <- function(opt) {
     mmseqs2_path = opt$mmseqs2_path,
     output_directory = opt$output_directory,
     ncpu = opt$cpu,
-    clustering_algorithm = opt$clustering_algorithm
+    clustering_algorithm = opt$clustering_algorithm,
+    min_coverage = opt$min_coverage,
+    min_identity = opt$min_identity,
+    coverage_mode = opt$coverage_mode
   )
 
   # Format results
@@ -1758,7 +1776,16 @@ option_list <- list(
     help="Number of iterations for Leiden clustering [default: %default]"),
   make_option(
     c("--seed"), type="integer", default=123,
-    help="Random number generator seed [default: %default]")
+    help="Random number generator seed [default: %default]"),
+  make_option(
+    c("--min_coverage"), type="numeric", default=0.8,
+    help="Minimum alignment coverage to create a similarity edge; interpreted per --coverage_mode [default: %default]"),
+  make_option(
+    c("--min_identity"), type="numeric", default=80,
+    help="Minimum percent identity to create a similarity edge [default: %default]"),
+  make_option(
+    c("--coverage_mode"), type="character", default="max",
+    help=paste("How --min_coverage is applied: 'max' = max(qcov,tcov) (a hit covering most of either sequence survives, e.g. a short monomer as a subset of a long one); 'min' = min(qcov,tcov) (bidirectional coverage; both sequences must be covered, rejecting short-vs-long subset hits) [default: %default]"))
 )
 
 opt_parser <- OptionParser(option_list=option_list)
@@ -1775,6 +1802,12 @@ valid_algorithms <- c("fast_greedy", "louvain", "leiden")
 if (!(opt$clustering_algorithm %in% valid_algorithms)) {
   print_help(opt_parser)
   stop(paste("Invalid clustering algorithm. Choose from:", paste(valid_algorithms, collapse = ", ")))
+}
+
+# check coverage mode
+if (!(opt$coverage_mode %in% c("max", "min"))) {
+  print_help(opt_parser)
+  stop("Invalid --coverage_mode. Choose 'max' or 'min'.")
 }
 
 # validate leiden-specific parameters if leiden clustering is used
