@@ -1,3 +1,34 @@
+## 1.11.0 (2026-06-03)
+- Comparative analysis: expose the per-edge coverage convention via
+  a new `--coverage_mode` flag on `tc_comparative_analysis.R`,
+  controlling how the MMseqs2 alignment coverage threshold is
+  applied when building the TRC similarity graph:
+    - `max` (default; current behaviour) —
+      `max(qcov, tcov) ≥ --min_coverage`. A hit covering most of
+      *either* sequence survives, so a short basic monomer can
+      attach to a longer family as a subset.
+    - `min` (new, bidirectional) —
+      `min(qcov, tcov) ≥ --min_coverage`. Both sequences must be
+      well covered. Rejects short-vs-long subset hits — e.g. a
+      53 bp satellite folding into the ~8 kb 45S rDNA family.
+  The selected metric drives both the edge filter and the edge
+  weight (`selected_coverage × pident`); both `max_cov` and
+  `min_cov` are retained in `mmseqs2_results.tsv` so the threshold
+  can be re-tuned post-hoc without re-running the search.
+  Defaults preserve 1.10.x behaviour.
+- Also exposes `--min_coverage` (default 0.8) and `--min_identity`
+  (default 80) on the CLI; previously these were hard-coded inside
+  `process_trc_analysis()`. The MMseqs2 search-time pre-filter
+  stays an OR (a valid superset for either mode); exact filtering
+  happens in R.
+- README: new *How similarity between TRCs is evaluated* subsection
+  walks through the MMseqs2 comparison in plain language (qcov +
+  tcov + percent identity, the two thresholds, the max-vs-min
+  combine choice with a worked example) and the three new flags
+  are added to the command-line option list. The *Purpose* bullet
+  that previously hard-coded "fast-greedy" now reflects all three
+  supported clustering algorithms.
+
 ## 1.10.6 (2026-06-03)
 - Fix 1.10.5 regression: when the new below-TAREAN-threshold
   superfamily fallback BLASTs the small-TRC dimers against the
