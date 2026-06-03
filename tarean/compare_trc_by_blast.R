@@ -289,6 +289,28 @@ run_blast <- function(query, db, threads, evalue) {
   if (system(cmd) != 0) {
     stop("Error running BLAST")
   }
+  # An empty BLAST output (no hits at any e-value) was historically
+  # impossible on the main self-vs-self path (the dimer library always
+  # has many self-hits), but the 1.10.5 below-threshold fallback can
+  # legitimately produce zero hits on a genome whose small TRCs match
+  # nothing in the dimer library (observed on S. pimpinellifolium,
+  # docs/tidecluster_bug_superfamily_fallback_empty_blast.md). Without
+  # this guard, read.table() on the empty file raises
+  # "no lines available in input" and the whole script dies, taking
+  # the existing native-SF output down with it. Return an empty,
+  # correctly-typed data frame instead and let the caller's
+  # `nrow(...) > 0` checks shortcut to "no attachments".
+  if (file.size(blast_out) == 0) {
+    return(data.frame(
+      qseqid   = character(0), sseqid   = character(0),
+      pident   = numeric(0),   length   = integer(0),
+      mismatch = integer(0),   gapopen  = integer(0),
+      qstart   = integer(0),   qend     = integer(0),
+      sstart   = integer(0),   send     = integer(0),
+      evalue   = numeric(0),   bitscore = numeric(0),
+      qlen     = integer(0),   slen     = integer(0),
+      stringsAsFactors = FALSE))
+  }
   bl <- read.table(blast_out, header = FALSE, sep = "\t", as.is = TRUE, comment.char = "")
   colnames(bl) <- c("qseqid", "sseqid", "pident", "length", "mismatch", "gapopen", "qstart", "qend", "sstart", "send", "evalue", "bitscore", "qlen", "slen")
   return(bl)
