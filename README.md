@@ -529,7 +529,7 @@ The `tc_comparative_analysis.R` script performs comparative analysis of Tandem R
 
 The script performs several key functions:
 1. **Sequence clustering**: Groups TRCs from multiple samples based on sequence similarity using MMseqs2
-2. **Graph-based community detection**: Uses fast-greedy clustering to identify satellite families
+2. **Graph-based community detection**: Identifies satellite families with a community-detection algorithm (fast-greedy by default; louvain and leiden also supported)
 3. **Annotation integration**: Incorporates annotation data from RepeatMasker analysis
 4. **Length calculation**: Computes total lengths of TRCs within each family across samples
 5. **SSRS analysis**: Processes Simple Sequence Repeat (SSR) data alongside TRC data
@@ -568,8 +568,52 @@ Rscript tc_comparative_analysis.R -i input_config.tsv -o output_directory -c 10
 - `-i, --input`: Input configuration file (required)
 - `-o, --output_directory`: Output directory for results (default: "tc_comparative_analysis")
 - `-c, --cpu`: Number of CPU threads for MMseqs2 (default: 5)
+- `--min_identity`: Minimum percent identity (0–100) for two TRCs to be linked
+  in the similarity graph (default: 80)
+- `--min_coverage`: Minimum alignment coverage (0–1) for two TRCs to be linked;
+  how this is applied to the two sequences is controlled by `--coverage_mode`
+  (default: 0.8)
+- `--coverage_mode`: How `--min_coverage` is applied to the per-sequence coverage
+  values returned by MMseqs2 — `max` (default; accepts a hit that covers most of
+  *either* sequence, so a short monomer can join a longer family as a subset) or
+  `min` (requires both sequences to be well covered, rejecting short-vs-long
+  subset hits). See *How similarity between TRCs is evaluated* below.
 
+### How similarity between TRCs is evaluated
 
+The script collects the consensus sequence of every TRC from every sample and
+runs an all-vs-all comparison with **MMseqs2** (a fast nucleotide search engine).
+For each alignment, MMseqs2 reports two coverage numbers — `qcov` (the fraction
+of the *query* sequence that aligned) and `tcov` (the fraction of the *target*
+sequence that aligned) — along with a percent identity.
+
+Two TRCs are linked in the similarity graph only when their best alignment
+passes two thresholds:
+
+- **percent identity** ≥ `--min_identity` (default 80) — how similar the aligned
+  letters are;
+- **coverage** ≥ `--min_coverage` (default 0.8 = 80 %) — how much of the
+  consensus the alignment spans.
+
+Because the two consensus sequences are usually different lengths, you choose
+via `--coverage_mode` how the two coverage numbers are combined:
+
+- **`max` (default)** — `max(qcov, tcov) ≥ min_coverage`. A hit that covers
+  most of *either* sequence survives, so a short basic monomer (e.g. 53 bp)
+  can be attached to a long higher-order repeat family (e.g. ~8 kb) as a
+  subset.
+- **`min`** — `min(qcov, tcov) ≥ min_coverage`. *Both* sequences must be well
+  covered. Subset hits where a short sequence aligns to only part of a long
+  family are rejected, so each satellite family is built from consensus
+  sequences that are roughly the same length and align end-to-end.
+
+Each surviving alignment becomes an edge in the TRC similarity graph; the edge
+weight is `selected_coverage × percent_identity`. Connected TRCs are then
+grouped into **satellite families** using one of the supported community-detection
+algorithms (`--clustering_algorithm`: `fast_greedy` by default; `louvain` or
+`leiden` also available). Both `max(qcov, tcov)` and `min(qcov, tcov)` are
+retained in `mmseqs2_results.tsv` so you can inspect why an edge did or did
+not survive without re-running the search.
 
 ### Output Files
 
