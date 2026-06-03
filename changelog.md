@@ -1,3 +1,39 @@
+## 1.10.6 (2026-06-03)
+- Fix 1.10.5 regression: when the new below-TAREAN-threshold
+  superfamily fallback BLASTs the small-TRC dimers against the
+  big-TRC dimer DB and finds zero above-e-value hits, blastn writes
+  an empty output file and `read.table(blast_out, …)` in
+  `run_blast()` (compare_trc_by_blast.R) raises
+  `Error in read.table(...) : no lines available in input`. The
+  script aborts before writing `<prefix>_trc_superfamilies.csv`, so
+  the *native* SFs (from the main big-vs-big BLAST, which did find
+  hits) are silently lost too — the surrounding TideCluster.py
+  pipeline still exits 0 because the wrapper sees a missing CSV,
+  not a failed step. Observed during the manuscript's set1/set2
+  1.10.5 rerun on *S. pimpinellifolium* (55 below-threshold TRCs,
+  11 big-TRC dimer records, zero qualifying matches; diagnosed in
+  `docs/tidecluster_bug_superfamily_fallback_empty_blast.md`).
+- Guard `run_blast()` against `file.size(blast_out) == 0` and
+  return a clean 0-row data frame with the correct 14-column
+  schema (character qseqid/sseqid, numeric pident/evalue/bitscore,
+  integer everything else). The fallback section's existing
+  `nrow(bl_fb2) > 0` guards then short-circuit to "no
+  attachments" and the CSV is written with the native SFs intact.
+  Also future-proofs the main self-vs-self BLAST against the
+  (extremely rare) zero-hit case on tiny datasets — the existing
+  `if (nrow(bl3) == 0)` early exit fires cleanly instead of
+  crashing inside `read.table()`.
+- Validation:
+    - R-level: mocked `system()` to write an empty file, run_blast()
+      returns a 0-row 14-col df with types matching `read.table()`;
+      gsub/order/duplicated/nrow all operate cleanly on it.
+    - Happy path on `analysis_kite15k`: byte-identical to 1.10.5
+      (4 SFs, 3 fallback rescues, exit 0, 16-row CSV).
+    - Empty-fallback end-to-end on a synthetic small-TRC with random
+      sequence that produces zero BLAST hits: exit 0, "Fallback:
+      no qualifying matches", CSV written with the native 2 SFs
+      (11 rows), HTML produced.
+
 ## 1.10.5 (2026-06-02)
 - New **below-TAREAN-threshold superfamily fallback rescue** in
   `tarean/compare_trc_by_blast.R`. TRCs whose array total length
