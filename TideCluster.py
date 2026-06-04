@@ -211,17 +211,22 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
         th_args_str = "Round 1: p=40-3000, Round 2: p=3001-10000, Round 3: p=10001-25000"
     else:
         th_mode_str = "Standard"
-        th_args_str = args.tidehunter_arguments
+        th_args_str = getattr(args, 'tidehunter_arguments', 'n/a')
 
+    # The info block summarises run_all-level settings. When tarean is invoked
+    # standalone, run_all-only args (tidehunter_arguments, min_length, no_dust,
+    # library) are normally back-filled from <prefix>_cmd_args.json above; fall
+    # back to 'n/a' so a standalone run without that side-car still prints the
+    # block instead of raising AttributeError.
     settings = (F"Input file                 : {input_fasta}\n"
                 F"Prefix                     : {args.prefix}\n"
                 F"Minimum TRC total length   : {args.min_total_length}\n"
-                F"Minimum array length       : {args.min_length}\n"
-                F"Dust filter                : {'no' if args.no_dust else 'yes'}\n"
+                F"Minimum array length       : {getattr(args, 'min_length', 'n/a')}\n"
+                F"Dust filter                : {'no' if getattr(args, 'no_dust', False) else 'yes'}\n"
                 F"TideHunter mode            : {th_mode_str}\n"
                 F"TideHunter arguments       : {th_args_str}\n"
                 F"CPU                        : {args.cpu}\n"
-                F"Library                    : {args.library}\n"
+                F"Library                    : {getattr(args, 'library', 'n/a')}\n"
                 F"TideCluster version        : {version}\n")
 
     # create summar with number of clusters, number of omitted clusters, number of SSRs

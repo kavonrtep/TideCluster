@@ -21,6 +21,13 @@
   subsection documents the options with defaults and an effect table,
   noting the defaults are the tuned operating point and should be left
   unchanged for routine use.
+- Fix: the `tarean` step printed its settings block by reading
+  run_all-only args (`tidehunter_arguments`, `min_length`, `no_dust`,
+  `library`) directly, so invoking `tarean` standalone without an
+  accumulated `<prefix>_cmd_args.json` raised `AttributeError`. These
+  reads now fall back to `n/a` via `getattr`, matching the existing
+  handling of `long` / `original_fasta`; behaviour is unchanged when the
+  side-car file is present.
 
 ## 1.11.0 (2026-06-03)
 - Comparative analysis: expose the per-edge coverage convention via
