@@ -1,3 +1,49 @@
+## Unreleased
+- Fix per-array `strongest_period` semantics in `tc_utils.build_
+  monomer_size_csv()` Pass 1. The previous code trusted kitehor's
+  `founder_period` column as the strongest periodicity, but kitehor's
+  rescore picks by single-peak kite score on some arrays rather than
+  by identity, occasionally returning the rank-1-by-score peak (low
+  id_med) even when a clean integer multiple of it has higher id_med
+  (the real HOR period). On *S. pimpinellifolium* TRC_8 chr12:1314680
+  and chr12:1327272 this collapsed `multiplicity` from the true 10
+  down to 1 — no HOR call. Strongest is now defined per the project's
+  documented semantics (see
+  `hermit/.../memory/reference_founder_strongest_hor.md`): the peak
+  with the highest `identity_med` among peaks that pass the founder
+  identity gate (`_FOUNDER_ID_MIN = 0.7`). Pass 1's divisor search
+  then naturally finds the basic monomer as the smallest valid
+  integer divisor of that higher strongest, recovering the HOR call.
+- New `kitehor_founder_period` column on
+  `<prefix>_kite/monomer_size_top3_estimats.csv` (additive; older
+  consumers ignore it): captures kitehor's original rescore pick so
+  that disagreement with TideCluster's recomputed `strongest_period`
+  is auditable per row. When the two agree, the column simply
+  duplicates `strongest_period`; when they differ, the row is one of
+  the cases where the new argmax(id_med) override fired.
+- Defensive guard: if no peak passes the id gate even though kitehor
+  reported a founder, TideCluster falls back to kitehor's pick rather
+  than failing — preserves 1.12.0 behaviour on those edge rows.
+- Pass 2/3/4/5 logic is unchanged. The TRC-consensus rescue in Pass 2
+  (ce233d1, kitehor 0.12 era) still handles arrays where Pass 1 left
+  `multiplicity = 1` due to an irregular (fractional `k`) HOR.
+- Validation on `test_data/Solanum_pimpinellifolium` (433 arrays):
+    - the two cases Petr cited (TRC_8 chr12:1314680 and chr12:1327272)
+      now report `strongest ≈ 1786`, `founder = 178`, `multiplicity = 10`
+      with `kitehor_founder_period = 178` documenting the override
+    - 71 arrays gained an HOR call (multiplicity 1 → ≥2), 1 lost
+    - 109 founder shifts are within ±10 % of the prior pick (same
+      monomer family, slightly different specific bp chosen by
+      argmax(id_med) — cosmetic)
+    - 30 structural founder shifts are downstream consequences of the
+      strongest change via the strict ±0.05 divisor tolerance —
+      semantically correct per the founder/strongest/HOR definitions
+- New `tests/test_strongest_by_identity.py` with 12 synthetic cases
+  covering the override (fires when kitehor picked low-id_med),
+  the no-op (kitehor was already argmax), the kitehor-NA fallback,
+  and the all-below-gate defensive fallback. Wired into
+  `tests/unit.sh`.
+
 ## 1.12.0 (2026-06-04)
 - Expose the per-genome clustering and superfamily similarity
   thresholds on the CLI; previously hard-coded:

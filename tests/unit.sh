@@ -10,4 +10,7 @@ python3 "$ROOT/tests/test_annotation_coverage.py"
 echo "=== unit: cluster rescue (Pass 5) ==="
 python3 "$ROOT/tests/test_cluster_rescue.py"
 
+echo "=== unit: strongest = argmax(id_med) ==="
+python3 "$ROOT/tests/test_strongest_by_identity.py"
+
 echo "unit tests OK"

@@ -2420,8 +2420,16 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
 
     Per array we compute, in five passes:
 
-    - **Pass 1 (per-TRA strict)**: rescore's `founder_period` column is
-      the *strongest* (highest-identity) period. The *founder* is
+    - **Pass 1 (per-TRA strict)**: the *strongest* period is the peak
+      with the highest `identity_med` among peaks that pass the
+      founder identity gate (≥ 0.7). On well-behaved arrays this is
+      the same peak kitehor's rescore stamps as `founder_period`, but
+      on the subset of arrays where kitehor picked by single-peak
+      score rather than by identity (e.g. a 178 bp monomer that
+      out-scores the 1786 bp 10× HOR period it tiles), this
+      argmax-based pick recovers the higher-identity HOR period as
+      strongest. Kitehor's original pick is retained as the
+      `kitehor_founder_period` column for audit. The *founder* is
       reassigned by searching for the smallest peak P whose period is
       an integer divisor of strongest (k = strongest/P, 2 ≤ k ≤ 30,
       |k - round(k)| ≤ 0.05) with `identity_med(P) ≥ 0.7`. If none,
@@ -2453,6 +2461,10 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
       `_cluster_rescue_founder()` for the gate logic.
 
     Other columns:
+    - **kitehor_founder_period**: kitehor's original rescore pick for
+      this case_id, preserved unchanged. When it differs from
+      `strongest_period` the argmax(identity_med) override in Pass 1
+      has fired (kitehor picked a lower-id_med peak by score).
     - **founder_fallback**: true when rescore returned NA *and* Pass 5
       did not rescue (i.e. truly no signal). Cleared on cluster rescue.
     - **founder_method**: enum recording which pass produced the final
@@ -2527,9 +2539,19 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
             continue
         seqid, start, end = parts
         rank1 = peaks[0]
-        fp = _num(rank1.get("founder_period"))
+        # kitehor's rescore writes the same `founder_period` on every row
+        # of a case_id (its own pick of the best peak). We keep it as a
+        # diagnostic only — see `kitehor_founder_period` in the CSV —
+        # because on some arrays kitehor's pick is the rank-1-by-score
+        # peak rather than the peak with the highest `identity_med`
+        # (e.g. S. pimpinellifolium TRC_8 chr12:1314680 picks the 178bp
+        # monomer at id_med=0.736 over the 1786bp HOR period at
+        # id_med=0.818, which then suppresses the 10×178 HOR call).
+        # An NA value still signals "no rescore signal at all", which
+        # we keep as the Pass 5 cluster-rescue trigger.
+        kitehor_fp = _num(rank1.get("founder_period"))
         fallback = False
-        if fp is None:
+        if kitehor_fp is None:
             fallback        = True
             strongest_peak  = rank1
             strongest_period = _num(rank1.get("period"))
@@ -2538,18 +2560,45 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
             multiplicity    = 1
             multiplicity_raw = 1.0 if strongest_period else None
         else:
-            strongest_period = fp
-            strongest_peak   = next(
-                (p for p in peaks if _num(p.get("period")) == fp), rank1)
+            # Strongest = peak with the highest identity_med among peaks
+            # that pass the founder identity gate (>= _FOUNDER_ID_MIN).
+            # On well-behaved arrays kitehor's founder_period IS already
+            # the argmax(id_med), so this is a no-op; on the subset where
+            # kitehor picked by score and missed a higher-id_med long-
+            # period peak, this gives Pass-1's divisor search the right
+            # strongest target and recovers the HOR call.
+            strongest_peak   = None
+            strongest_period = None
+            best_idm         = -1.0
+            for p in peaks:
+                idm    = _num(p.get("identity_med"))
+                period = _num(p.get("period"))
+                if idm is None or period is None or period <= 0:
+                    continue
+                if idm < _FOUNDER_ID_MIN:
+                    continue
+                if idm > best_idm:
+                    best_idm         = idm
+                    strongest_peak   = p
+                    strongest_period = period
+            if strongest_period is None:
+                # No peak cleared the id gate even though kitehor reported
+                # a founder. Defensive: keep kitehor's pick rather than
+                # falling through (changes are then exactly the same as
+                # 1.12.0 for these rows).
+                strongest_period = kitehor_fp
+                strongest_peak   = next(
+                    (p for p in peaks if _num(p.get("period")) == kitehor_fp),
+                    rank1)
             candidates = []
             for p in peaks:
                 P = _num(p.get("period"))
-                if P is None or P >= fp:
+                if P is None or P >= strongest_period:
                     continue
                 idm = _num(p.get("identity_med"))
                 if idm is None or idm < _FOUNDER_ID_MIN:
                     continue
-                k = fp / P
+                k = strongest_period / P
                 kr = round(k)
                 if not (2 <= kr <= _KMAX):
                     continue
@@ -2578,6 +2627,10 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
             "rank1":             rank1,
             "strongest_peak":    strongest_peak,
             "strongest_period":  strongest_period,
+            # kitehor's original rescore pick (may differ from
+            # strongest_period when TideCluster's argmax(id_med)
+            # override fires).
+            "kitehor_founder_period": kitehor_fp,
             "founder_peak":      founder_peak,
             "founder_period":    founder_period,
             "multiplicity":      multiplicity,
@@ -2784,6 +2837,12 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
             "hor_confidence":    "",
             "founder_period":    _fmt_bp(e["founder_period"]),
             "strongest_period":  _fmt_bp(e["strongest_period"]),
+            # kitehor's original rescore pick for this case_id. When it
+            # differs from `strongest_period` above, TideCluster's
+            # argmax(identity_med) override has fired (kitehor picked a
+            # lower-id_med peak by score). Useful for auditing the
+            # override; not required by downstream consumers.
+            "kitehor_founder_period": _fmt_bp(e.get("kitehor_founder_period")),
             "multiplicity":      str(e["multiplicity"]),
             "multiplicity_raw":  (f"{e['multiplicity_raw']:.4f}"
                                   if e["multiplicity_raw"] is not None else ""),
@@ -2834,7 +2893,8 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
         "monomer_size_4", "score_4",
         "monomer_size_5", "score_5",
         "hor_status", "hor_confidence",
-        "founder_period", "strongest_period", "multiplicity",
+        "founder_period", "strongest_period", "kitehor_founder_period",
+        "multiplicity",
         "multiplicity_raw", "irregular_multiplicity",
         "delta_id_pp", "founder_id_med", "strongest_id_med",
         "founder_fallback", "ssr_founder_override",
