@@ -1,3 +1,27 @@
+## Unreleased
+- Expose the per-genome clustering and superfamily similarity
+  thresholds on the CLI; previously hard-coded:
+    - `--cluster_identity` (default 75) and `--cluster_coverage`
+      (default 0.8) on `clustering` and `run_all` — the BLASTN
+      percent-identity and shorter-sequence coverage gates that
+      define array-level families (TRCs).
+    - `--superfamily_score` (default 20) on `tarean` and `run_all`,
+      threaded into `compare_trc_by_blast.R --score_threshold` — the
+      consensus-vs-consensus BLAST score gate
+      `(length · pident − gap_openings) / longer_consensus_length`
+      that defines superfamilies (also governs the below-threshold
+      fallback rescue).
+  Defaults equal the former hard-coded constants, so default runs are
+  unchanged.
+- Validate the new thresholds before a run starts: out-of-range values
+  abort with a clear error (a coverage fraction entered as a percent,
+  identity outside (0, 100], a negative score); biologically unusual
+  but valid values emit a warning and proceed.
+- README: new *Advanced: tuning the clustering thresholds (expert use)*
+  subsection documents the options with defaults and an effect table,
+  noting the defaults are the tuned operating point and should be left
+  unchanged for routine use.
+
 ## 1.11.0 (2026-06-03)
 - Comparative analysis: expose the per-edge coverage convention via
   a new `--coverage_mode` flag on `tc_comparative_analysis.R`,

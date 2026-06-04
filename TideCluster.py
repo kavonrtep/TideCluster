@@ -311,12 +311,14 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
     # script for the score gate and annotation-consistency safety check.
     consensus_dir_arg = F"{prefix}_consensus"
     annotation_tsv_arg = F"{prefix}_annotation.tsv"
+    superfamily_score = float(getattr(args, "superfamily_score", 20))
     print('running Compare TRC by blast')
     cmd = (
         F"{script_path}/tarean/compare_trc_by_blast.R -i {prefix}_consensus_dimer_library.fasta"
         F" -p {prefix} -t {cpu}"
         F" --consensus_dir {consensus_dir_arg}"
-        F" --annotation_tsv {annotation_tsv_arg}")
+        F" --annotation_tsv {annotation_tsv_arg}"
+        F" --score_threshold {superfamily_score}")
     tc.run_cmd(cmd)
 
     _move_v1_to_legacy(prefix)
@@ -460,7 +462,8 @@ def annotation(prefix, library, gff=None, consensus_dir=None, cpu=1):
             tc.annotate_gff(gff_short, gff_short_annot, library, cpu=cpu)
 
 
-def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
+def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4,
+               cluster_identity=75, cluster_coverage=0.8):
     """
     Run clustering on sequences defined in gff3 file and fasta file
     produce gff3 file with cluster information
@@ -470,6 +473,8 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
     :param min_length: minimal length of repeat to be included in clustering
     :param dust: use dust filter in blast search
     :param cpu: number of cpu cores to use
+    :param cluster_identity: minimum BLASTN percent identity for a clustering edge
+    :param cluster_coverage: minimum alignment coverage over the shorter sequence
     :return:
 
     """
@@ -576,7 +581,8 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4):
                           )
     # second round of clustering by blastn
     clusters2 = tc.find_clusters_by_blast_connected_component(
-            consensus_fasta_representative, dust=dust, cpu=cpu
+            consensus_fasta_representative, dust=dust, cpu=cpu,
+            perc_identity=cluster_identity, min_coverage=cluster_coverage
             )
     # combine clusters
     clusters_final = clusters1.copy()
@@ -895,6 +901,58 @@ def load_args_from_file(prefix):
     return {}
 
 
+def validate_threshold_args(args):
+    """Validate the user-tunable clustering / superfamily thresholds.
+
+    Hard errors abort runs that would silently yield empty or meaningless
+    groupings (for example a coverage fraction mistakenly entered as a
+    percent); warnings flag biologically unusual but permissible settings.
+    Parameters absent from the active subcommand are skipped.
+    """
+    errors, warnings = [], []
+
+    ci = getattr(args, "cluster_identity", None)
+    if ci is not None:
+        if not 0 < ci <= 100:
+            errors.append(
+                F"--cluster_identity must be a percent in (0, 100]; got {ci}")
+        elif ci < 50:
+            warnings.append(
+                F"--cluster_identity={ci} is very low; unrelated arrays may be "
+                "merged into one TRC")
+
+    cc = getattr(args, "cluster_coverage", None)
+    if cc is not None:
+        if not 0 < cc <= 1:
+            errors.append(
+                F"--cluster_coverage must be a fraction in (0, 1] "
+                F"(e.g. 0.8, not 80); got {cc}")
+        elif cc < 0.3:
+            warnings.append(
+                F"--cluster_coverage={cc} is very low; arrays sharing only a "
+                "short region may be clustered together")
+
+    ss = getattr(args, "superfamily_score", None)
+    if ss is not None:
+        if ss < 0:
+            errors.append(F"--superfamily_score must be >= 0; got {ss}")
+        elif ss == 0:
+            warnings.append(
+                "--superfamily_score=0 collapses any TRC pair with a BLAST hit "
+                "into a single superfamily")
+        elif ss > 100:
+            warnings.append(
+                F"--superfamily_score={ss} exceeds the practical maximum (~100) "
+                "and will likely prevent all superfamily grouping")
+
+    for w in warnings:
+        print(F"WARNING: {w}", file=sys.stderr)
+    if errors:
+        for e in errors:
+            print(F"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     # Command line arguments
     parser = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -970,6 +1028,17 @@ if __name__ == "__main__":
             )
     parser_clustering.add_argument(
             "-c", "--cpu", type=int, default=4, help="Number of CPUs to use"
+            )
+    parser_clustering.add_argument(
+            "--cluster_identity", type=float, default=75,
+            help=("Minimum BLASTN percent identity for an array-level (TRC) "
+                  "clustering edge. Lower values give looser clusters. "
+                  "Default (%(default)s)")
+            )
+    parser_clustering.add_argument(
+            "--cluster_coverage", type=float, default=0.8,
+            help=("Minimum alignment coverage over the shorter sequence for an "
+                  "array-level (TRC) clustering edge. Default (%(default)s)")
             )
 
     # Annotation
@@ -1048,6 +1117,13 @@ if __name__ == "__main__":
             help=("kitehor `rescore --top-n` cap per array (number of kite peaks "
                   "rescored). Default (%(default)s)")
             )
+    parser_tarean.add_argument(
+            "--superfamily_score", type=float, default=20,
+            help=("Minimum BLASTN score, (alignment_length * percent_identity - "
+                  "gap_openings) / longer_consensus_length, for a superfamily edge "
+                  "between two TRC consensus sequences. Lower values give looser "
+                  "superfamilies. Default (%(default)s)")
+            )
 
     parser_run_all = subparsers.add_parser(
             'run_all', help='Run all steps of TideCluster'
@@ -1112,6 +1188,24 @@ if __name__ == "__main__":
             help=("kitehor `rescore --top-n` cap per array (number of kite peaks "
                   "rescored). Default (%(default)s)")
             )
+    parser_run_all.add_argument(
+            "--cluster_identity", type=float, default=75,
+            help=("Minimum BLASTN percent identity for an array-level (TRC) "
+                  "clustering edge. Lower values give looser clusters. "
+                  "Default (%(default)s)")
+            )
+    parser_run_all.add_argument(
+            "--cluster_coverage", type=float, default=0.8,
+            help=("Minimum alignment coverage over the shorter sequence for an "
+                  "array-level (TRC) clustering edge. Default (%(default)s)")
+            )
+    parser_run_all.add_argument(
+            "--superfamily_score", type=float, default=20,
+            help=("Minimum BLASTN score, (alignment_length * percent_identity - "
+                  "gap_openings) / longer_consensus_length, for a superfamily edge "
+                  "between two TRC consensus sequences. Lower values give looser "
+                  "superfamilies. Default (%(default)s)")
+            )
 
     parser.description = """Wrapper of TideHunter
     This script enable to run TideHunter on large fasta files in parallel. It splits
@@ -1164,6 +1258,7 @@ if __name__ == "__main__":
     ''')
 
     cmd_args = parser.parse_args()
+    validate_threshold_args(cmd_args)
 
     # Handle gzipped input FASTA files
     cleanup_fasta = None
@@ -1191,7 +1286,9 @@ if __name__ == "__main__":
         elif cmd_args.command == "clustering":
             clustering(
                     cmd_args.fasta, cmd_args.prefix, cmd_args.gff, cmd_args.min_length,
-                    not cmd_args.no_dust, cmd_args.cpu
+                    not cmd_args.no_dust, cmd_args.cpu,
+                    cluster_identity=cmd_args.cluster_identity,
+                    cluster_coverage=cmd_args.cluster_coverage
                     )
         elif cmd_args.command == "annotation":
             annotation(
@@ -1226,7 +1323,9 @@ if __name__ == "__main__":
                     cmd_args.fasta, cmd_args.prefix,
                     min_length=cmd_args.min_length,
                     dust=not cmd_args.no_dust,
-                    cpu=cmd_args.cpu
+                    cpu=cmd_args.cpu,
+                    cluster_identity=cmd_args.cluster_identity,
+                    cluster_coverage=cmd_args.cluster_coverage
                     )
             if cmd_args.library:
                 annotation(

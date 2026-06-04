@@ -352,7 +352,12 @@ option_list <- list(
   # the fallback rejects (small, big) merges if both TRCs have an
   # annotation and the annotations disagree.
   make_option(c("--annotation_tsv"), type="character", default=NULL,
-              help="<prefix>_annotation.tsv (optional fallback consistency gate)")
+              help="<prefix>_annotation.tsv (optional fallback consistency gate)"),
+  # Superfamily edge gate. score = (length * pident - gapopen) / longer_seq_len.
+  # Lower values give looser superfamilies; the same gate is applied in the
+  # below-threshold fallback rescue.
+  make_option(c("--score_threshold"), type="numeric", default=20,
+              help="Minimum BLAST score for a superfamily edge [default: %default]")
 )
 
 
@@ -363,6 +368,15 @@ opt <- parse_args(opt_parser)
 # validate input arguments input and prefix must be provided
 if (is.null(opt$input) || is.null(opt$prefix)) {
   stop("Input and prefix must be provided")
+}
+
+# validate superfamily score gate
+if (!is.numeric(opt$score_threshold) || opt$score_threshold < 0) {
+  stop("--score_threshold must be a non-negative number")
+}
+if (opt$score_threshold > 100) {
+  message("WARNING: --score_threshold > 100 exceeds the practical maximum (~100) ",
+          "and will likely prevent all superfamily grouping")
 }
 
 suppressPackageStartupMessages({
@@ -400,7 +414,7 @@ bl <- bl[bl$ID1 != bl$ID2,]
 bl <- bl[order(bl$bitscore, decreasing=TRUE),]
 bl2 <- bl[!duplicated((bl[,c("ID1", "ID2")])),]
 bl2$score <- (bl2$length * bl2$pident - bl2$gapopen) / ifelse(bl2$qlen > bl2$slen, bl2$qlen, bl2$slen)
-score_threshold <-  20
+score_threshold <-  opt$score_threshold
 bl3 <- bl2[bl2$score >= score_threshold,]
 score_dict <- bl2$score
 names(score_dict) <- paste(bl2$ID1, bl2$ID2, sep="|")

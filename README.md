@@ -96,7 +96,9 @@ higher-order repeats.
 - **Family (TRC, Tandem Repeat Cluster)** — a group of tandem repeat
   arrays whose monomer sequences are nearly identical. Arrays are
   assigned to the same family when their monomers align at
-  ≥ 75 % sequence identity over ≥ 80 % of the shorter sequence;
+  ≥ 75 % sequence identity over ≥ 80 % of the shorter sequence
+  (the defaults `--cluster_identity 75 --cluster_coverage 0.8`; see
+  *Advanced: tuning the clustering thresholds* below);
   similarity is propagated transitively, so if array A is similar to
   B and B to C at these thresholds, A, B and C are one family. TRCs
   are numbered `TRC_1`, `TRC_2`, … in decreasing order of total array
@@ -105,7 +107,8 @@ higher-order repeats.
   belonging to a family. Each TRA has a seqid, start, end, and
   length.
 - **Superfamily** — a group of families whose consensus sequences
-  share any BLAST-detectable similarity. Because this criterion is
+  share BLAST similarity above a score gate (default
+  `--superfamily_score 20`). Because this criterion is
   looser than family assignment, superfamilies can join families
   that share only a local region of their consensus, or families
   whose monomers differ in length — for example when one family's
@@ -117,6 +120,33 @@ higher-order repeats.
 > related sequences rather than discrete groups; the family and
 > superfamily boundaries reported by TideCluster are operational
 > summaries at fixed thresholds, not clear-cut biological clades.
+
+### Advanced: tuning the clustering thresholds (expert use)
+
+The similarity thresholds that define families and superfamilies are
+exposed as command-line options, but **the defaults are a tuned,
+validated operating point and should be left unchanged for routine
+use.** They were chosen so that known satellite and rDNA families are
+recovered as coherent clusters; changing them alters how aggressively
+arrays and clusters are merged and moves the family / superfamily
+boundaries accordingly. Adjust them only if you understand the effect
+and have a specific reason to — for example, deliberately exploring a
+diverged continuum of variants. If in doubt, do not change them.
+
+| Step | Option | Default | Effect of changing |
+|------|--------|--------:|--------------------|
+| Family (TRC) clustering | `--cluster_identity` | 75 | minimum BLASTN % identity for an array–array edge; **lower** = looser families (more merging), **higher** = stricter (more, smaller families) |
+| Family (TRC) clustering | `--cluster_coverage` | 0.8 | minimum alignment coverage over the shorter array, a fraction in (0, 1] |
+| Superfamily grouping | `--superfamily_score` | 20 | minimum consensus-vs-consensus BLAST score `(length · pident − gap_openings) / longer_consensus_length`; **lower** = looser superfamilies |
+
+The comparative cross-genome grouping has its own thresholds
+(`--min_identity`, `--min_coverage`, `--coverage_mode`, and the Leiden
+resolution; see `tc_comparative_analysis.R --help`), to which the same
+"defaults are tuned, change only if you know why" guidance applies.
+
+Values outside their valid range are rejected before the run starts
+(for example a coverage fraction mistakenly given as a percent);
+biologically unusual but valid values emit a warning and proceed.
 
 ## Installation
 
