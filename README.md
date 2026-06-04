@@ -177,7 +177,7 @@ TideCluster.py --version
 ```
 
 To pin a specific release, append `=<version>` (e.g.
-`tidecluster=1.11.0`).
+`tidecluster=1.12.0`).
 
 ### Singularity / Apptainer
 
@@ -186,7 +186,7 @@ Pre-built SIF images are published as OCI artefacts on GHCR:
 ```bash
 apptainer pull oras://ghcr.io/kavonrtep/tidecluster/sif:latest
 # or pin a release:
-# apptainer pull oras://ghcr.io/kavonrtep/tidecluster/sif:1.11.0
+# apptainer pull oras://ghcr.io/kavonrtep/tidecluster/sif:1.12.0
 
 apptainer exec tidecluster_latest.sif TideCluster.py --version
 ```

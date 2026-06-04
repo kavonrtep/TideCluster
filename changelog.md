@@ -1,4 +1,4 @@
-## Unreleased
+## 1.12.0 (2026-06-04)
 - Expose the per-genome clustering and superfamily similarity
   thresholds on the CLI; previously hard-coded:
     - `--cluster_identity` (default 75) and `--cluster_coverage`
