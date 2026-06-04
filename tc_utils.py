@@ -1202,11 +1202,13 @@ def generate_kmers(dna, k):
     return kmers
 
 
-def run_blastn(fasta_file, dust=False, cpu=4):
+def run_blastn(fasta_file, dust=False, cpu=4, perc_identity=75, min_coverage=0.8):
     """
     run blastn on fasta file
     :param cpu:
     :param dust: dust filter for blastn
+    :param perc_identity: minimum BLASTN percent identity for a pair to be kept
+    :param min_coverage: minimum alignment coverage over the shorter sequence
     :param sequences : dictionary with sequences
     :return: dictionary with clusters
     """
@@ -1225,7 +1227,7 @@ def run_blastn(fasta_file, dust=False, cpu=4):
     # run blastn
     cmd = (F"blastn -task blastn -query {fasta_file_symlink} -db {fasta_file_symlink} -outfmt"
            F" {outfmt}"
-           F" -out {blast_out} -num_threads {cpu} -evalue 1e-20 -perc_identity 75"
+           F" -out {blast_out} -num_threads {cpu} -evalue 1e-20 -perc_identity {perc_identity}"
            F" -word_size 9 -max_target_seqs 1000000 -dust {dust}"
            F" -gapextend 1 -gapopen 2 -reward 1 -penalty -1")
     subprocess.check_call(cmd, shell=True)
@@ -1235,8 +1237,8 @@ def run_blastn(fasta_file, dust=False, cpu=4):
         for line in f:
             qseqid, sseqid, pident, length, evalue, bitscore, qlen, slen = line.split()
             if qseqid != sseqid:
-                # overlap should be at least 50% over the shorter sequence
-                if int(length) / min([int(qlen), int(slen)]) > 0.8:
+                # overlap should be at least min_coverage over the shorter sequence
+                if int(length) / min([int(qlen), int(slen)]) > min_coverage:
                     pairs.add(tuple(sorted([qseqid, sseqid])))
     # add self hits separately, so they are in the graph later
     with open(fasta_file, 'r') as f:
@@ -1507,13 +1509,15 @@ def single_sequence_ssrs_proportion(ssrs):
 
 def find_clusters_by_blast_connected_component(
         fasta_file, dust=False,
-        cpu=4
+        cpu=4, perc_identity=75, min_coverage=0.8
         ):
     """
     find clusters by blastn, return dictionary with clusters
     cluaste are connected components in graph
     :param cpu:
     :param dust: use dust filter
+    :param perc_identity: minimum BLASTN percent identity for a clustering edge
+    :param min_coverage: minimum alignment coverage over the shorter sequence
     :param consensus_representative:
     :return: clusters
     """
@@ -1522,7 +1526,8 @@ def find_clusters_by_blast_connected_component(
         return {}
 
     print("Clustering by BLASTN")
-    pairs = run_blastn(fasta_file, dust=dust, cpu=cpu)
+    pairs = run_blastn(fasta_file, dust=dust, cpu=cpu,
+                       perc_identity=perc_identity, min_coverage=min_coverage)
     # graph = make_graph(pairs)
     # components = find_connected_components(graph)
     components = get_connected_component_clusters(pairs)
