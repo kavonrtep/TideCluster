@@ -1,4 +1,4 @@
-## Unreleased
+## 1.12.2 (2026-06-04)
 - Pass 1 now generates founder candidates from peak **clusters** rather
   than individual peaks. Within each cluster (single-link `±5%/±100 bp`,
   same `_cluster_peaks_by_period` Pass 5 uses), the score-weighted mean
