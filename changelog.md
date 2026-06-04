@@ -1,4 +1,4 @@
-## Unreleased
+## 1.12.1 (2026-06-04)
 - Fix per-array `strongest_period` semantics in `tc_utils.build_
   monomer_size_csv()` Pass 1. The previous code trusted kitehor's
   `founder_period` column as the strongest periodicity, but kitehor's
