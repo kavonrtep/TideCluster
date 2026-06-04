@@ -207,6 +207,109 @@ def main():
     check("(f) multiplicity is 10",
           int(r["multiplicity"]) == 10)
 
+    # (g) Lever 2 — drapa TRC_26 chr9:1816989 mirror. Strongest 1880,
+    # nearby basic-monomer peaks 154/158/161/165 each fail strict
+    # |k-kr|≤0.05 individually (gaps 0.21, 0.10, 0.32, 0.39), but
+    # cluster as one group (within ±5%) with score-weighted mean ≈
+    # 156.8 → k=11.99 → integer-clean. Lever 2's cluster-mean Pass-1
+    # picks founder ≈ 157 with multiplicity = 12. Without Lever 2,
+    # Pass 1 falls to founder=315 (=2×154 clean divisor) with mult=6,
+    # collapsing the HOR call.
+    case7 = "TRC_26:chr9_1816989_1825401"
+    rows_g = [
+        _row(case7, 1,  154, 0.3201, 0.9481, kitehor_founder=154),
+        _row(case7, 2,  158, 0.1712, 0.9494, kitehor_founder=154),
+        _row(case7, 3,  161, 0.1476, 0.9503, kitehor_founder=154),
+        _row(case7, 4,  315, 0.0488, 0.9651, kitehor_founder=154),
+        _row(case7, 5, 1880, 0.0170, 0.9915, kitehor_founder=154),  # strongest
+        _row(case7, 6,  165, 0.0115, 0.9455, kitehor_founder=154),
+        _row(case7, 7,  312, 0.0096, 0.9647, kitehor_founder=154),
+    ]
+    out = _run(rows_g)
+    r = out["TRC_26:chr9_1816989_1825401"]
+    check("(g) cluster-mean founder lands in basic-monomer band (150..170)",
+          150 <= int(r["founder_period"]) <= 170)
+    check("(g) multiplicity = 12 (was 6 with single-peak Pass 1)",
+          int(r["multiplicity"]) == 12)
+    check("(g) strongest stays at 1880 (highest id_med)",
+          int(r["strongest_period"]) == 1880)
+
+    # (h) Lever 3 — TRC with 3 arrays at the basic monomer (131) plus
+    # one array where only a single peak in the basic band exists
+    # (262 = 2×131 is the only clean divisor of strongest 3395). The
+    # Lever 3 expansion lets Pass 2 re-evaluate that mult>1 row using
+    # the TRC consensus founder (131) and rescue founder back to 131.
+    # The 3 consensus-building arrays have a clean k=2.0 relationship
+    # so they keep founder=131 / mult=2 untouched.
+    trc_h = "TRC_500"
+    rows_h = [
+        # Three arrays at the basic monomer (mult=2 each → consensus 131).
+        # The 262 peak's id_med is just-higher than 131's so it wins the
+        # argmax and becomes strongest; Pass 1's divisor search then
+        # finds 131 (k=2.00, clean) as founder.
+        _row(f"{trc_h}:chr1_1_10000",     1, 131, 0.50, 0.95, kitehor_founder=131),
+        _row(f"{trc_h}:chr1_1_10000",     2, 262, 0.10, 0.96, kitehor_founder=131),  # strongest
+        _row(f"{trc_h}:chr1_20000_30000", 1, 131, 0.50, 0.95, kitehor_founder=131),
+        _row(f"{trc_h}:chr1_20000_30000", 2, 262, 0.10, 0.96, kitehor_founder=131),
+        _row(f"{trc_h}:chr2_1_10000",     1, 131, 0.50, 0.95, kitehor_founder=131),
+        _row(f"{trc_h}:chr2_1_10000",     2, 262, 0.10, 0.96, kitehor_founder=131),
+        # The "stuck" array — strongest 3395, only one peak in the basic
+        # band (131, k=25.92, fails strict gate), peak at 262 happens to
+        # be clean (k=12.96; not integer either, but 3395/262=12.96 is
+        # clean enough — let's make it clean: strongest 3406, k=26.0/13.0).
+    ]
+    # Build the stuck array carefully: strongest must be a clean multiple
+    # of 262 so Pass 1 picks 262 as founder, but it should ALSO be off
+    # 131 by enough that 131 fails the strict ratio gate.
+    # 262 × 13 = 3406. 3406 / 131 = 26.00 — actually that IS integer.
+    # Need a strongest where 262 is clean divisor but 131 is NOT.
+    # 262 × 13 = 3406 → 3406/131 = 26.0 (clean) — bad for the test.
+    # 262 × 9 = 2358 → 2358/131 = 18.00 (clean) — bad.
+    # Use a non-integer relation: make peak labels 131 and 262 but pick
+    # strongest = 3395, peak 262 at k=3395/262=12.96 (NOT clean either).
+    # Need 262 to be a clean divisor of strongest. Use strongest=3406,
+    # which is 13×262 = 3406 exactly. But 3406/131=26 is also clean.
+    # The biology is: the basic monomer is 131 and strongest is N×131,
+    # so 262=2×131 is also a divisor. The "stuck" case is when 131 has
+    # |k-kr|>0.05 but 262 has |k-kr|≤0.05 — that requires the peak at
+    # 131 to be slightly off (e.g. 131 but strongest is at 3404).
+    # 3404/131 = 25.985 → |k-kr|=0.015 (clean). Hmm.
+    # 3404/262 = 12.992 → |k-kr|=0.008 (clean). Both clean.
+    # To make 131 NOT clean while 262 IS clean, the strongest must be
+    # such that strongest/131 has gap > 0.05. E.g. strongest=2620 / 131
+    # = 20.00 (clean) — bad.
+    # Try strongest=2624 / 131 = 20.031 (clean, gap 0.031).
+    # strongest=2640 / 131 = 20.153 → gap 0.153 (FAILS strict).
+    # strongest=2640 / 262 = 10.076 → gap 0.076 (also FAILS strict).
+    # strongest=2620 / 262 = 10.00 clean; 2620/131 = 20 clean — bad.
+    # strongest=2624 / 262 = 10.015 clean; 2624/131 = 20.031 clean.
+    # The problem: if 262 = 2×131 EXACTLY, the ratios scale together.
+    # Solution: make the peak labels 131 and 263 (slightly off 2×131).
+    # peak 131, peak 263. strongest=3408 → 3408/131=26.015 clean;
+    # 3408/263=12.96 → gap 0.04 clean. Both still pass.
+    # Try strongest with 131 OFF but 263 clean: strongest 3419 → 131:
+    # 3419/131=26.099 gap 0.099 FAILS; 3419/263=13.00 clean ✓.
+    # Use that.
+    rows_h.append(_row(f"{trc_h}:chr3_1_10000", 1,  131, 0.20, 0.90, kitehor_founder=131))
+    rows_h.append(_row(f"{trc_h}:chr3_1_10000", 2,  263, 0.10, 0.90, kitehor_founder=131))
+    rows_h.append(_row(f"{trc_h}:chr3_1_10000", 3, 3419, 0.05, 0.99, kitehor_founder=131))  # strongest
+    out = _run(rows_h)
+    # The three consensus-building arrays should report founder=131, mult=2
+    for k in (f"{trc_h}:chr1_1_10000", f"{trc_h}:chr1_20000_30000",
+              f"{trc_h}:chr2_1_10000"):
+        ri = out[k]
+        check(f"(h) consensus-array {k.split(':')[1]} founder=131 mult=2",
+              int(ri["founder_period"]) == 131 and int(ri["multiplicity"]) == 2)
+    # The "stuck" array: without Lever 3, Pass 1 would pick founder=263
+    # (closest clean divisor of 3419 with kr=13). With Lever 3,
+    # Pass 2 expansion swaps to founder=131 (TRC consensus) with
+    # mult=26 (irregular).
+    rs = out[f"{trc_h}:chr3_1_10000"]
+    check("(h) Lever 3 rescues mult>1 stuck row to consensus 131",
+          int(rs["founder_period"]) == 131)
+    check("(h) Lever 3 sets irregular_multiplicity=true",
+          rs["irregular_multiplicity"] == "true")
+
     print("\nALL PASS" if not failures else f"\nFAILED: {failures}")
     sys.exit(1 if failures else 0)
 

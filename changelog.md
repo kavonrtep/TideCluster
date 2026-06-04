@@ -1,3 +1,71 @@
+## Unreleased
+- Pass 1 now generates founder candidates from peak **clusters** rather
+  than individual peaks. Within each cluster (single-link `±5%/±100 bp`,
+  same `_cluster_peaks_by_period` Pass 5 uses), the score-weighted mean
+  of cluster members that pass the founder identity gate
+  (`_FOUNDER_ID_MIN = 0.7`) is tested as a divisor of `strongest_period`
+  under the existing strict `|k − round(k)| ≤ 0.05` gate. This recovers
+  arrays where the basic monomer is supported by multiple nearby peaks
+  but no single peak forms a clean integer divisor on its own — e.g.
+  drapa TRC_26 `chr9:1816989` with strongest 1880 and peaks
+  154/158/161/165 each at `id_med ≈ 0.95` but `|k − kr|` up to 0.21
+  individually; the score-weighted mean ≈ 156.8 gives `k = 11.99`
+  (clean) → founder 157 / multiplicity 12 (previously 315 / ×6, the
+  multiple-of-basic Pass 1 settled on as the only single-peak clean
+  divisor).
+- Defensive: when a cluster's mean fails the strict gate but an
+  individual member of that cluster passes it (e.g. drapa TRC_45
+  `chr12:19629243` cluster {334, 337, 340, 344} where the mean has
+  `|k − kr| = 0.32` but member 344 alone has `|k − kr| = 0.035`), Pass 1
+  falls back to per-member candidate generation inside that cluster —
+  the pre-existing single-peak path. Each cluster contributes either
+  its mean (when the mean is clean) or its qualifying single members
+  (when the mean is not). The per-kr-winner sort from 9254c93 then
+  arbitrates across all candidates.
+- Pass 2 expansion (Lever 3): the
+  `if e["multiplicity"] > 1 or e["fallback"]: continue` gate is widened
+  to also re-evaluate Pass-1-success rows whose founder sits at an
+  integer multiple of the TRC consensus and is significantly off it
+  (`founder / consensus ∈ [2..5]` with `|ratio − round(ratio)| ≤ 0.10`
+  AND `|fp − consensus| / consensus > 0.20`). Those rows hand off to
+  the existing `_rescue_founder_from_trc` helper, which finds a near-
+  consensus peak with the relaxed `id_med ≥ 0.5` gate and sets
+  `irregular_multiplicity = true` because the resulting `k` is
+  fractional. Example: drapa TRC_138 `chr4:26085301` rescues from
+  founder 262 (= 2×131, mult 13) to founder 131 (mult 26 irregular,
+  raw k 25.92) — the basic monomer the TRC's consensus says is right.
+- TRC_20-class arrays (TRCs with fewer than `_TRC_CONSENSUS_MIN_ARRAYS
+  = 3` Pass-1 successes) still cannot be rescued because the TRC
+  consensus is not computed at all — known limitation, applies to
+  tiny / fragmented TRCs only.
+- Validation on `test_data/drapa` (2073 arrays):
+    - 0 strongest_period changes (Lever 2/3 leave strongest untouched
+      by design).
+    - 613 founder shifts (mostly within-monomer-family micro-shifts
+      from cluster mean vs single peak — cosmetic; same basic
+      monomer).
+    - 38 multiplicity changes: 27 ↑ recoveries (×6→×12, ×7→×14,
+      ×5→×10, ×4→×8 etc.) and ~11 ↓ adjustments where the cluster
+      mean differs slightly from the single-peak pick (same
+      decomposition depth, founder bp nudged a few % within the
+      monomer family).
+    - User's cited case `chr9:1816989`: founder 315 → 157,
+      mult ×6 → ×12, `mult_raw 11.987` (clean integer).
+    - `TRC_138 chr4:26085301` rescued by Lever 3: founder 262 → 131,
+      mult ×13 → ×26 (`irregular_multiplicity=true`,
+      `mult_raw=25.916`, `founder_method=pass2`).
+- Validation on `test_data/Solanum_pimpinellifolium` (433 arrays):
+    - Flagship 1.12.1 cases (TRC_8 chr12:1314680 / 1327272) unchanged
+      — founder 178, mult ×10.
+    - 86 founder shifts, 28 multiplicity changes (22 recoveries, 6
+      minor down-shifts), 0 strongest changes.
+- Two new unit cases in `tests/test_strongest_by_identity.py`:
+    - `(g)` Lever 2 — cluster-mean founder lands in basic-monomer band
+      with multiplicity recovered.
+    - `(h)` Lever 3 — multi-array TRC where a single mult>1 stuck row
+      gets rescued to the TRC consensus founder.
+- Design notes in `docs/founder_cluster_mean_plan.md`.
+
 ## 1.12.1 (2026-06-04)
 - Fix per-array `strongest_period` semantics in `tc_utils.build_
   monomer_size_csv()` Pass 1. The previous code trusted kitehor's

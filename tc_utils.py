@@ -2597,48 +2597,113 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
                 strongest_peak   = next(
                     (p for p in peaks if _num(p.get("period")) == kitehor_fp),
                     rank1)
+            # Lever 2 — cluster-mean basic-monomer search. Cluster the
+            # rescored peaks by period (single-link, mixed ±5% / ±100 bp
+            # window, the same _cluster_peaks_by_period helper Pass 5
+            # uses) and test each cluster's score-weighted mean period
+            # as a divisor of `strongest_period` under the strict
+            # ±_RATIO_TOL gate. This recovers cases where the basic
+            # monomer is supported by multiple nearby peaks but no
+            # single peak forms a clean integer divisor — e.g. drapa
+            # TRC_26 chr9:1816989 strongest=1880 with peaks
+            # 154/158/161/165 each at id_med ≈ 0.95 but |k − kr| up to
+            # 0.21 individually; the score-weighted mean ≈ 156.8 gives
+            # k = 11.99 (clean). A singleton cluster's mean equals the
+            # peak's own period, so the prior single-peak behaviour is
+            # preserved exactly when no near-neighbour exists.
+            #
+            # Each cluster yields one candidate tuple:
+            #   (P_mean, rep_id_med, kr, k, rep_peak, rep_period)
+            # where `rep_peak` = the cluster member with the highest
+            # id_med (drives the founder_id_med and delta_id_pp cells)
+            # and `rep_period` = that member's actual reported period
+            # (used as the deterministic tiebreaker in the per-kr sort).
+            clusters = _cluster_peaks_by_period(peaks)
             candidates = []
-            for p in peaks:
-                P = _num(p.get("period"))
-                if P is None or P >= strongest_period:
+            for cluster in clusters:
+                # Only members passing the founder id gate contribute to
+                # the cluster's representation — otherwise a noise peak
+                # with low id_med that happens to fall inside the cluster
+                # window (max(±5%, ±100 bp)) can both drag the mean and
+                # pretend to be a representative.
+                qualified = [m for m in cluster["members"]
+                             if (_num(m.get("identity_med")) or 0.0)
+                                 >= _FOUNDER_ID_MIN]
+                if not qualified:
                     continue
-                idm = _num(p.get("identity_med"))
-                if idm is None or idm < _FOUNDER_ID_MIN:
+                # Strategy: prefer the cluster's score-weighted mean if
+                # it forms a clean integer divisor of strongest (the
+                # Lever 2 use case: multiple nearby peaks averaging to
+                # the true basic). If the mean fails the strict gate
+                # but an individual cluster member passes (the TRC_45
+                # chr12:19629243 case: cluster {334,337,340,344} mean
+                # fails k-gap 0.32 but 344 alone is clean), fall back
+                # to per-member candidate generation within the cluster
+                # — this preserves the pre-Lever-2 single-peak behaviour
+                # for arrays where one peak is structurally cleaner than
+                # its noisy neighbours.
+                num = 0.0
+                den = 0.0
+                for m in qualified:
+                    mp = _num(m.get("period"))
+                    sc = _num(m.get("score"))
+                    if mp is None or sc is None or sc <= 0:
+                        continue
+                    num += mp * sc
+                    den += sc
+                mean_added = False
+                if den > 0:
+                    P_mean = num / den
+                    if P_mean < strongest_period:
+                        k_mean = strongest_period / P_mean
+                        kr_mean = round(k_mean)
+                        if (2 <= kr_mean <= _KMAX
+                            and abs(k_mean - kr_mean) <= _RATIO_TOL):
+                            rep_peak = max(
+                                qualified,
+                                key=lambda m: _num(m.get("identity_med")) or 0.0)
+                            rep_idm = _num(rep_peak.get("identity_med"))
+                            rep_period = _num(rep_peak.get("period")) or P_mean
+                            candidates.append(
+                                (P_mean, rep_idm, kr_mean, k_mean,
+                                 rep_peak, rep_period))
+                            mean_added = True
+                if mean_added:
                     continue
-                k = strongest_period / P
-                kr = round(k)
-                if not (2 <= kr <= _KMAX):
-                    continue
-                if abs(k - kr) > _RATIO_TOL:
-                    continue
-                candidates.append((P, idm, kr, k, p))
+                # Fallback: per-member single-peak candidates inside
+                # this cluster (same gate the pre-Lever-2 code used).
+                for m in qualified:
+                    P = _num(m.get("period"))
+                    if P is None or P >= strongest_period:
+                        continue
+                    idm = _num(m.get("identity_med"))
+                    k = strongest_period / P
+                    kr = round(k)
+                    if not (2 <= kr <= _KMAX):
+                        continue
+                    if abs(k - kr) > _RATIO_TOL:
+                        continue
+                    candidates.append((P, idm, kr, k, m, P))
             if candidates:
-                # Two-level pick: group candidates by integer multiplicity
-                # `kr` (= round(strongest / P)). Within each kr group choose
-                # the best representative (highest id_med, then cleanest
-                # |k - kr|, then smallest P as tiebreaker). Across groups
-                # choose the smallest period — preserves the "basic monomer"
-                # semantic (a kr=10 divisor like 178 should still beat a
-                # kr=2 divisor like 892 because 178 is the deeper / more
-                # basic decomposition). The original "smallest period wins"
-                # tiebreaker missed cases like drapa TRC_2 chr3:56557 where
-                # kr=2 had three candidates {1066 k=2.04 id_med=0.972,
-                # 1088 k=2.00 id_med=0.995, 1091 k=1.99 id_med=0.995} and
-                # the fuzzy-k 1066 (lower id_med, |k-kr|=0.041) won purely
-                # for being numerically smallest.
+                # Two-level pick (unchanged from 9254c93, applied to
+                # cluster-mean candidates). Across kr groups: smallest
+                # mean wins (basic-monomer rule, so a kr=10 cluster at
+                # mean 178 still beats a kr=2 cluster at mean 892).
+                # Within a kr group: highest id_med, then cleanest
+                # |k - kr|, then smallest mean.
                 by_kr = collections.defaultdict(list)
                 for c in candidates:
                     by_kr[c[2]].append(c)
                 per_kr_winners = []
                 for group in by_kr.values():
-                    # (-id_med, |k - kr|, P) — highest id_med first; on a
-                    # tie prefer the cleanest integer relationship; on a
-                    # further tie prefer the smaller period.
                     group.sort(key=lambda c: (-c[1], abs(c[3] - c[2]), c[0]))
                     per_kr_winners.append(group[0])
-                per_kr_winners.sort(key=lambda c: c[0])   # smallest period wins across kr levels
-                P, _id, kr, k_raw, fp_peak = per_kr_winners[0]
-                founder_period   = P
+                per_kr_winners.sort(key=lambda c: c[0])
+                P_winner, _id, kr, k_raw, fp_peak, _rep_period = per_kr_winners[0]
+                # P_winner is either the cluster mean (Lever 2 path) or a
+                # single member period (per-member fallback) — round in
+                # both cases to give an integer founder_period.
+                founder_period   = int(round(P_winner))
                 founder_peak     = fp_peak
                 multiplicity     = kr
                 multiplicity_raw = k_raw
@@ -2688,12 +2753,47 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
         consensus_period, _n = _trc_consensus_founder(strict_founders)
         consensus_by_trc[trc] = consensus_period
 
-    # ---- Pass 2 + Pass 3: rescue arrays where Pass 1 left mult=1 ----
+    # ---- Pass 2 + Pass 3: rescue arrays where Pass 1 left mult=1
+    #                       (or where Pass-1's founder sits at an
+    #                       integer multiple of the TRC consensus —
+    #                       the Lever 3 expansion) ----
+    # Original gate: only Pass-1 mult=1 (or fallback) rows. Lever 3
+    # adds a second escape clause covering rows where Pass 1 succeeded
+    # with mult>1 but the founder ended up at 2..5× the TRC consensus
+    # basic — the signature of "no peak near the basic monomer formed
+    # a clean integer divisor of strongest individually AND no nearby
+    # cluster existed either, so Pass 1 settled on a multiple". We
+    # re-evaluate those rows against the TRC consensus oracle.
+    # Examples on drapa: TRC_138 chr4:26085301 (founder=262=2*131,
+    # consensus=131); the rescue from TRC consensus yields
+    # founder=131, mult=round(strongest/131)=26, irregular=true.
     for e in pass1:
-        if e["multiplicity"] > 1 or e["fallback"]:
+        if e["fallback"]:
             continue
         if e["strongest_period"] is None:
             continue
+        if e["multiplicity"] > 1:
+            # Lever 3 gate — only rescue mult>1 rows that look like an
+            # integer-multiple-of-the-basic pick. Requires: a TRC
+            # consensus exists, founder/consensus is approximately
+            # integer in [2..5], founder is significantly off the
+            # consensus (else there's nothing to fix), AND the
+            # consensus is plausibly nested inside founder (founder
+            # divides into strongest in proportion to consensus).
+            tc_cons = consensus_by_trc.get(e["trc"])
+            if tc_cons is None or tc_cons <= 0:
+                continue
+            fp = e["founder_period"]
+            if fp is None or fp <= 0:
+                continue
+            ratio = fp / tc_cons
+            rr = round(ratio)
+            if not (2 <= rr <= 5):
+                continue
+            if abs(ratio - rr) > 0.10:
+                continue
+            if abs(fp - tc_cons) / tc_cons <= 0.20:
+                continue
         # Pass 2 — TRC consensus rescue
         trc_consensus = consensus_by_trc.get(e["trc"])
         rescued = _rescue_founder_from_trc(
