@@ -2430,9 +2430,16 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
       argmax-based pick recovers the higher-identity HOR period as
       strongest. Kitehor's original pick is retained as the
       `kitehor_founder_period` column for audit. The *founder* is
-      reassigned by searching for the smallest peak P whose period is
-      an integer divisor of strongest (k = strongest/P, 2 ≤ k ≤ 30,
-      |k - round(k)| ≤ 0.05) with `identity_med(P) ≥ 0.7`. If none,
+      reassigned by searching for divisor peaks P with
+      `strongest = k · P`, `2 ≤ round(k) ≤ 30`, `|k − round(k)| ≤
+      0.05`, and `identity_med(P) ≥ 0.7`. Candidates are then
+      grouped by `kr = round(k)`; within each kr group the best
+      representative is picked (highest id_med, then cleanest
+      `|k − kr|`, then smallest P), and across kr groups the
+      smallest period wins — so a deeper-decomposition (basic-
+      monomer) candidate still outranks shallower ones, but at the
+      same kr level a clean k=2.00 / id_med=0.995 divisor beats a
+      fuzzy k=2.04 / id_med=0.972 one. If no candidate qualifies,
       founder = strongest, multiplicity = 1.
     - **Pass 2 (TRC consensus rescue)**: for each TRC, compute the
       consensus founder from Pass-1 successes (median of the largest
@@ -2606,8 +2613,31 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
                     continue
                 candidates.append((P, idm, kr, k, p))
             if candidates:
-                candidates.sort(key=lambda c: c[0])    # smallest period wins
-                P, _id, kr, k_raw, fp_peak = candidates[0]
+                # Two-level pick: group candidates by integer multiplicity
+                # `kr` (= round(strongest / P)). Within each kr group choose
+                # the best representative (highest id_med, then cleanest
+                # |k - kr|, then smallest P as tiebreaker). Across groups
+                # choose the smallest period — preserves the "basic monomer"
+                # semantic (a kr=10 divisor like 178 should still beat a
+                # kr=2 divisor like 892 because 178 is the deeper / more
+                # basic decomposition). The original "smallest period wins"
+                # tiebreaker missed cases like drapa TRC_2 chr3:56557 where
+                # kr=2 had three candidates {1066 k=2.04 id_med=0.972,
+                # 1088 k=2.00 id_med=0.995, 1091 k=1.99 id_med=0.995} and
+                # the fuzzy-k 1066 (lower id_med, |k-kr|=0.041) won purely
+                # for being numerically smallest.
+                by_kr = collections.defaultdict(list)
+                for c in candidates:
+                    by_kr[c[2]].append(c)
+                per_kr_winners = []
+                for group in by_kr.values():
+                    # (-id_med, |k - kr|, P) — highest id_med first; on a
+                    # tie prefer the cleanest integer relationship; on a
+                    # further tie prefer the smaller period.
+                    group.sort(key=lambda c: (-c[1], abs(c[3] - c[2]), c[0]))
+                    per_kr_winners.append(group[0])
+                per_kr_winners.sort(key=lambda c: c[0])   # smallest period wins across kr levels
+                P, _id, kr, k_raw, fp_peak = per_kr_winners[0]
                 founder_period   = P
                 founder_peak     = fp_peak
                 multiplicity     = kr

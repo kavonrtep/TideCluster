@@ -161,6 +161,52 @@ def main():
     check("(d) kitehor_founder_period reflects kitehor's pick (250)",
           int(r["kitehor_founder_period"]) == 250)
 
+    # (e) Founder tiebreaker — drapa TRC_2 chr3:56557 case. Strongest is
+    # 2176 (id_med 0.996). At kr=2 there are three valid divisors:
+    # 1066 (k=2.041, id_med 0.972) — fuzzy, lower id
+    # 1088 (k=2.000, id_med 0.995) — cleanest, highest id
+    # 1091 (k=1.995, id_med 0.995) — clean, highest id (tie on id_med)
+    # The old "smallest period wins" sort picked 1066 because numerically
+    # smallest. The fix groups by kr and picks the best per group
+    # (highest id_med → cleanest |k-kr| → smallest P), giving 1088.
+    case5 = "TRC_2:chr3_56557_126534"
+    rows_e = [
+        _row(case5, 1, 1088, 0.5914, 0.9954, kitehor_founder=1088),
+        _row(case5, 2, 1017, 0.0313, 0.4730, kitehor_founder=1088),
+        _row(case5, 3, 1091, 0.0219, 0.9954, kitehor_founder=1088),
+        _row(case5, 4, 1066, 0.0097, 0.9719, kitehor_founder=1088),
+        _row(case5, 5, 2176, 0.0078, 0.9963, kitehor_founder=1088),
+    ]
+    out = _run(rows_e)
+    r = out["TRC_2:chr3_56557_126534"]
+    check("(e) tiebreaker picks 1088 over fuzzy 1066 at same kr=2",
+          int(r["founder_period"]) == 1088)
+    check("(e) strongest is 2176 (highest id_med)",
+          int(r["strongest_period"]) == 2176)
+    check("(e) multiplicity is 2",
+          int(r["multiplicity"]) == 2)
+
+    # (f) Across-kr semantic preserved — a kr=10 divisor must still win
+    # over a kr=2 divisor when both qualify (basic-monomer rule). Set up
+    # strongest=1786 with the highest id_med so it's picked as strongest;
+    # candidates 178 (kr=10, k=10.034) and 892 (kr=2, k=2.0022) both pass
+    # the gate. The new per-kr-winner sort across kr groups picks the
+    # smallest period → 178 (deeper decomposition wins, as before).
+    case6 = "TRC_99:chrX_1_50000"
+    rows_f = [
+        _row(case6, 1, 1786, 0.0500, 0.9900, kitehor_founder=1786),  # strongest
+        _row(case6, 2,  178, 0.0400, 0.7500, kitehor_founder=1786),  # kr=10
+        _row(case6, 3,  892, 0.0300, 0.7500, kitehor_founder=1786),  # kr=2
+    ]
+    out = _run(rows_f)
+    r = out["TRC_99:chrX_1_50000"]
+    check("(f) across-kr: smallest P wins (178 over 892) — basic monomer",
+          int(r["founder_period"]) == 178)
+    check("(f) strongest stays at 1786 (highest id_med)",
+          int(r["strongest_period"]) == 1786)
+    check("(f) multiplicity is 10",
+          int(r["multiplicity"]) == 10)
+
     print("\nALL PASS" if not failures else f"\nFAILED: {failures}")
     sys.exit(1 if failures else 0)
 

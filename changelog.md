@@ -44,6 +44,25 @@
   and the all-below-gate defensive fallback. Wired into
   `tests/unit.sh`.
 
+- Fix within-kr founder tiebreaker in `tc_utils.build_monomer_size_csv()`
+  Pass 1. After the strongest-by-identity change landed (944735d), several
+  rows whose strongest had multiple valid divisors at the *same* `kr =
+  round(strongest/P)` level were still picking the wrong representative
+  — the old "smallest period wins" sort favoured numerically smaller P
+  over the cleanest integer relationship. On drapa TRC_2 chr3:56557:
+  strongest=2176 had three kr=2 candidates {1066 (k=2.041, id_med
+  0.972), 1088 (k=2.000, id_med 0.995), 1091 (k=1.995, id_med 0.995)};
+  1066 won purely because numerically smallest, despite being the
+  fuzziest divisor with the lowest identity. The fix groups candidates
+  by `kr` and within each group picks the best representative (highest
+  id_med → cleanest `|k − kr|` → smallest P), then across kr groups
+  the smallest period still wins (preserves the basic-monomer
+  semantic so a kr=10 divisor outranks a kr=2 divisor when both
+  qualify). On drapa: 490 of 2073 rows now report a slightly better
+  founder at the same multiplicity (0 strongest changes, 0
+  multiplicity changes). Covered by two new cases in
+  `tests/test_strongest_by_identity.py`.
+
 ## 1.12.0 (2026-06-04)
 - Expose the per-genome clustering and superfamily similarity
   thresholds on the CLI; previously hard-coded:
