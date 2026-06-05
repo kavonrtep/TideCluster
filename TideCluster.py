@@ -153,35 +153,58 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
                    F" --out-peaks {kite_dir}/kitehor.kite.peaks.tsv"
                    F" --periodogram {kite_dir}/kitehor.periodogram"
                    F" --threads {cpu}")
-        # rescore + ssr-scan are independent — run them concurrently.
-        # rayon inside each binary still uses --threads, so we split the
-        # CPU budget between the two.
-        half = max(1, cpu // 2)
+        # rule-classify is cheap and produces the per-array verdicts that
+        # `tandem-validate` (kitehor >= 0.13.0's unified subrepeat detector,
+        # spec v5) consumes. Run it first, then fan rescore || ssr-scan ||
+        # tandem-validate out concurrently. rayon inside each binary still
+        # uses --threads; rescore is the O(period²) bottleneck so it keeps
+        # the lion's share of the CPU budget, the other two are quick.
+        tc.run_cmd(F"kitehor rule-classify {kite_dir}/kitehor.kite.peaks.tsv"
+                   F" --out {kite_dir}/kitehor")
+        rescore_threads = max(1, cpu - 2)
+        side_threads    = max(1, cpu // 2)
         rescore_cmd = (
             F"kitehor rescore"
             F" --peaks {kite_dir}/kitehor.kite.peaks.tsv"
             F" --out {kite_dir}/kitehor.rescored"
             F" --max-period {rescore_max_period}"
             F" --top-n {rescore_top_n}"
-            F" --threads {half} {multi_fa}")
+            F" --threads {rescore_threads} {multi_fa}")
         ssr_cmd = (
             F"kitehor ssr-scan"
             F" --kite-peaks {kite_dir}/kitehor.kite.peaks.tsv"
             F" --out {kite_dir}/kitehor {multi_fa}")
+        # tandem-validate: founder/host monomer is inferred from the
+        # verdicts; per array it reports the dominant nested-TR candidate
+        # with density (occupancy) / spatial_contrast / phase_contrast and
+        # a decision_hint (localized_subrepeat | confirms_host | ...).
+        # TideCluster gates these against its OWN founder downstream.
+        tv_cmd = (
+            F"kitehor tandem-validate"
+            F" --verdicts {kite_dir}/kitehor.verdicts.tsv"
+            F" --peaks {kite_dir}/kitehor.kite.peaks.tsv"
+            F" --out {kite_dir}/kitehor"
+            F" --threads {side_threads} {multi_fa}")
         print(F"Running kitehor rescore (max-period {rescore_max_period},"
-              F" top-n {rescore_top_n}) || ssr-scan in parallel.")
+              F" top-n {rescore_top_n}) || ssr-scan || tandem-validate"
+              F" in parallel.")
         rescore_proc = subprocess.Popen(rescore_cmd, shell=True)
         ssr_proc     = subprocess.Popen(ssr_cmd,     shell=True)
+        tv_proc      = subprocess.Popen(tv_cmd,      shell=True)
         rc1 = rescore_proc.wait()
         rc2 = ssr_proc.wait()
+        rc3 = tv_proc.wait()
         if rc1 != 0:
             raise RuntimeError(F"kitehor rescore failed (exit {rc1})")
         if rc2 != 0:
             raise RuntimeError(F"kitehor ssr-scan failed (exit {rc2})")
+        if rc3 != 0:
+            raise RuntimeError(F"kitehor tandem-validate failed (exit {rc3})")
         tc.build_monomer_size_csv(
             kite_tsv=F"{kite_dir}/kitehor.kite.tsv",
             ssr_tsv=F"{kite_dir}/kitehor.ssr.tsv",
             rescored_peaks_tsv=F"{kite_dir}/kitehor.rescored.peaks.tsv",
+            tandem_validate_tsv=F"{kite_dir}/kitehor.tandem_validate.tsv",
             out_csv=F"{kite_dir}/monomer_size_top3_estimats.csv")
         print("Rendering per-TRC profile heatmaps.")
         tc.run_cmd(F"{script_path}/tarean/kite_heatmaps.R"

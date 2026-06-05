@@ -2107,6 +2107,34 @@ _KMAX            = 30     # rescore --rule-k-max default
 _RATIO_TOL       = 0.05   # how close to integer multiplicity must be
 _SUBREP_RATIO    = 0.33   # period <= founder/3 ⇒ qualifies as candidate band
 
+# --- kitehor >= 0.13.0 "go-deeper" founder adoption (Pass 1b) ---
+# kitehor's rescore now emits its own per-array HOR decomposition
+# (`hor_basic_period`, constant per case_id) using a strict + scan-relaxed
+# divisor search. When that basic is *deeper* than TideCluster's strict
+# Pass-1 pick AND the rescored peak at that period is a clean, near-full
+# array-wide tandem, TideCluster adopts it. The coverage/occupancy gate is
+# the sharp discriminator (validated on drapa): real deeper monomers tile
+# the whole array (cov >= 0.75, scan_occ >= 0.90), whereas kitehor's
+# spurious near-2x over-splits have ~0 coverage and are rejected.
+_KH_DEEPER_COV_MIN   = 0.75   # coverage_frac of the deeper-basic peak
+_KH_DEEPER_OCC_MIN   = 0.90   # scan_occupancy_frac of the deeper-basic peak
+_KH_DEEPER_RATIO_TOL = 0.10   # |k - round(k)| tol (relaxed; high-k HORs)
+# kitehor's basic must be a MEANINGFULLY smaller monomer, not a ~few-%
+# lateral re-estimate of the same period. The confirmed deep-HOR cases
+# drop the founder by >=25 % (mult rises >=1.33x); spurious lateral
+# shifts move it only ~5 %. Require at least a 20 % drop.
+_KH_DEEPER_MAX_RATIO = 0.80   # kh_basic <= 0.80 * current founder
+
+# --- tandem-validate (kitehor >= 0.13.0) subrepeat adoption gate ---
+# We surface a localized_subrepeat only when it is a genuine partial-
+# occupancy nested motif that does NOT coincide with TideCluster's founder.
+_TV_DENSITY_MIN   = 0.10   # min occupancy (density) to count as "strong"
+_TV_PRESENCE_MIN  = 0.10   # min n_windows_present / n_windows_total
+_TV_FOUNDER_TOL   = 0.05   # cand ~= founder ⇒ it IS the founder, suppress
+# Edge diagnostic: a candidate that is a clean integer divisor of the
+# founder at high occupancy may indicate the founder itself is miscalled.
+_TV_EDGE_DENSITY  = 0.50
+
 
 def _classify_subrepeat_tier(peak, founder_period):
     """Per-peak subrepeat tier, ported from kitehor's decision tree
@@ -2226,6 +2254,101 @@ def _num_or_none(v):
         return float(v)
     except (TypeError, ValueError):
         return None
+
+
+def _parse_tv_candidates(cell):
+    """Parse a tandem-validate `candidates` cell into a list of dicts.
+
+    Each `;`-separated entry is `kind/period:d=..:sc=..:pc=..:label`,
+    e.g. `other/305:d=0.084:sc=0.500:pc=0.111:localized`."""
+    out = []
+    if not cell or cell in ("", "NA"):
+        return out
+    for entry in cell.split(";"):
+        entry = entry.strip()
+        if not entry:
+            continue
+        parts = entry.split(":")
+        head = parts[0]
+        if "/" not in head:
+            continue
+        kind, per = head.split("/", 1)
+        d = sc = pc = None
+        label = ""
+        for f in parts[1:]:
+            if f.startswith("d="):    d  = _num_or_none(f[2:])
+            elif f.startswith("sc="): sc = _num_or_none(f[3:])
+            elif f.startswith("pc="): pc = _num_or_none(f[3:])
+            else:                     label = f
+        out.append({"kind": kind, "period": _num_or_none(per),
+                    "d": d, "sc": sc, "pc": pc, "label": label})
+    return out
+
+
+def _tv_subrepeats(tv_row, founder_period):
+    """Select adopted subrepeats from a tandem-validate row, gated against
+    TideCluster's founder.
+
+    Returns `(sr_list, edge_flag, edge_k)` where `sr_list` is up to two
+    `(period, density, "HIGH")` tuples that pass the strong partial-
+    occupancy gate and do NOT coincide with the founder, and
+    `edge_flag`/`edge_k` flag a candidate that is a clean integer divisor
+    of the founder at high occupancy (the possible-founder-miscall
+    watch-list). Returns empty / False when no tandem-validate row."""
+    sr = []
+    edge_flag = False
+    edge_k = None
+    if not tv_row:
+        return sr, edge_flag, edge_k
+    hint  = tv_row.get("decision_hint", "")
+    ntot  = _num_or_none(tv_row.get("n_windows_total"))
+    npres = _num_or_none(tv_row.get("n_windows_present"))
+    presfrac = (npres / ntot) if (npres and ntot and ntot > 0) else None
+    cands = _parse_tv_candidates(tv_row.get("candidates"))
+    if not cands and _num_or_none(tv_row.get("best_candidate_period")) is not None:
+        cands = [{"kind":   tv_row.get("best_candidate_kind", ""),
+                  "period": _num_or_none(tv_row.get("best_candidate_period")),
+                  "d":      _num_or_none(tv_row.get("density")),
+                  "sc":     _num_or_none(tv_row.get("spatial_contrast")),
+                  "pc":     _num_or_none(tv_row.get("phase_contrast")),
+                  "label":  hint}]
+    for c in cands:
+        per  = c["period"]
+        dens = c["d"]
+        if per is None or per <= 0:
+            continue
+        # Coincides with founder, or kitehor labelled it the founder/host
+        # ⇒ it IS the HOR subunit, not a subrepeat. Suppress.
+        if founder_period and abs(per - founder_period) <= max(
+                12.0, _TV_FOUNDER_TOL * max(per, founder_period)):
+            continue
+        if c["kind"] == "founder":
+            continue
+        # Edge diagnostic: a clean integer divisor of the founder at high
+        # occupancy is not a partial-occupancy subrepeat — it hints the
+        # founder may be miscalled. Flag it (watch-list); don't surface as
+        # a subrepeat.
+        if founder_period and per < founder_period:
+            kk = founder_period / per
+            kr = round(kk)
+            if (2 <= kr <= _KMAX and abs(kk - kr) <= 0.10
+                    and dens is not None and dens >= _TV_EDGE_DENSITY):
+                edge_flag = True
+                if edge_k is None:
+                    edge_k = kr
+                continue
+        # Strong partial-occupancy gate.
+        if "localized" not in (c["label"] or "") and hint != "localized_subrepeat":
+            continue
+        if dens is None or dens < _TV_DENSITY_MIN:
+            continue
+        if presfrac is not None and presfrac < _TV_PRESENCE_MIN:
+            continue
+        if founder_period and per >= founder_period:
+            continue
+        sr.append((per, dens, "HIGH"))
+    sr.sort(key=lambda x: -(x[1] or 0.0))
+    return sr[:2], edge_flag, edge_k
 
 
 def _trc_consensus_founder(periods):
@@ -2411,7 +2534,8 @@ def _cluster_rescue_founder(peaks):
     return best, founder_period
 
 
-def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
+def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
+                           tandem_validate_tsv=None):
     """Build the per-array summary CSV (one row per array) from kitehor
     >=0.12.0 outputs: the rescored peaks TSV (`<prefix>.rescored.peaks.tsv`,
     24 cols = kite + 15 rescore) and the ssr-scan summary
@@ -2474,16 +2598,36 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
       has fired (kitehor picked a lower-id_med peak by score).
     - **founder_fallback**: true when rescore returned NA *and* Pass 5
       did not rescue (i.e. truly no signal). Cleared on cluster rescue.
+    - **Pass 1b (kitehor go-deeper)**: before Pass 2, consult kitehor's
+      own per-array basic monomer (`hor_basic_period`). Adopt it as
+      founder only when it is *deeper* than the strict pick AND its
+      rescored peak is a near-full-coverage array-wide tandem
+      (coverage_frac ≥ 0.75, scan_occupancy_frac ≥ 0.90). Recovers deep
+      HORs the strict ±0.05 gate rejects at large k; coverage-gated so
+      kitehor's spurious near-2× over-splits are not adopted. Marks
+      `founder_method = "kh_deeper"`.
     - **founder_method**: enum recording which pass produced the final
-      founder — `strict` / `none` / `pass2` / `pass3` / `ssr` /
-      `cluster` / `fallback`.
+      founder — `strict` / `none` / `kh_deeper` / `pass2` / `pass3` /
+      `ssr` / `cluster` / `fallback`.
     - **cluster_rescue**: true when Pass 5 promoted a cluster median
       to founder. Diagnostic counterpart of `founder_method = cluster`.
     - **delta_id_pp**: identity_med(strongest) − identity_med(founder)
       in percentage points; NA when founder = strongest.
     - **top-5 monomer estimates by score**.
-    - **top-2 subrepeat candidates** drawn from peaks classified HIGH
-      or LIKELY (see _classify_subrepeat_tier).
+    - **top-2 subrepeat candidates**: when `tandem_validate_tsv` is
+      given (kitehor >= 0.13.0), drawn from `tandem-validate`'s
+      per-array `localized_subrepeat` candidates, gated against
+      TideCluster's founder — adopted only when the candidate period
+      does NOT coincide with the founder (not the HOR subunit) and shows
+      genuine partial occupancy (density ≥ 0.10, presence ≥ 10 %). The
+      candidate's occupancy lands in `subrepeat_*_occ` and its tier is
+      `HIGH`. When no tandem-validate file is supplied, falls back to the
+      legacy per-peak `_classify_subrepeat_tier` rescore-column heuristic.
+    - **subrepeat_founder_divisor_flag / _k**: edge diagnostic — set when
+      a tandem-validate candidate is a clean integer divisor of the
+      founder at high occupancy (density ≥ 0.50). Surfaces arrays where
+      the founder itself may be miscalled (a smaller unit tiles it), for
+      review rather than an automatic founder change.
     - **alt_cluster_1..2_***: top-2 period clusters that are *not* the
       founder's, surfaced so the report can show secondary signals
       (e.g. a spurious 310-bp peak that was correctly demoted).
@@ -2532,6 +2676,17 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
         with open(ssr_tsv, newline="") as fh:
             for r in csv.DictReader(fh, delimiter="\t"):
                 ssr_by_rec[r["record_id"]] = r
+
+    # ---- Read tandem-validate subrepeat detector keyed by record_id ----
+    # kitehor >= 0.13.0's unified nested-TR detector (spec v5). Each row
+    # carries the dominant candidate plus a `candidates` cell listing all
+    # of them, `;`-separated, each entry `kind/period:d=..:sc=..:pc=..:label`
+    # (e.g. `other/305:d=0.084:sc=0.500:pc=0.111:localized`).
+    tv_by_rec = {}
+    if tandem_validate_tsv and os.path.exists(tandem_validate_tsv):
+        with open(tandem_validate_tsv, newline="") as fh:
+            for r in csv.DictReader(fh, delimiter="\t"):
+                tv_by_rec[r["record_id"]] = r
 
     # ---- Pass 1: per-array strict reassignment ----
     # Stash one dict per record with the strict result + the raw peaks
@@ -2890,6 +3045,62 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
         e["cluster_rescue"]     = True
         e["rescue_method"]      = "cluster"
 
+    # ---- Pass 6: kitehor "go-deeper" founder adoption (Bucket 1) ----
+    # Consult kitehor's own per-array basic monomer (hor_basic_period,
+    # constant per case_id, from rescore >= 0.13.0). Adopt it as founder
+    # ONLY when it is deeper than TideCluster's FINAL founder (after all
+    # prior passes) AND the rescored peak at that period is a clean,
+    # near-full-coverage array-wide tandem. This recovers real deep HORs
+    # that TC's strict ±0.05 ratio gate rejects at large k and that the
+    # TRC-consensus passes couldn't reach (the 4 confirmed drapa cases:
+    # TRC_173 496->165 k=27.07; TRC_276 205->103 k=21.9; TRC_178 64->48;
+    # TRC_203 3148->1522). Running LAST and gating "deeper than the final
+    # founder" is deliberate: it never walks a correct Pass-2 deep founder
+    # back to kitehor's shallower intermediate divisor (TRC_26 final 154
+    # rejects kitehor's 462=3*154), and the hard coverage/occupancy gate
+    # keeps kitehor's spurious near-2x over-splits out (TRC_1 1692->890 at
+    # cov≈0.0). Deeper-only — never overrides with a shallower founder.
+    for e in pass1:
+        if e["fallback"] or e.get("ssr_override"):
+            continue
+        if e["strongest_period"] is None:
+            continue
+        kh_basic = _num(e["rank1"].get("hor_basic_period"))
+        if kh_basic is None or kh_basic <= 0:
+            continue
+        cur_fp = e["founder_period"]
+        # must be a meaningfully smaller monomer than TC's final founder
+        # (not a ~few-% lateral re-estimate of the same period)
+        if cur_fp is None or kh_basic > cur_fp * _KH_DEEPER_MAX_RATIO:
+            continue
+        # kitehor's basic must form a clean integer multiple of strongest
+        k  = e["strongest_period"] / kh_basic
+        kr = round(k)
+        if not (2 <= kr <= _KMAX) or abs(k - kr) > _KH_DEEPER_RATIO_TOL:
+            continue
+        # locate the rescored peak at kh_basic; require a (near-)full
+        # coverage array-wide tandem there (Bucket-1 vs Bucket-3 split).
+        win  = max(12.0, 0.05 * kh_basic)
+        near = [p for p in e["peaks"]
+                if (_num(p.get("period")) is not None
+                    and abs(_num(p.get("period")) - kh_basic) <= win)]
+        if not near:
+            continue
+        bp  = max(near, key=lambda p: (_num(p.get("coverage_frac")) or 0.0))
+        cov = _num(bp.get("coverage_frac"))
+        occ = _num(bp.get("scan_occupancy_frac"))
+        if cov is None or occ is None:
+            continue
+        if cov < _KH_DEEPER_COV_MIN or occ < _KH_DEEPER_OCC_MIN:
+            continue
+        e["founder_peak"]     = bp
+        e["founder_period"]   = int(round(kh_basic))
+        e["multiplicity"]     = kr
+        e["multiplicity_raw"] = k
+        # flag irregular only when the integer ratio needed the relaxed gate
+        e["irregular"]        = abs(k - kr) > _RATIO_TOL
+        e["rescue_method"]    = "kh_deeper"
+
     # ---- Build output rows ----
     rows = []
     for e in pass1:
@@ -2909,17 +3120,29 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
             else (_num(p.get("period")), _num(p.get("score")))
             for p in top5]
 
-        # Subrepeat candidates: tier each peak, keep HIGH+LIKELY, sort by
-        # scan_occupancy_frac desc, take top 2.
-        sr_keep = []
-        for p in peaks:
-            t = _classify_subrepeat_tier(p, e["founder_period"])
-            if t in ("HIGH", "LIKELY"):
-                sr_keep.append((
-                    _num(p.get("scan_occupancy_frac")) or 0.0,
-                    _num(p.get("period")),
-                    t))
-        sr_keep.sort(key=lambda c: -c[0])
+        # Subrepeat candidates. When kitehor >= 0.13.0's tandem-validate
+        # output is available, draw the top-2 from its per-array
+        # localized_subrepeat candidates, gated against TideCluster's
+        # founder (suppress candidates that coincide with / are the HOR
+        # subunit; flag clean high-occupancy founder divisors). Otherwise
+        # fall back to the legacy per-peak rescore-column tiering. Tuples
+        # are stored as (occupancy, period, tier) for the row writer.
+        sr_edge_flag = False
+        sr_edge_k    = None
+        if tv_by_rec:
+            tv_sr, sr_edge_flag, sr_edge_k = _tv_subrepeats(
+                tv_by_rec.get(e["record_id"]), e["founder_period"])
+            sr_keep = [(dens, per, tier) for (per, dens, tier) in tv_sr]
+        else:
+            sr_keep = []
+            for p in peaks:
+                t = _classify_subrepeat_tier(p, e["founder_period"])
+                if t in ("HIGH", "LIKELY"):
+                    sr_keep.append((
+                        _num(p.get("scan_occupancy_frac")) or 0.0,
+                        _num(p.get("period")),
+                        t))
+            sr_keep.sort(key=lambda c: -c[0])
         sr1 = sr_keep[0] if len(sr_keep) > 0 else None
         sr2 = sr_keep[1] if len(sr_keep) > 1 else None
 
@@ -2983,7 +3206,8 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
             "founder_fallback":  "true" if e["fallback"] else "false",
             "ssr_founder_override": "true" if e.get("ssr_override") else "false",
             # Cluster-rescue diagnostics + founder_method enum
-            # (strict | none | pass2 | pass3 | ssr | cluster | fallback).
+            # (strict | none | kh_deeper | pass2 | pass3 | ssr | cluster
+            #  | fallback).
             "founder_method":     e.get("rescue_method") or "",
             "cluster_rescue":     "true" if e.get("cluster_rescue") else "false",
             "subrepeat_1_period": _fmt_bp(sr1[1]) if sr1 else "",
@@ -2992,6 +3216,8 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
             "subrepeat_2_period": _fmt_bp(sr2[1]) if sr2 else "",
             "subrepeat_2_occ":    _fmt_id(sr2[0]) if sr2 else "",
             "subrepeat_2_tier":   sr2[2] if sr2 else "",
+            "subrepeat_founder_divisor_flag": "true" if sr_edge_flag else "false",
+            "subrepeat_founder_divisor_k":    str(sr_edge_k) if sr_edge_k else "",
             # Alternative periodicities (top-N clusters that aren't the founder).
             "alt_cluster_1_period":       _fmt_bp(alt1["median_period"])  if alt1 else "",
             "alt_cluster_1_score_sum":    _fmt_sc(alt1["score_sum"])      if alt1 else "",
@@ -3031,6 +3257,7 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv):
         "founder_method", "cluster_rescue",
         "subrepeat_1_period", "subrepeat_1_occ", "subrepeat_1_tier",
         "subrepeat_2_period", "subrepeat_2_occ", "subrepeat_2_tier",
+        "subrepeat_founder_divisor_flag", "subrepeat_founder_divisor_k",
         "alt_cluster_1_period", "alt_cluster_1_score_sum",
         "alt_cluster_1_n_peaks", "alt_cluster_1_cov_frac_max",
         "alt_cluster_2_period", "alt_cluster_2_score_sum",
