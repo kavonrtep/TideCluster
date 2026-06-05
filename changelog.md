@@ -1,3 +1,18 @@
+## 1.13.1 (2026-06-05)
+- **Deterministic comparative analysis** (`tc_comparative_analysis.R`).
+  The MMseqs2-driven satellite-family clustering was not reproducible
+  across thread counts or run-to-run at threads > 1. Fixes (refs #4):
+  raise `--max-seqs` to `max(10000, n_seqs)` so the prefilter no longer
+  drops redundant hits thread-dependently; deterministic best-hit dedup
+  (`LC_ALL=C sort -s` by pair then descending pident/qcov/tcov, keep
+  first); order `df_pass` by `(query, target)` before building the
+  igraph graph so Leiden tie-breaking is invariant to edge order. The
+  community table is now identical across thread counts and repeated
+  runs. A new `--deterministic` flag additionally forces MMseqs2
+  `--threads 1` for a byte-identical `mmseqs2_results.tsv`. Pinned
+  `r-igraph=2.0.3` (Leiden tie-breaking is igraph-version sensitive).
+  Added `tests/determinism.sh` (`./tests.sh determinism`).
+
 ## 1.13.0 (2026-06-05)
 - Bumped kitehor to **0.13.0** (`conda-deps.txt`), adopting its two new
   capabilities while TideCluster keeps full control of the founder/HOR
