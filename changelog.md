@@ -1,3 +1,31 @@
+## 1.13.0 (2026-06-05)
+- Bumped kitehor to **0.13.0** (`conda-deps.txt`), adopting its two new
+  capabilities while TideCluster keeps full control of the founder/HOR
+  call. The kite step now runs `rule-classify` then
+  `rescore || ssr-scan || tandem-validate` in parallel.
+- **Founder go-deeper** (new Pass 6 in `build_monomer_size_csv`):
+  consult kitehor's own per-array basic monomer (`hor_basic_period`)
+  and adopt it as founder only when it is *deeper* than TideCluster's
+  final founder by ≥ 20 %, a clean integer multiple of `strongest`
+  (±0.10), and the rescored peak at that period is a near-full-coverage
+  array-wide tandem (`coverage_frac ≥ 0.75`, `scan_occupancy_frac ≥
+  0.90`). Recovers real deep HORs that the strict ±0.05 divisor gate
+  rejects at large `k` while the hard coverage gate rejects kitehor's
+  spurious near-2× over-splits; runs last so it never walks a correct
+  TRC-consensus founder back to an intermediate divisor. Marked
+  `founder_method = "kh_deeper"`. On drapa it recovers 4 confirmed deep
+  HORs (e.g. TRC_173 496→165 ×27, TRC_203 3148→1522 ×4).
+- **Subrepeats from `tandem-validate`** (kitehor's unified spec-v5
+  nested-TR detector) replace the per-peak rescore-column tier
+  heuristic for the main subrepeat cell, gated against TideCluster's
+  founder: founder-coincident / HOR-subunit candidates are suppressed,
+  and only genuine partial-occupancy motifs (density ≥ 0.10, presence
+  ≥ 10 %) are surfaced. New `subrepeat_founder_divisor_flag` /
+  `subrepeat_founder_divisor_k` columns flag clean high-occupancy
+  founder divisors as a possible-founder-miscall watch-list. The legacy
+  `_classify_subrepeat_tier` path remains as a fallback for run
+  directories without a tandem-validate file.
+
 ## 1.12.2 (2026-06-04)
 - Pass 1 now generates founder candidates from peak **clusters** rather
   than individual peaks. Within each cluster (single-link `±5%/±100 bp`,
