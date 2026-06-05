@@ -9,7 +9,9 @@ mmseqs2_search <- function(sequences,
                            mmseqs2_path = "mmseqs",
                            min_coverage = 0.2,
                            min_identity = 70,
-                           awk_filter = NULL
+                           awk_filter = NULL,
+                           max_seqs = NULL,
+                           deterministic = FALSE
 ) {
 
   # Create temporary directory for all operations
@@ -28,6 +30,23 @@ mmseqs2_search <- function(sequences,
     # Write input sequences to temporary file
     writeXStringSet(sequences, input_fasta, format = "fasta")
 
+    # Determinism controls (see issue #4):
+    #  * --max-seqs (R1): the nucleotide prefilter default is 300. On the
+    #    highly redundant satellite-monomer pool, a query with > max-seqs
+    #    near-identical neighbours overflows the cap and *which* hits
+    #    survive becomes thread-scheduling dependent. Raise it well above
+    #    the per-query redundancy (input size, floored at 10000) so the
+    #    surviving hit set is stable across thread counts.
+    #  * --threads 1 (R5): the only way to also fix the result *ordering*
+    #    of the m8 file (multithreaded query blocks finish in arbitrary
+    #    order). Only forced in --deterministic mode, since R2/R3 below
+    #    already make the downstream result order-independent.
+    effective_max_seqs <- if (is.null(max_seqs)) max(10000L, length(sequences)) else max_seqs
+    effective_threads  <- if (deterministic) 1 else threads
+    if (deterministic && threads != 1) {
+      cat("Deterministic mode: forcing MMseqs2 --threads 1 for byte-identical output\n")
+    }
+
     # Build MMseqs2 command with filtering options
     mmseqs_cmd <- paste(mmseqs2_path, " easy-search",
                         input_fasta,
@@ -38,11 +57,13 @@ mmseqs2_search <- function(sequences,
                         "-a",
                         paste0("--format-output \"", format_output, "\""),
                         "-s", sensitivity, "-v 0", # No verbose output
-                        "--threads", threads,
+                        "--threads", effective_threads,
+                        "--max-seqs", effective_max_seqs,
                         "--min-seq-id", min_identity / 100,  # Convert percentage to fraction
                         additional_params)
 
-    cat("Running MMseqs2 easy-search...\n")
+    cat(sprintf("Running MMseqs2 easy-search (--threads %d --max-seqs %d)...\n",
+                effective_threads, effective_max_seqs))
     cat(sprintf("Memory usage before MMseqs2 search: %.2f MB\n", memory_usage() / 1024^2))
     start_time <- Sys.time()
     
@@ -80,15 +101,25 @@ mmseqs2_search <- function(sequences,
       stop("Reordering command failed with exit code: ", reorder_result_code)
     }
     
-    # Step 2: Sort by query-target pair (first two columns)
-    sort_cmd <- paste("sort -k1,1 -k2,2", temp_reordered_file, ">", temp_sorted_file)
+    # Step 2: Sort into a deterministic total order (issue #4, R2+R4).
+    # Columns are query,target,pident,qcov,tcov. We group by the
+    # canonicalised pair (k1,k2) and then order the duplicate reciprocal
+    # rows (A->B and B->A collapse to one key but carry different
+    # pident/qcov/tcov) by descending pident, qcov, tcov so the dedup in
+    # step 3 keeps a *defined* best representative rather than whichever
+    # row sort happened to emit first. LC_ALL=C fixes byte collation on
+    # the key columns so the order is identical across locales/machines.
+    sort_cmd <- paste("LC_ALL=C sort -s -k1,1 -k2,2 -k3,3nr -k4,4nr -k5,5nr",
+                      temp_reordered_file, ">", temp_sorted_file)
     sort_result_code <- system(sort_cmd)
-    
+
     if (sort_result_code != 0) {
       stop("Sort command failed with exit code: ", sort_result_code)
     }
-    
-    # Step 3: Remove duplicates based on query-target pair, keeping the best hit
+
+    # Step 3: Remove duplicates based on query-target pair, keeping the
+    # best hit (now deterministic: step 2 ordered the duplicates so the
+    # first row per key is the highest-scoring alignment).
     dedup_awk <- "'!seen[$1,$2]++'"
     dedup_cmd <- paste("awk", dedup_awk, temp_sorted_file, ">", temp_prefiltered_file)
     dedup_result_code <- system(dedup_cmd)
@@ -165,7 +196,8 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
                                   coverage_mode = "max",
                                   output_directory = NULL, ncpu = 5,
                                   input_tc_dirs = NULL, prefix = NULL, tc_code = NULL,
-                                  clustering_algorithm = "fast_greedy"
+                                  clustering_algorithm = "fast_greedy",
+                                  deterministic = FALSE, max_seqs = NULL
 ) {
 
   # Input validation
@@ -241,14 +273,16 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
     # Run MMseqs2 search with filtering parameters
     tryCatch({
       if (is.null(mmseqs2_path)) {
-        df <- mmseqs2_search(th_tc_seq, threads = ncpu, 
+        df <- mmseqs2_search(th_tc_seq, threads = ncpu,
                             min_identity = min_identity,
-                            awk_filter = awk_coverage_filter)
+                            awk_filter = awk_coverage_filter,
+                            max_seqs = max_seqs, deterministic = deterministic)
       } else {
-        df <- mmseqs2_search(th_tc_seq, threads = ncpu, 
+        df <- mmseqs2_search(th_tc_seq, threads = ncpu,
                             mmseqs2_path = mmseqs2_path,
                             min_identity = min_identity,
-                            awk_filter = awk_coverage_filter)
+                            awk_filter = awk_coverage_filter,
+                            max_seqs = max_seqs, deterministic = deterministic)
       }
     }, error = function(e) {
       stop("MMseqs2 execution failed. Please check that MMseqs2 is properly installed and accessible: ", e$message)
@@ -279,6 +313,14 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
 
   # Calculate edge weights
   df_pass$weight <- df_pass$sel_cov * df_pass$pident
+
+  # Deterministic edge order (issue #4, R3): igraph's community detection
+  # is tie-break-sensitive to the edge-list insertion order, which is the
+  # row order of df_pass. Sort by the canonicalised (query, target) pair
+  # so the graph object is identical regardless of any upstream ordering
+  # noise. vertices_df below is already deterministic (unique() over a
+  # fixed sequence order), so this pins the whole graph object.
+  df_pass <- df_pass[order(df_pass$query, df_pass$target), , drop = FALSE]
 
   # Build graph and perform community detection
   cat("Building similarity graph...\n")
@@ -1290,7 +1332,8 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
                                  ncpu = opt$cpu,
                                  clustering_algorithm = "fast_greedy",
                                  min_coverage = 0.8, min_identity = 80,
-                                 coverage_mode = "max"
+                                 coverage_mode = "max",
+                                 deterministic = FALSE, max_seqs = NULL
 ) {
 
   tc_clust_path <- paste0(tc_code, "_clustering.gff3")
@@ -1307,7 +1350,8 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
                                 min_identity = min_identity, min_coverage = min_coverage,
                                 coverage_mode = coverage_mode,
                                 input_tc_dirs = input_tc_dirs, prefix = prefix, tc_code = tc_code,
-                                clustering_algorithm = clustering_algorithm
+                                clustering_algorithm = clustering_algorithm,
+                                deterministic = deterministic, max_seqs = max_seqs
   )
 
   # Clean up large sequence objects after clustering
@@ -1723,7 +1767,9 @@ main <- function(opt) {
     clustering_algorithm = opt$clustering_algorithm,
     min_coverage = opt$min_coverage,
     min_identity = opt$min_identity,
-    coverage_mode = opt$coverage_mode
+    coverage_mode = opt$coverage_mode,
+    deterministic = opt$deterministic,
+    max_seqs = opt$max_seqs
   )
 
   # Format results
@@ -1785,7 +1831,13 @@ option_list <- list(
     help="Minimum percent identity to create a similarity edge [default: %default]"),
   make_option(
     c("--coverage_mode"), type="character", default="max",
-    help=paste("How --min_coverage is applied: 'max' = max(qcov,tcov) (a hit covering most of either sequence survives, e.g. a short monomer as a subset of a long one); 'min' = min(qcov,tcov) (bidirectional coverage; both sequences must be covered, rejecting short-vs-long subset hits) [default: %default]"))
+    help=paste("How --min_coverage is applied: 'max' = max(qcov,tcov) (a hit covering most of either sequence survives, e.g. a short monomer as a subset of a long one); 'min' = min(qcov,tcov) (bidirectional coverage; both sequences must be covered, rejecting short-vs-long subset hits) [default: %default]")),
+  make_option(
+    c("--max_seqs"), type="integer", default=NULL,
+    help=paste("MMseqs2 --max-seqs prefilter cap. The MMseqs2 nucleotide default (300) drops redundant hits in a thread-dependent way on the highly redundant satellite-monomer pool, which is the dominant source of comparative non-determinism. Raise it above the per-query redundancy. Default: max(10000, number of input sequences).")),
+  make_option(
+    c("--deterministic"), action="store_true", default=FALSE,
+    help=paste("Force bit-for-bit reproducible output: runs the MMseqs2 search single-threaded (--threads 1) so the result file ordering is fixed too. Slower, but the m8 file and every downstream table are byte-identical across runs and machines. Without this flag the result table is still stable across thread counts and runs (via --max-seqs, deterministic dedup and sorted graph edges); only the on-disk m8 ordering may vary. [default: %default]"))
 )
 
 opt_parser <- OptionParser(option_list=option_list)

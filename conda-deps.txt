@@ -10,7 +10,10 @@ python>=3.6
 networkx
 repeatmasker=4.1.2.p1
 r-optparse
-r-igraph
+# Pinned: igraph drives Leiden community-detection tie-breaking in the
+# comparative analysis; an unpinned version is a cross-environment
+# reproducibility risk (see issue #4, R6).
+r-igraph=2.0.3
 bioconductor-biostrings
 bioconductor-rtracklayer
 bioconductor-genomicranges
