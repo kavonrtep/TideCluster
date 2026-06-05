@@ -51,13 +51,15 @@ higher-order repeats and captures the variability in monomer size across differe
 repeat arrays.
 
 Starting in TideCluster 1.10.0, the KITE step is powered by
-[kitehor](https://github.com/kavonrtep/kitehor) `0.12.0` — a
-sequence-agnostic Rust reimplementation of the same k-mer-interval
-principle. The pipeline runs `kitehor kite-periodicity` followed in
-parallel by `kitehor rescore` (banded semi-global alignment scoring of
-the top-N kite peaks) and `kitehor ssr-scan`; the heavier `analyze`
-cascade is dropped. kitehor is installed transitively from the
-`petrnovak` conda channel.
+[kitehor](https://github.com/kavonrtep/kitehor) (`0.13.0` since
+TideCluster 1.13.0) — a sequence-agnostic Rust reimplementation of the
+same k-mer-interval principle. The pipeline runs `kitehor
+kite-periodicity` and `kitehor rule-classify`, followed in parallel by
+`kitehor rescore` (banded semi-global alignment scoring of the top-N
+kite peaks), `kitehor ssr-scan`, and `kitehor tandem-validate` (the
+unified spatial-localization nested-TR / subrepeat detector); the
+heavier `analyze` cascade is dropped. kitehor is installed transitively
+from the `petrnovak` conda channel.
 
 The KITE analysis includes:
 
@@ -74,13 +76,21 @@ higher-order repeats.
   strongest (k = strongest/P) with `identity_med(P) ≥ 0.7` — recovering
   the HOR base / tile decomposition. When rescore cannot assign a
   founder, TideCluster falls back to the top-scored kite peak and marks
-  the array with a `*` in the report.
-- Subrepeat candidates: peaks with `period ≤ founder/3` and partial
-  per-base occupancy. Tiered HIGH / LIKELY (surfaced in the per-TRA
-  table) / KMER_SUPPORT / AMBIGUOUS / WEAK / OBSERVATIONAL (Details
-  panel only). Strict by design — true nested subrepeats (a short
-  motif occupying only part of each longer monomer; not the same as an
-  HOR pattern that tiles the whole longer monomer) are rare.
+  the array with a `*` in the report. Since 1.13.0 a final *go-deeper*
+  pass also consults kitehor's own per-array basic monomer
+  (`hor_basic_period`) and adopts it when it is a meaningfully deeper
+  (≥ 20 %), clean, near-full-coverage array-wide tandem that the strict
+  divisor gate missed (`founder_method = kh_deeper`).
+- Subrepeat candidates: since 1.13.0 sourced from `kitehor
+  tandem-validate` and gated against TideCluster's founder — only
+  genuine partial-occupancy nested motifs that do **not** coincide with
+  the founder/HOR subunit are surfaced (density ≥ 0.10, presence
+  ≥ 10 %). Strict by design — a true nested subrepeat is a short motif
+  occupying only part of each longer monomer, not an HOR pattern that
+  tiles the whole longer monomer. A candidate that is instead a clean
+  high-occupancy integer divisor of the founder is flagged
+  (`subrepeat_founder_divisor_flag`) as a possible-founder-miscall
+  watch-list entry rather than reported as a subrepeat.
 - SSR scan with dominant motif, total coverage, and top motifs.
 - All surfaced in the report's KITE page, the per-TRC dashboards
   (▸ click opens the per-array Details child row with the full
