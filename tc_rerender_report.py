@@ -1020,6 +1020,13 @@ def load_kite_top3(paths):
                 "subrepeat_2_period": ni(row.get("subrepeat_2_period")),
                 "subrepeat_2_occ":    num(row.get("subrepeat_2_occ")),
                 "subrepeat_2_tier":   (row.get("subrepeat_2_tier") or "").strip() or None,
+                # Short-founder review aids (tc_utils >= kitehor 0.13.1 gate).
+                # weak_short_founder_flag: a short founder (<= 30 bp) kept on
+                # weak kite support (founder peak score < 0.20);
+                # alt_longer_period: the dominant longer-period alternative.
+                "weak_short_founder_flag":
+                                    (row.get("weak_short_founder_flag") or "").strip() == "true",
+                "alt_longer_period":  ni(row.get("alt_longer_period")),
                 # SSR
                 "ssr_flag":           (row.get("ssr_flag") or "").strip() or None,
                 "ssr_dominant_motif": (row.get("ssr_dominant_motif") or "").strip() or None,
@@ -2727,6 +2734,15 @@ def _details_html(a):
         head_bits.append(f'<strong>&times;{mult}</strong>')
     if delta is not None:
         head_bits.append(f'<span class="tc-dim">&Delta;id {delta:+.2f}&nbsp;pp</span>')
+    if a.get("weak_short_founder_flag"):
+        alt = a.get("alt_longer_period")
+        alt_txt = (f' &nbsp;<span class="tc-dim">(longer alternative &asymp; '
+                   f'{esc(alt)}&nbsp;bp)</span>' if alt
+                   else ' <span class="tc-dim">(no credible longer alternative)</span>')
+        head_bits.append(
+            '<span class="tc-weakshort" title="short founder kept on weak kite '
+            'support (founder peak kite score &lt; 0.20)">'
+            '&#9888; weak short founder</span>' + alt_txt)
     header = ('<div class="tc-details-summary">'
               + ' &nbsp;·&nbsp; '.join(head_bits)
               + '</div>')
@@ -2854,6 +2870,14 @@ def _arrays_table(arrays, include_hor=True):
                 glyphs.append('<span class="tc-ssr-badge" '
                               'title="SSR-pure array: founder set to '
                               'kite top peak (= SSR period)">SSR</span>')
+            if a.get("weak_short_founder_flag"):
+                alt = a.get("alt_longer_period")
+                alt_txt = (f"; longer alternative ≈ {alt} bp"
+                           if alt else "; no credible longer alternative")
+                glyphs.append(
+                    '<span class="tc-weakshort" '
+                    f'title="short founder (≤30 bp) with weak kite support '
+                    f'(founder peak score &lt; 0.20) — review{alt_txt}">⚠short</span>')
             fp_html = (esc(fp) + "".join(glyphs)
                        if fp is not None else "—")
             sp_html = esc(sp) if sp is not None else "—"
@@ -2895,21 +2919,86 @@ def _arrays_table(arrays, include_hor=True):
     return "".join(rows)
 
 
+# Plain-language meaning of every subrepeat-evidence tier (mirrors the
+# classify_peak_tier cascade) — rendered into the per-TRA legend so the
+# coloured pills in the Details child row are self-documenting.
+_TIER_DESC = [
+    ("HIGH",   "period ≤ Founder/4, occupancy ≥ 0.15, AND k-mer / alignment "
+               "support (kitehor subrepeat flag, phase-contrast ≥ 0.10, or "
+               "founder-autocorr ≥ 0.4) — scan and sequence structure agree."),
+    ("LIKELY", "period ≤ Founder/4, occupancy ≥ 0.20 over ≥ 10 scan windows — "
+               "strong tiling, but no independent k-mer/alignment corroboration."),
+    ("KMER_SUPPORT", "period ≤ Founder/4 with k-mer support (phase-contrast or "
+               "autocorr) but occupancy below the LIKELY gate."),
+    ("AMBIGUOUS", "Founder/4 &lt; period ≤ Founder/3 with some occupancy or "
+               "k-mer support — too near the Founder/3 cut-off to be confident."),
+    ("WEAK",   "period ≤ Founder/4 but neither occupancy nor k-mer support "
+               "reaches threshold."),
+    ("OBSERVATIONAL", "no Founder defined for the array, but the peak has "
+               "non-trivial occupancy (≥ 0.05) — listed for observation only."),
+    ("REJECT_IS_FOUNDER", "the peak IS the founder / HOR subunit "
+               "(id_med ≥ 0.85, coverage ≥ 0.95, occupancy ≥ 0.95) — not a subrepeat."),
+    ("REJECT_TOO_LARGE", "period &gt; Founder/3 — too long to be a subrepeat."),
+    ("REJECT_PHANTOM", "kitehor flagged the peak as a phantom (sub-period harmonic)."),
+    ("REJECT_AMBIGUOUS_LOW", "Founder/4 &lt; period ≤ Founder/3 with no support."),
+    ("REJECT_NO_FOUNDER", "no Founder and negligible occupancy."),
+    ("REJECT_BAD", "invalid / non-positive period."),
+]
+
+# Column glossary for the per-array Details child table (the full rescored-
+# peak diagnostics table). Abbreviations match the <th> labels in _details_html.
+_DETAILS_COL_DESC = [
+    ("rank",   "kite peak rank for this array (1 = highest kite score)."),
+    ("period", "peak periodicity in bp."),
+    ("score",  "kite periodicity score: k-mer autocorrelation strength vs a "
+               "composition-matched random background (≈ a significance score; "
+               "high = real periodicity, ~0 = composition noise)."),
+    ("id_med", "median pairwise identity between monomer copies at this period."),
+    ("id_iqr", "interquartile range of that identity (spread; a high IQR with "
+               "high id_med flags a bimodal / subrepeat signal)."),
+    ("occ",    "scan_occupancy_frac — fraction of the array actually tiled by "
+               "this period."),
+    ("scan_n", "scan_n_intervals — number of scan windows evaluated."),
+    ("cov",    "coverage_frac — fraction of the array length the period's "
+               "tiling covers."),
+    ("spat",   "spatial_contrast — how localised the period is (high = "
+               "concentrated in one part of the array; low = array-wide)."),
+    ("autoF",  "kmer_autocorr_founder — k-mer autocorrelation measured at the "
+               "Founder period."),
+    ("phaseC", "kmer_phase_contrast — phase contrast of the k-mer signal "
+               "(structural support for a real, in-phase repeat)."),
+    ("sub",    "✓ = kitehor's bimodal-identity subrepeat heuristic fired for "
+               "this peak."),
+    ("phtm",   "✓ = phantom (sub-period harmonic); auto-rejected from subrepeat "
+               "tiering."),
+    ("tier",   "subrepeat-evidence tier for the peak — see the Tier glossary above."),
+]
+
+
 def arrays_legend():
-    """Trimmed per-TRA column legend. Wrapped in a <details> so it stays
-    collapsed by default; click the summary to unfold. Structured as a
-    proper <dl> (previous markup put <dt>/<dd> directly under a <div>,
-    which DataTables sometimes mis-styled)."""
-    return """
+    """Per-TRA column legend + tier glossary + Details-table column glossary.
+    Wrapped in a <details> so it stays collapsed by default; click the summary
+    to unfold. The tier and Details-column sections document the expanded
+    child row (every rescored peak with its diagnostics and tier pill)."""
+    tier_rows = "".join(
+        f'<dt>{_tier_pill(t)}</dt><dd>{desc}</dd>' for t, desc in _TIER_DESC)
+    col_rows = "".join(
+        f'<dt><code>{esc(c)}</code></dt><dd>{desc}</dd>'
+        for c, desc in _DETAILS_COL_DESC)
+    hi, li = _tier_pill("HIGH"), _tier_pill("LIKELY")
+    return f"""
 <details class="tc-legend">
-  <summary>Column legend</summary>
+  <summary>Column legend &amp; tier glossary</summary>
+  <p class="tc-legend-head"><strong>Array table columns</strong></p>
   <dl class="tc-legend-list">
     <dt>Founder / Strongest</dt><dd>
         <strong>Strongest</strong> = highest-identity peak (rescore's
         <code>founder_period</code>). <strong>Founder</strong> = smallest
         divisor P of Strongest with k ∈ [2, 30] and id_med ≥ 0.7; falls
         back to Strongest. Red <code>*</code> = NA from rescore, fell
-        back to top kite peak.</dd>
+        back to top kite peak. <span class="tc-weakshort">⚠short</span> =
+        a short founder (≤ 30 bp) whose founder peak has weak kite support
+        (score &lt; 0.20) — hover for the longer alternative to review against.</dd>
     <dt>&Delta;id</dt><dd>id(Strongest) − id(Founder), pp. NA when
         Founder = Strongest.</dd>
     <dt>&times;k</dt><dd>round(Strongest / Founder); 1 if none. Amber
@@ -2927,8 +3016,13 @@ def arrays_legend():
     <dt>SSR</dt><dd>dominant short-motif tandem repeat from kitehor's
         ssr-scan + coverage %; top motifs in the expanded child row.</dd>
   </dl>
+  <p class="tc-legend-head"><strong>Subrepeat-evidence tiers</strong>
+     (pills in the expanded Details row)</p>
+  <dl class="tc-legend-list tc-legend-tiers">{tier_rows}</dl>
+  <p class="tc-legend-head"><strong>Details row — rescored-peak columns</strong></p>
+  <dl class="tc-legend-list tc-legend-cols">{col_rows}</dl>
 </details>
-""".format(hi=_tier_pill("HIGH"), li=_tier_pill("LIKELY"))
+"""
 
 
 def _variants_table(variants, tarean_dir, show=20, src_prefix="../"):
