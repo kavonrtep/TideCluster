@@ -30,7 +30,7 @@ requirements:
     - networkx
     - repeatmasker=4.1.2.p1
     - r-optparse
-    - r-igraph
+    - r-igraph=2.0.3
     - bioconductor-biostrings
     - bioconductor-rtracklayer
     - bioconductor-genomicranges
@@ -47,10 +47,11 @@ requirements:
     # KITE backend. Lives on the `petrnovak` channel — `meta.yaml`
     # does not declare channels itself; the conda-release workflow
     # passes `-c petrnovak` to conda-build, and end users follow the
-    # README install line which also lists it. Keep this in sync
-    # with `conda-deps.txt`; `tests/check_conda_recipe_deps.py`
-    # (invoked by `tests/smoke.sh`) fails fast on drift.
-    - kitehor=0.12.0
+    # README install line which also lists it. The version pin MUST match
+    # `conda-deps.txt` exactly — `tests/check_conda_recipe_deps.py`
+    # (invoked by `tests/smoke.sh`) now fails fast on a pin mismatch, not
+    # just a missing package.
+    - kitehor=0.13.2
 
 test:
   commands:

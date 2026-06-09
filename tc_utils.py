@@ -2107,6 +2107,35 @@ _KMAX            = 30     # rescore --rule-k-max default
 _RATIO_TOL       = 0.05   # how close to integer multiplicity must be
 _SUBREP_RATIO    = 0.33   # period <= founder/3 ⇒ qualifies as candidate band
 
+# --- Short-founder review aids (kitehor >= 0.13.2) ---------------------------
+# kitehor 0.13.1's "shorter-monomer scanning" computed a pairwise identity_med
+# for very short periods (P≈5-20) that was high *by chance* on low-complexity
+# arrays (skewed composition ⇒ frequent matches) with no real periodicity
+# (kite `score` ≈ 0.005); these cleared the identity_med >= 0.7 founder gate and
+# collapsed real satellite monomers to microsatellite harmonics. kitehor 0.13.2
+# fixed this at source — those phantom short periods now get a realistic LOW
+# identity_med (≈0.54, below the gate), so TideCluster's founder logic no longer
+# adopts them and needs no suppression gate of its own. What remains useful is
+# *visibility*: a short founder kept on weak kite support is worth a manual look,
+# so we flag it and surface its dominant longer-period alternative. These are
+# pure diagnostics — they never change the founder call.
+_FOUNDER_SCORE_MIN      = 0.20  # kite-score floor — at/above ⇒ a credible peak
+_FOUNDER_SCAN_ID_STRONG = 0.80  # scan_identity_med at/above ⇒ a credible peak
+_SHORT_FOUNDER_MAX      = 30    # founder period (bp) at/below which a founder is
+                                # "short" (flagged + given a longer alternative)
+
+
+def _peak_credible(peak):
+    """True when *peak* shows real periodicity support — kite ``score`` >=
+    _FOUNDER_SCORE_MIN OR ``scan_identity_med`` >= _FOUNDER_SCAN_ID_STRONG (or
+    either value is absent). Used only to pick a *credible* longer-period
+    alternative for the short-founder review column; never gates the founder."""
+    sc  = _num_or_none(peak.get("score"))
+    sid = _num_or_none(peak.get("scan_identity_med"))
+    if sc is None or sid is None:
+        return True
+    return sc >= _FOUNDER_SCORE_MIN or sid >= _FOUNDER_SCAN_ID_STRONG
+
 # --- kitehor >= 0.13.0 "go-deeper" founder adoption (Pass 1b) ---
 # kitehor's rescore now emits its own per-array HOR decomposition
 # (`hor_basic_period`, constant per case_id) using a strict + scan-relaxed
@@ -3169,6 +3198,36 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
         alt1 = alt_clusters[0] if len(alt_clusters) > 0 else None
         alt2 = alt_clusters[1] if len(alt_clusters) > 1 else None
 
+        # Short-founder review aids (pure diagnostics — they never change the
+        # founder). For any short founder (<= _SHORT_FOUNDER_MAX) surface the
+        # dominant *longer*-period alternative so a reviewer can sanity-check the
+        # short call at a glance, and flag the subset whose founder peak has weak
+        # kite support (score < _FOUNDER_SCORE_MIN) — kitehor 0.13.2 already
+        # suppresses the by-chance short phantoms, but a surviving weak short
+        # founder still warrants a manual look. Strongly supported short founders
+        # (e.g. a clean 15 bp monomer at score 0.87) surface the alternative but
+        # are not flagged.
+        fp_val      = e["founder_period"]
+        weak_short  = False
+        alt_longer  = None
+        if fp_val is not None and fp_val <= _SHORT_FOUNDER_MAX:
+            # Surface the most credible longer alternative: the highest
+            # kite-score peak above the founder that itself shows real
+            # periodicity support (_peak_credible). Blank ⇒ no credible longer
+            # monomer (the short call stands on its own), which is itself
+            # informative; requiring support avoids surfacing a noise peak.
+            longer = [p for p in peaks
+                      if (_num(p.get("period")) or 0) > fp_val
+                      and _num(p.get("score")) is not None
+                      and _peak_credible(p)]
+            if longer:
+                alt_longer = _num(
+                    max(longer, key=lambda p: _num(p.get("score")) or 0.0)
+                    .get("period"))
+            fsc = _num(e["founder_peak"].get("score"))
+            if fsc is not None and fsc < _FOUNDER_SCORE_MIN:
+                weak_short = True
+
         ssr = ssr_by_rec.get(e["record_id"], {})
         rows.append({
             "TRC_ID":            e["trc"],
@@ -3218,6 +3277,12 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
             "subrepeat_2_tier":   sr2[2] if sr2 else "",
             "subrepeat_founder_divisor_flag": "true" if sr_edge_flag else "false",
             "subrepeat_founder_divisor_k":    str(sr_edge_k) if sr_edge_k else "",
+            # Short-founder review aids (kitehor >= 0.13.2 short-monomer scan):
+            # weak_short_founder_flag marks a short founder (<= 30 bp) whose
+            # founder peak has weak kite support (score < 0.20); alt_longer_period
+            # is the dominant longer-period alternative to eyeball against it.
+            "weak_short_founder_flag": "true" if weak_short else "false",
+            "alt_longer_period":       _fmt_bp(alt_longer) if alt_longer else "",
             # Alternative periodicities (top-N clusters that aren't the founder).
             "alt_cluster_1_period":       _fmt_bp(alt1["median_period"])  if alt1 else "",
             "alt_cluster_1_score_sum":    _fmt_sc(alt1["score_sum"])      if alt1 else "",
@@ -3258,6 +3323,7 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
         "subrepeat_1_period", "subrepeat_1_occ", "subrepeat_1_tier",
         "subrepeat_2_period", "subrepeat_2_occ", "subrepeat_2_tier",
         "subrepeat_founder_divisor_flag", "subrepeat_founder_divisor_k",
+        "weak_short_founder_flag", "alt_longer_period",
         "alt_cluster_1_period", "alt_cluster_1_score_sum",
         "alt_cluster_1_n_peaks", "alt_cluster_1_cov_frac_max",
         "alt_cluster_2_period", "alt_cluster_2_score_sum",

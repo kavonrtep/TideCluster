@@ -37,7 +37,7 @@ conda activate tidecluster        # name resolves via $CONDA_ENVS_PATH
 ```
 
 The env supplies: TideHunter 1.4.3, mmseqs2, NCBI BLAST,
-RepeatMasker 4.1.2.p1, mafft, bedtools, networkx, kitehor 0.13.0
+RepeatMasker 4.1.2.p1, mafft, bedtools, networkx, kitehor 0.13.2
 (`-c petrnovak`), and the R/Bioconductor stack (Biostrings,
 GenomicRanges, rtracklayer, GenomeInfoDbData, igraph, optparse,
 plyr/dplyr, reshape2, scales, hwriter, R2HTML, jsonlite).
