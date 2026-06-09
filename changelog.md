@@ -1,3 +1,27 @@
+## 1.14.0 (2026-06-09)
+- **kitehor 0.13.2** (pinned in `conda-deps.txt`): improved short-monomer
+  detection that limits false positives. kitehor 0.13.1's short-monomer
+  scanning emitted a pairwise `identity_med` for very short periods (P≈5–20)
+  that was high *by chance* on low-complexity arrays (skewed composition →
+  frequent matches) with no real periodicity; those cleared TideCluster's
+  `identity_med ≥ 0.7` founder gate and collapsed real 180/309 bp satellite
+  monomers to 11–14 bp microsatellite harmonics. 0.13.2 fixes this at source —
+  the phantom short periods now get a realistic low `identity_med` (≈0.54,
+  below the gate), so the founder logic no longer adopts them and needs no
+  suppression of its own. Measured on drapa + *S. tuberosum*: founder
+  collapses vs the previous baseline fall from 55/68 to 6/11 with **no
+  TideCluster-side change**, and those residuals are mostly genuine short
+  monomers or short telomere-like families.
+- **Short-founder review diagnostics** (`monomer_size_top3_estimats.csv`): new
+  `weak_short_founder_flag` (a short founder ≤ 30 bp whose founder peak has weak
+  kite support, score < 0.20) and `alt_longer_period` (the dominant credible
+  longer-period alternative). These are purely additive — they never change the
+  founder call — and surface a surviving weak short founder for manual review.
+- **HTML report**: amber `⚠short` badge on flagged arrays (Founder cell +
+  Details child row; hover for the longer alternative), and an expanded per-TRA
+  legend that now documents the full subrepeat-evidence tier vocabulary and
+  every rescored-peak column in the Details child row.
+
 ## 1.13.1 (2026-06-05)
 - **Deterministic comparative analysis** (`tc_comparative_analysis.R`).
   The MMseqs2-driven satellite-family clustering was not reproducible
