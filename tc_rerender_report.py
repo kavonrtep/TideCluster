@@ -111,7 +111,7 @@ ColSpec = namedtuple("ColSpec", "key header source fmt desc")
 BLURBS = {
     "trc_signal_counts": (
         '<h3>Structural signal counts across all analysed arrays</h3>'
-        '<p style="font-size:12px;color:var(--fg-muted)">'
+        '<p class="tc-note">'
         'HOR confident: <strong>{tot_hor}</strong> &nbsp;·&nbsp; '
         'HOR&approx; (founder recovered): <strong>{tot_hor_approx}</strong> &nbsp;·&nbsp; '
         'subrepeat: <strong>{tot_subrep}</strong> &nbsp;·&nbsp; '
@@ -122,7 +122,7 @@ BLURBS = {
         '</p>'),
     "trc_structural_summary": (
         '<h2>Per-TRC structural summary</h2>'
-        '<p style="font-size:12px;color:var(--fg-muted)">'
+        '<p class="tc-note">'
         '<strong>Monomer (KITE)</strong> is the most-frequent primary '
         'rescore founder period across the arrays of a given TRC. '
         '<strong>HOR (confident)</strong> counts arrays with a confidently '
@@ -1657,7 +1657,7 @@ def render_index_distribution(model, ctx):
     return f"""
     <section class="tc-idx-dist-wrap">
       <h2>TRC distribution across the assembly</h2>
-      <p style="font-size:12px;color:var(--fg-muted);margin:4px 0 10px;">
+      <p class="tc-note">
         Each tick is a tandem-repeat array (TRA). Click a TRC on the
         left to highlight just its arrays — others fade. Click the
         active TRC again, or the <em>Show all</em> button, to reset.
@@ -1812,7 +1812,7 @@ def render_cluster_overview(model, ctx):
     return f"""
     <section>
       <h2>Cluster overview</h2>
-      <p style="font-size:12px;color:var(--fg-muted)">
+      <p class="tc-note">
         Each dot is a TRC. <strong>x</strong> = median per-array founder
         period (log bp; falls back to KITE m₁ on legacy CSVs);
         <strong>y</strong> = TRC coverage (log Mbp);
@@ -2192,7 +2192,7 @@ def render_kite(model, out_path, run_meta, ctx):
         summary = (
             '<h3>Array class distribution across all analysed arrays</h3>'
             f'<div class="tc-bar" title="Total arrays: {total}">{bar}</div>'
-            '<p style="font-size:12px;color:var(--fg-muted)">'
+            '<p class="tc-note">'
             + " · ".join(legend_bits) +
             f' (total {total} arrays).</p>'
             '<h2>Per-TRC class summary</h2>')
@@ -2543,7 +2543,7 @@ def render_trc_distribution(trc, seqid_lengths):
         else "Hover a rectangle to see coordinates and class."
     )
     summary = (
-        f'<p style="font-size:12px;color:var(--fg-muted)">'
+        f'<p class="tc-note">'
         f'Genome distribution of this TRC&#39;s arrays across the '
         f'assembly: '
         + " · ".join(summary_parts) +
