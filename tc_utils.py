@@ -2184,26 +2184,38 @@ def parse_trc_ssr_motif_len(gff3_path):
     return out
 
 
-# Map kitehor's finer-grained verdict + confidence onto the legacy
-# 4-bin status string that the report consumes. Thresholds match
-# HOR_BIN_WEAK / MODERATE / STRONG from the removed tarean/kite.R so
-# colours, badges, and per-TRC roll-ups stay comparable across versions.
-_KITE_HOR_BIN_WEAK     = 0.10
-_KITE_HOR_BIN_MODERATE = 0.20
-_KITE_HOR_BIN_STRONG   = 0.40
+def _hor_order_confidence(multiplicity, multiplicity_raw, irregular,
+                          founder_method, fallback):
+    """Confidence that the array's ×k *higher-order order* is real, as distinct
+    from "founder recovered" (the basic monomer is reliable but the ×k may be an
+    estimate). See docs/hor_order_confidence_design.md. Pure function of columns
+    the row already carries — it never changes founder selection.
 
+      none      multiplicity <= 1 — founder == strongest, no HOR claim.
+      strict    clean integer divisor, low-k, strict path → confident HOR order.
+      supported family/anchor-rescued (pass2 / kh_deeper), clean, low-k — order
+                plausible, leans on cross-array support.
+      weak      founder solid but order not confidently integer: irregular
+                multiplicity, OR k >= _HOR_ORDER_HIGH_K (integer test vacuous),
+                OR a relaxed rescue path (pass3 / cluster / fallback).
 
-def _kitehor_status(verdict, confidence):
-    if verdict != "hor":
-        return "No HOR"
+    For reporting, "HOR" = strict ∪ supported."""
     try:
-        c = float(confidence)
+        m = int(multiplicity)
     except (TypeError, ValueError):
-        return "No HOR"
-    if c < _KITE_HOR_BIN_WEAK:     return "No HOR"
-    if c < _KITE_HOR_BIN_MODERATE: return "HOR weak"
-    if c < _KITE_HOR_BIN_STRONG:   return "HOR moderate"
-    return "HOR strong"
+        return "none"
+    if m <= 1:
+        return "none"
+    if fallback or irregular:
+        return "weak"
+    k = multiplicity_raw if multiplicity_raw is not None else m
+    if k >= _HOR_ORDER_HIGH_K:
+        return "weak"
+    if founder_method == "strict":
+        return "strict"
+    if founder_method in ("pass2", "kh_deeper"):
+        return "supported"
+    return "weak"   # pass3 / cluster / fallback / other relaxed rescue
 
 
 _FOUNDER_ID_MIN  = 0.7    # rescore --subrepeat-founder-id-min default
@@ -2219,6 +2231,12 @@ _RATIO_TOL       = 0.05   # how close to integer multiplicity must be
 _RATIO_TOL_FRAC  = 0.01   # per-k integer tolerance for the consensus anchor
 _CONS_ANCHOR_BP  = 5      # rank-1 must be within max(bp, pct) of the consensus
 _CONS_ANCHOR_PCT = 0.05
+# HOR-order confidence (see docs/hor_order_confidence_design.md). Above this k the
+# integer-multiplicity test is vacuous (every k is within 0.5 of an integer), so a
+# clean-looking ×k is a *scaling estimate*, not a verified higher-order order ->
+# downgrade to "weak". Tied to _RATIO_TOL_FRAC so it tracks the same constant the
+# prevalent-founder anchor uses (0.5 / 0.01 = 50).
+_HOR_ORDER_HIGH_K = round(0.5 / _RATIO_TOL_FRAC)
 _SUBREP_RATIO    = 0.33   # period <= founder/3 ⇒ qualifies as candidate band
 
 # --- Short-founder review aids (kitehor >= 0.13.2) ---------------------------
@@ -2779,7 +2797,14 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
     `kite_tsv` is currently unused but kept on the signature to keep
     the call site self-documenting (it pairs with the rescored peaks
     file). Empty `hor_status` / `hor_confidence` cells are emitted so
-    the per-TRA consensus R script's HOR_* alias shim doesn't choke."""
+    the per-TRA consensus R script's HOR_* alias shim doesn't choke
+    (the spectral HOR classifier they fed is retired — see
+    `hor_order_confidence` below and docs/hor_order_confidence_design.md).
+
+    `hor_order_confidence` (none | strict | supported | weak) is the
+    founder-arithmetic HOR tier that replaces the spectral classifier:
+    it distinguishes a recovered founder from a confidently-ordered
+    HOR. "HOR" for the report = strict ∪ supported."""
     import csv
     import collections
 
@@ -3433,8 +3458,17 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
             "score_4":           _fmt_sc(ms_scores[3][1]),
             "monomer_size_5":    _fmt_bp(ms_scores[4][0]),
             "score_5":           _fmt_sc(ms_scores[4][1]),
+            # hor_status / hor_confidence: the old spectral HOR classifier is
+            # retired from reporting (docs/hor_order_confidence_design.md); these
+            # stay as empty vestigial columns only because the per-TRA consensus
+            # R alias shim (consensus_ensemble.R) selects HOR_status/_confidence.
             "hor_status":        "",
             "hor_confidence":    "",
+            # hor_order_confidence: founder-arithmetic HOR tier that replaces the
+            # spectral classifier — none | strict | supported | weak.
+            "hor_order_confidence": _hor_order_confidence(
+                e["multiplicity"], e["multiplicity_raw"], e["irregular"],
+                e.get("rescue_method"), e["fallback"]),
             "founder_period":    _fmt_bp(e["founder_period"]),
             "strongest_period":  _fmt_bp(e["strongest_period"]),
             # kitehor's original rescore pick for this case_id. When it
@@ -3501,7 +3535,7 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
         "monomer_size_3", "score_3",
         "monomer_size_4", "score_4",
         "monomer_size_5", "score_5",
-        "hor_status", "hor_confidence",
+        "hor_status", "hor_confidence", "hor_order_confidence",
         "founder_period", "strongest_period", "kitehor_founder_period",
         "multiplicity",
         "multiplicity_raw", "irregular_multiplicity",
