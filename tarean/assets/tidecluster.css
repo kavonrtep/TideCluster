@@ -411,6 +411,13 @@ tr.tc-details-open .tc-details-control::before {
 .tc-details-table td:nth-child(-n+2) { text-align: left; }
 .tc-details-table th { color: var(--fg-muted); font-weight: 600; }
 .tc-details-table td:last-child { text-align: center; }
+.tc-details-table th[title] { cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; }
+
+/* In-row "column meanings" legend (built once in JS, revealed from any
+   Details child row — not duplicated per row). */
+.tc-col-legend { margin-top: 6px; font-size: 12px; }
+.tc-col-legend > summary { cursor: pointer; color: var(--fg-muted); }
+.tc-col-legend .tc-legend-cols { margin-top: 4px; }
 
 /* ======== subrepeat tier pills ======== */
 .tc-tier {

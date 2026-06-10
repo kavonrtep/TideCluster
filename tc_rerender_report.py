@@ -2660,166 +2660,112 @@ def _ssr_cell(a):
     return s
 
 
-def _details_html(a):
-    """HTML for the per-array Details child row (DataTables row.child()).
-    Header line + SSR scan summary + table of every rescored peak,
-    tier-labelled. Stored in `data-details` on the main row."""
-    peaks = a.get("rescored_peaks") or []
-    fp   = a.get("founder_period")
-    sp   = a.get("strongest_period")
-    mult = a.get("multiplicity") or 1
-    delta = a.get("delta_id_pp")
-    f_id = a.get("founder_id_med")
-    s_id = a.get("strongest_id_med")
-    fb   = a.get("founder_fallback")
-    crescue = a.get("cluster_rescue")
-    fmethod = a.get("founder_method")
+# ----------------------------------------------------------------------
+# Canonical per-peak (Details / unfold) columns — the SINGLE source for:
+#   • the unfold table headers + tooltips (Part 1),
+#   • the embedded per-TRC `tc-peaks` JSON the child row is built from (Part 3),
+#   • `tra_peaks.tsv` in the report/data bundle (Part 2),
+#   • the column dictionary (`columns.tsv`) and HTML legend.
+# Order matters: the JSON peak rows are positional in this order.
+# Each entry: (key, html_header, raw_kitehor_source, fmt, description).
+# fmt: int | f3 | f4 | yn | str  (how the value is displayed).
+# ----------------------------------------------------------------------
+_PEAK_COLUMNS = [
+    ("rank",   "rank",   "rank",                  "int",
+        "kite peak rank for this array (1 = highest kite score)."),
+    ("period", "period", "period",                "int",
+        "peak periodicity in bp."),
+    ("score",  "score",  "score",                 "f4",
+        "kite periodicity score: k-mer autocorrelation strength vs a "
+        "composition-matched random background (≈ a significance score; "
+        "high = real periodicity, ~0 = composition noise)."),
+    ("id_med", "id_med", "identity_med",          "f3",
+        "median pairwise identity between monomer copies at this period."),
+    ("id_iqr", "id_iqr", "identity_iqr",          "f3",
+        "interquartile range of that identity (spread; a high IQR with high "
+        "id_med flags a bimodal / subrepeat signal)."),
+    ("occ",    "occ",    "scan_occupancy_frac",   "f3",
+        "scan_occupancy_frac — fraction of the array actually tiled by this "
+        "period."),
+    ("scan_n", "scan_n", "scan_n_intervals",      "int",
+        "scan_n_intervals — number of scan windows evaluated."),
+    ("cov",    "cov",    "coverage_frac",         "f3",
+        "coverage_frac — fraction of the array length the period's tiling "
+        "covers."),
+    ("spat",   "spat",   "spatial_contrast",      "f3",
+        "spatial_contrast — how localised the period is (high = concentrated "
+        "in one part of the array; low = array-wide)."),
+    ("autoF",  "autoF",  "kmer_autocorr_founder", "f3",
+        "kmer_autocorr_founder — k-mer autocorrelation measured at the "
+        "Founder period."),
+    ("phaseC", "phaseC", "kmer_phase_contrast",   "f3",
+        "kmer_phase_contrast — phase contrast of the k-mer signal (structural "
+        "support for a real, in-phase repeat)."),
+    ("sub",    "sub",    "subrepeat",             "yn",
+        "✓ = kitehor's bimodal-identity subrepeat heuristic fired for this peak."),
+    ("phtm",   "phtm",   "phantom",               "yn",
+        "✓ = phantom (sub-period harmonic); auto-rejected from subrepeat tiering."),
+    ("tier",   "tier",   "(computed)",            "str",
+        "subrepeat-evidence tier for the peak — see the Tier glossary."),
+]
+_PEAK_COL_KEYS    = [c[0] for c in _PEAK_COLUMNS]
+_PEAK_COL_HEADERS = [c[1] for c in _PEAK_COLUMNS]
 
-    def _idstr(v):
-        return f"id_med {v:.3f}" if v is not None else ""
 
-    head_bits = []
-    if fp is not None:
-        # Hoist the conditional out of the f-string expression: Python
-        # 3.11 (used by CI) rejects backslashes inside f-string `{...}`
-        # parts (PEP 701 relaxed this in 3.12, but the CI runner stays
-        # on 3.11 — see .github/workflows/tests.yml).
-        fb_sup = ('<sup title="rescore fallback to top-scored kite peak">*</sup>'
-                  if fb else '')
-        # Pass 5 cluster-rescue provenance: a dagger sup tag advertises
-        # that the founder is the median of a summed-score peak cluster
-        # rather than a rescore-passing peak. The `*` and `‡` cannot
-        # both appear because Pass 5 clears fb on success.
-        cr_sup = ('<sup title="founder = median of summed-score peak cluster '
-                  '(Pass 5 rescue; rescore returned NA)">&Dagger;</sup>'
-                  if crescue else '')
-        head_bits.append(
-            f'<strong>Founder:</strong> {esc(fp)}{fb_sup}{cr_sup}'
-            f' <span class="tc-dim">{_idstr(f_id)}</span>')
-    else:
-        head_bits.append('<strong>Founder:</strong> NA')
-    if sp is not None:
-        head_bits.append(
-            f'<strong>Strongest:</strong> {esc(sp)} '
-            f'<span class="tc-dim">{_idstr(s_id)}</span>')
-    mult_raw  = a.get("multiplicity_raw")
-    if mult > 1:
-        tier  = _hor_tier(a)
-        kraw  = (f' <span class="tc-dim">(k = {mult_raw:.3f})</span>'
-                 if mult_raw is not None else '')
-        head_bits.append(
-            f'<strong>&times;{mult}</strong>'
-            f' <span class="hor-badge hor-tier-{tier}" '
-            f'title="HOR-order confidence: {tier}">'
-            f'{esc(_HOR_TIER_LABEL.get(tier, tier))}</span>{kraw}')
-    else:
-        head_bits.append(f'<strong>&times;{mult}</strong>')
-    if delta is not None:
-        head_bits.append(f'<span class="tc-dim">&Delta;id {delta:+.2f}&nbsp;pp</span>')
-    if a.get("weak_short_founder_flag"):
-        alt = a.get("alt_longer_period")
-        alt_txt = (f' &nbsp;<span class="tc-dim">(longer alternative &asymp; '
-                   f'{esc(alt)}&nbsp;bp)</span>' if alt
-                   else ' <span class="tc-dim">(no credible longer alternative)</span>')
-        head_bits.append(
-            '<span class="tc-weakshort" title="short founder kept on weak kite '
-            'support (founder peak kite score &lt; 0.20)">'
-            '&#9888; weak short founder</span>' + alt_txt)
-    header = ('<div class="tc-details-summary">'
-              + ' &nbsp;·&nbsp; '.join(head_bits)
-              + '</div>')
+def _peak_cell_values(p, fp_f):
+    """Native-typed display values for one rescored peak, in _PEAK_COLUMNS
+    order. Shared by the JSON payload (Part 3) and tra_peaks.tsv (Part 2) so
+    the unfold table, the embedded data, and the export can never disagree.
+    Numbers are floats/ints (None when missing); sub/phtm are bools; tier is a
+    string. Formatting (rounding, ✓) is applied by each consumer."""
+    def _num(v):
+        if v in (None, "", "NA"):
+            return None
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+    def _int(v):
+        x = _num(v)
+        return int(x) if x is not None else None
+    def _bool(v):
+        return (str(v).strip() == "true")
+    raw = {
+        "rank":   _int(p.get("rank")),
+        "period": _int(p.get("period")),
+        "score":  _num(p.get("score")),
+        "id_med": _num(p.get("identity_med")),
+        "id_iqr": _num(p.get("identity_iqr")),
+        "occ":    _num(p.get("scan_occupancy_frac")),
+        "scan_n": _int(p.get("scan_n_intervals")),
+        "cov":    _num(p.get("coverage_frac")),
+        "spat":   _num(p.get("spatial_contrast")),
+        "autoF":  _num(p.get("kmer_autocorr_founder")),
+        "phaseC": _num(p.get("kmer_phase_contrast")),
+        "sub":    _bool(p.get("subrepeat")),
+        "phtm":   _bool(p.get("phantom")),
+        "tier":   classify_peak_tier(p, fp_f),
+    }
+    return [raw[k] for k in _PEAK_COL_KEYS]
 
-    # Alternative periodicities (top-N period clusters that are NOT the
-    # founder's). Each cluster = a "score-summed family" of nearby peaks
-    # — e.g. on TRC_2/TRC_4 fallback rows where Pass 5 promotes the
-    # ~10 kb cluster to founder, the 310 bp peak shows up here so the
-    # secondary signal is still surfaced. Only emit the line when at
-    # least one alt cluster is populated (older CSVs lack the columns).
-    alt_bits = []
-    for n in (1, 2):
-        period   = a.get(f"alt_cluster_{n}_period")
-        score    = a.get(f"alt_cluster_{n}_score_sum")
-        n_peaks  = a.get(f"alt_cluster_{n}_n_peaks")
-        if period is None:
-            continue
-        meta = []
-        if score is not None:
-            meta.append(f"&Sigma;&nbsp;{score:.4f}")
-        if n_peaks is not None:
-            meta.append(f"n={n_peaks}")
-        meta_str = (' <span class="tc-meta">(' + ' &middot; '.join(meta) + ')</span>'
-                    if meta else '')
-        alt_bits.append(f'{esc(period)}&nbsp;bp{meta_str}')
-    alt_html = ''
-    if alt_bits:
-        alt_html = ('<div class="tc-details-alt tc-dim" '
-                    'style="margin-top:2px;font-size:0.9em">'
-                    'Other periodicities: '
-                    + ' &nbsp;&middot;&nbsp; '.join(alt_bits)
-                    + '</div>')
-    header = header + alt_html
 
-    # SSR
-    ssr_html = ""
-    motif = a.get("ssr_dominant_motif")
-    if motif and motif != "NA":
-        pct = a.get("ssr_dominant_motif_coverage_pct")
-        tot = a.get("ssr_total_coverage_pct")
-        top = a.get("ssr_top_motifs")
-        ssr_html = '<div class="tc-details-ssr">SSR scan: '
-        ssr_html += f'<strong>{esc(motif)}</strong>'
-        if pct is not None: ssr_html += f' {pct:.1f}% dominant'
-        if tot is not None and tot != pct: ssr_html += f' &nbsp;·&nbsp; {tot:.1f}% total'
-        if top and top != motif:
-            ssr_html += f' &nbsp;·&nbsp; top: {_fmt_motifs(top)}'
-        ssr_html += '</div>'
-
-    # All peaks
-    if not peaks:
-        return header + ssr_html + (
-            '<div class="tc-dim" style="margin-top:6px">'
-            'no rescored peaks for this array</div>')
-
-    fp_f = float(fp) if fp is not None else None
-    def _f(v, n=3):
-        if v in (None, "", "NA"): return ""
-        try: return f"{float(v):.{n}f}"
-        except (TypeError, ValueError): return esc(v)
-    def _yn(v):
-        s = (v or "").strip()
-        return "✓" if s == "true" else ""
-    body_rows = []
-    for p in peaks:
-        tier = classify_peak_tier(p, fp_f)
-        body_rows.append(
-            "<tr>"
-            f"<td>{esc(p.get('rank',''))}</td>"
-            f"<td>{esc(p.get('period',''))}</td>"
-            f"<td>{_f(p.get('score'), 4)}</td>"
-            f"<td>{_f(p.get('identity_med'))}</td>"
-            f"<td>{_f(p.get('identity_iqr'))}</td>"
-            f"<td>{_f(p.get('scan_occupancy_frac'))}</td>"
-            f"<td>{esc(p.get('scan_n_intervals',''))}</td>"
-            f"<td>{_f(p.get('coverage_frac'))}</td>"
-            f"<td>{_f(p.get('spatial_contrast'))}</td>"
-            f"<td>{_f(p.get('kmer_autocorr_founder'))}</td>"
-            f"<td>{_f(p.get('kmer_phase_contrast'))}</td>"
-            f"<td>{_yn(p.get('subrepeat'))}</td>"
-            f"<td>{_yn(p.get('phantom'))}</td>"
-            f"<td>{_tier_pill(tier)}</td>"
-            "</tr>")
-    table = (
-        '<div class="tc-details-table-wrap">'
-        '<table class="tc-details-table">'
-        '<thead><tr>'
-        '<th>rank</th><th>period</th><th>score</th>'
-        '<th>id_med</th><th>id_iqr</th>'
-        '<th>occ</th><th>scan_n</th><th>cov</th>'
-        '<th>spat</th><th>autoF</th><th>phaseC</th>'
-        '<th>sub</th><th>phtm</th><th>tier</th>'
-        '</tr></thead>'
-        f'<tbody>{"".join(body_rows)}</tbody></table></div>')
-    return header + ssr_html + table
+def _fmt_peak_cell(value, fmt):
+    """Format one _peak_cell_values entry as a display string (TSV / fallback
+    HTML). JS mirrors this for the lazily-built child row."""
+    if value is None:
+        return ""
+    if fmt == "int":
+        try: return str(int(value))
+        except (TypeError, ValueError): return esc(value)
+    if fmt == "f3":
+        try: return f"{float(value):.3f}"
+        except (TypeError, ValueError): return esc(value)
+    if fmt == "f4":
+        try: return f"{float(value):.4f}"
+        except (TypeError, ValueError): return esc(value)
+    if fmt == "yn":
+        return "✓" if value else ""
+    return esc(value)
 
 
 def _arrays_table(arrays, include_hor=True):
@@ -2881,9 +2827,13 @@ def _arrays_table(arrays, include_hor=True):
                                   f'title="founder recovered; HOR order '
                                   f'approximate{kr} — irregular, very high k, '
                                   f'or relaxed rescue">≈</span>')
-            details_attr = html.escape(_details_html(a), quote=True)
+            # The Details child row is built lazily in JS from the embedded
+            # per-TRC `tc-peaks` JSON (keyed by this array key), so the heavy
+            # peak-table HTML is NOT inlined per row — keeps satellite-rich
+            # dashboards light. See _peaks_payload_script / tidecluster.js.
+            akey = f'{a.get("seqid")}:{a.get("start")}:{a.get("end")}'
             rows.append(
-                f'<tr data-details="{details_attr}">'
+                f'<tr data-array-key="{esc(akey)}">'
                 '<td class="tc-details-control"></td>'
                 f'<td>{i}</td>'
                 f'<td>{esc(a.get("seqid"))}</td>'
@@ -2909,6 +2859,230 @@ def _arrays_table(arrays, include_hor=True):
                 f'<td>{esc((a.get("ssr") or "").replace("%25","%"))}</td>'
                 "</tr>")
     return "".join(rows)
+
+
+def _array_key(a):
+    return f'{a.get("seqid")}:{a.get("start")}:{a.get("end")}'
+
+
+def _round(v, n=4):
+    """Round floats for the compact JSON payload; pass ints / None through."""
+    if isinstance(v, float):
+        return round(v, n)
+    return v
+
+
+def _array_detail_payload(a):
+    """Compact, JSON-serialisable data the JS child-row builder needs for one
+    array (Part 3). Carries the resolved header fields + the per-peak rows
+    (positional in _PEAK_COLUMNS order) — NOT pre-rendered HTML, so it is a
+    fraction of the old inline `data-details` weight."""
+    fp = a.get("founder_period")
+    fp_f = float(fp) if fp is not None else None
+    pk = []
+    for p in (a.get("rescored_peaks") or []):
+        row = []
+        for v in _peak_cell_values(p, fp_f):
+            if isinstance(v, bool):
+                row.append(1 if v else 0)
+            else:
+                row.append(_round(v))
+        pk.append(row)
+    mult = a.get("multiplicity") or 1
+    tier = _hor_tier(a) if mult > 1 else None
+    alt = []
+    for n in (1, 2):
+        per = a.get(f"alt_cluster_{n}_period")
+        if per is None:
+            continue
+        alt.append([per, _round(a.get(f"alt_cluster_{n}_score_sum")),
+                    a.get(f"alt_cluster_{n}_n_peaks")])
+    ssr = None
+    motif = a.get("ssr_dominant_motif")
+    if motif and motif != "NA":
+        ssr = [motif, _round(a.get("ssr_dominant_motif_coverage_pct"), 1),
+               _round(a.get("ssr_total_coverage_pct"), 1),
+               a.get("ssr_top_motifs")]
+    return {
+        "f":  fp, "fid": _round(a.get("founder_id_med")),
+        "fb": 1 if a.get("founder_fallback") else 0,
+        "cr": 1 if a.get("cluster_rescue") else 0,
+        "s":  a.get("strongest_period"), "sid": _round(a.get("strongest_id_med")),
+        "m":  mult, "mr": _round(a.get("multiplicity_raw")),
+        "ht": tier, "htl": (_HOR_TIER_LABEL.get(tier) if tier else None),
+        "d":  _round(a.get("delta_id_pp"), 2),
+        "ws": 1 if a.get("weak_short_founder_flag") else 0,
+        "al": a.get("alt_longer_period"),
+        "alt": alt, "ssr": ssr, "pk": pk,
+    }
+
+
+def _peaks_payload_script(arrays):
+    """Embedded per-TRC JSON the child rows are built from, plus the column
+    dictionary (headers / fmt / tooltips). Self-contained — no runtime fetch,
+    so it works from file://. Only arrays that have a details control (the
+    KITE-analysed, include_hor rows) are included."""
+    payload = {_array_key(a): _array_detail_payload(a)
+               for a in arrays if (a.get("rescored_peaks") is not None
+                                   or a.get("founder_period") is not None)}
+    coldict = {
+        "cols":  [[c[0], c[1], c[3], c[4]] for c in _PEAK_COLUMNS],
+        "tiers": _TIER_SHORT,
+    }
+    j = json.dumps(payload, separators=(",", ":"), default=str)
+    cj = json.dumps(coldict, separators=(",", ":"))
+    # `</script>` cannot appear inside an inline JSON script element.
+    j = j.replace("</", "<\\/")
+    cj = cj.replace("</", "<\\/")
+    return (f'<script type="application/json" id="tc-peaks">{j}</script>'
+            f'<script type="application/json" id="tc-coldict">{cj}</script>')
+
+
+# ----------------------------------------------------------------------
+# TSV bundle (Part 2) — accessible exports that mirror the HTML tables, all
+# written into <prefix>_report/data/ from the same `model` the HTML renders
+# from (so they cannot drift). Three granularities + a data dictionary:
+#   trc_table.tsv   one row per TRC   (mirrors the per-TRC overview)
+#   tra_table.tsv   one row per TRA   (mirrors the "Tandem repeat arrays" table)
+#   tra_peaks.tsv   one row per peak  (mirrors the ▸ unfold table; _PEAK_COLUMNS)
+#   columns.tsv     data dictionary   (table · column · description · source)
+# HTML-facing column names; columns.tsv carries the raw kitehor source name.
+# ----------------------------------------------------------------------
+# (column, source-field-in-model, description). source=None ⇒ computed below.
+_TRC_TABLE_COLS = [
+    ("TRC_ID",            "id",               "tandem repeat cluster id."),
+    ("repeat_type",       "repeat_type",      "TR or SSR (clustering classification)."),
+    ("n_arrays",          "n_arrays",         "number of tandem repeat arrays in the TRC."),
+    ("total_size_bp",     "total_size",       "summed length of all arrays (bp)."),
+    ("array_len_min",     "min_array",        "shortest array (bp)."),
+    ("array_len_median",  "median_array",     "median array length (bp)."),
+    ("array_len_max",     "max_array",        "longest array (bp)."),
+    ("monomer_kite",      None,               "most-frequent primary KITE founder period across arrays (bp)."),
+    ("monomer_tarean",    None,               "TAREAN monomer length for the TRC (bp), if analysed."),
+    ("score_tarean",      None,               "TAREAN total score, if analysed."),
+    ("prevalent_founder", None,               "prevalent per-array founder period (bp)."),
+    ("n_hor_confident",   None,               "arrays with a confident HOR order (tier strict ∪ supported)."),
+    ("n_hor_approx",      None,               "arrays with founder recovered but order approximate (tier weak)."),
+    ("n_subrepeat",       None,               "arrays with ≥1 HIGH/LIKELY subrepeat candidate."),
+    ("n_ssr",             None,               "arrays with a dominant SSR motif."),
+    ("ssr_motif",         "ssr_motif",        "SSR motif for SSR-typed TRCs."),
+    ("superfamily",       "superfamily",      "superfamily id this TRC belongs to."),
+    ("annotation",        "annotation",       "TRC annotation, if any."),
+]
+# (column, array-field, fmt, description). fmt: raw | bool
+_TRA_TABLE_COLS = [
+    ("TRC_ID",                  None,                "raw", "parent TRC id."),
+    ("seqid",                   "seqid",             "raw", "sequence / contig id."),
+    ("start",                   "start",             "raw", "array start (1-based)."),
+    ("end",                     "end",               "raw", "array end."),
+    ("array_length",            "length",            "raw", "array length (bp)."),
+    ("founder",                 "founder_period",    "raw", "basic monomer period (bp); the building block."),
+    ("founder_id_med",          "founder_id_med",    "raw", "median pairwise identity at the founder period."),
+    ("delta_id",                "delta_id_pp",       "raw", "id(Strongest) − id(Founder), percentage points."),
+    ("strongest",              "strongest_period",   "raw", "best-conserved period (bp); a multiple of founder under HOR."),
+    ("strongest_id_med",       "strongest_id_med",   "raw", "median pairwise identity at the strongest period."),
+    ("multiplicity",            "multiplicity",      "raw", "round(strongest/founder); 1 = no higher-order structure."),
+    ("multiplicity_raw",        "multiplicity_raw",  "raw", "exact strongest/founder ratio."),
+    ("hor_order_confidence",    "hor_order_confidence","raw","none | strict | supported | weak (HOR-order tier)."),
+    ("irregular_multiplicity",  "irregular_multiplicity","bool","strongest is not a clean integer multiple of founder."),
+    ("founder_method",          "founder_method",    "raw", "which pass set the founder (strict|pass2|kh_deeper|pass3|cluster|ssr|fallback|none)."),
+    ("founder_fallback",        "founder_fallback",  "bool","rescore returned NA; fell back to the top kite peak."),
+    ("cluster_rescue",          "cluster_rescue",    "bool","founder = median of a summed-score peak cluster (Pass 5)."),
+    ("subrepeat_1_period",      "subrepeat_1_period","raw", "top subrepeat candidate period (bp; inside the monomer)."),
+    ("subrepeat_1_tier",        "subrepeat_1_tier",  "raw", "evidence tier of the top subrepeat candidate."),
+    ("subrepeat_1_occ",         "subrepeat_1_occ",   "raw", "scan occupancy of the top subrepeat candidate."),
+    ("subrepeat_2_period",      "subrepeat_2_period","raw", "second subrepeat candidate period (bp)."),
+    ("subrepeat_2_tier",        "subrepeat_2_tier",  "raw", "evidence tier of the second subrepeat candidate."),
+    ("subrepeat_2_occ",         "subrepeat_2_occ",   "raw", "scan occupancy of the second subrepeat candidate."),
+    ("weak_short_founder_flag", "weak_short_founder_flag","bool","short founder (≤30 bp) on weak kite support — review."),
+    ("alt_longer_period",       "alt_longer_period", "raw", "dominant credible longer-period alternative (bp)."),
+    ("alt_cluster_1_period",    "alt_cluster_1_period","raw","top alternative periodicity cluster (bp)."),
+    ("alt_cluster_2_period",    "alt_cluster_2_period","raw","second alternative periodicity cluster (bp)."),
+    ("ssr_dominant_motif",      "ssr_dominant_motif","raw", "dominant SSR motif from kitehor ssr-scan."),
+    ("ssr_total_coverage_pct",  "ssr_total_coverage_pct","raw","total SSR coverage of the array (%)."),
+    ("copy_number",             "copy_number",       "raw", "array_length / founder period (approx. copies)."),
+    ("consensus_period_bp",     "consensus_period_bp","raw","TRC consensus founder period (bp)."),
+]
+
+
+def _tsv_cell(v):
+    if v is None:
+        return ""
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    return str(v)
+
+
+def write_table_exports(model, data_dir):
+    """Write the curated TSV bundle mirroring the HTML tables. Returns row
+    counts. Derived entirely from `model` so it mirrors the rendered HTML."""
+    import csv as _csv
+    data_dir.mkdir(parents=True, exist_ok=True)
+    trcs = model.get("trcs", [])
+
+    # ---- trc_table.tsv ----
+    with (data_dir / "trc_table.tsv").open("w", newline="") as fh:
+        w = _csv.writer(fh, delimiter="\t", lineterminator="\n")
+        w.writerow([c[0] for c in _TRC_TABLE_COLS])
+        for t in trcs:
+            k = t.get("kite") or {}
+            ta = t.get("tarean") or {}
+            comp = {
+                "monomer_kite":      k.get("monomer_primary"),
+                "monomer_tarean":    ta.get("monomer_length"),
+                "score_tarean":      ta.get("total_score"),
+                "prevalent_founder": k.get("prevalent_founder"),
+                "n_hor_confident":   k.get("n_hor"),
+                "n_hor_approx":      k.get("n_hor_weak"),
+                "n_subrepeat":       k.get("n_subrepeat"),
+                "n_ssr":             k.get("n_ssr"),
+            }
+            w.writerow([_tsv_cell(comp[col] if src is None else t.get(src))
+                        for col, src, _ in _TRC_TABLE_COLS])
+
+    # ---- tra_table.tsv ----
+    with (data_dir / "tra_table.tsv").open("w", newline="") as fh:
+        w = _csv.writer(fh, delimiter="\t", lineterminator="\n")
+        w.writerow([c[0] for c in _TRA_TABLE_COLS])
+        for t in trcs:
+            for a in t.get("arrays", []):
+                row = []
+                for col, src, fmt, _ in _TRA_TABLE_COLS:
+                    if col == "TRC_ID":
+                        row.append(_tsv_cell(t.get("id")))
+                    else:
+                        row.append(_tsv_cell(a.get(src)))
+                w.writerow(row)
+
+    # ---- tra_peaks.tsv (exactly the unfold columns) ----
+    n_peaks = 0
+    with (data_dir / "tra_peaks.tsv").open("w", newline="") as fh:
+        w = _csv.writer(fh, delimiter="\t", lineterminator="\n")
+        w.writerow(["TRC_ID", "seqid", "start", "end"] + _PEAK_COL_HEADERS)
+        for t in trcs:
+            tid = t.get("id")
+            for a in t.get("arrays", []):
+                fp = a.get("founder_period")
+                fp_f = float(fp) if fp is not None else None
+                for p in (a.get("rescored_peaks") or []):
+                    vals = _peak_cell_values(p, fp_f)
+                    cells = [_fmt_peak_cell(v, c[3]) for v, c in zip(vals, _PEAK_COLUMNS)]
+                    w.writerow([tid, a.get("seqid"), a.get("start"), a.get("end")] + cells)
+                    n_peaks += 1
+
+    # ---- columns.tsv (data dictionary; one source for legend + export) ----
+    with (data_dir / "columns.tsv").open("w", newline="") as fh:
+        w = _csv.writer(fh, delimiter="\t", lineterminator="\n")
+        w.writerow(["table", "column", "description", "kitehor_source"])
+        for col, _src, desc in _TRC_TABLE_COLS:
+            w.writerow(["trc_table", col, desc, ""])
+        for col, src, _fmt, desc in _TRA_TABLE_COLS:
+            w.writerow(["tra_table", col, desc, src or ""])
+        for key, header, raw, fmt, desc in _PEAK_COLUMNS:
+            w.writerow(["tra_peaks", header, desc, "" if raw == "(computed)" else raw])
+
+    n_tra = sum(len(t.get("arrays", [])) for t in trcs)
+    return {"trc": len(trcs), "tra": n_tra, "peaks": n_peaks}
 
 
 # Plain-language meaning of every subrepeat-evidence tier (mirrors the
@@ -2937,34 +3111,11 @@ _TIER_DESC = [
     ("REJECT_BAD", "invalid / non-positive period."),
 ]
 
-# Column glossary for the per-array Details child table (the full rescored-
-# peak diagnostics table). Abbreviations match the <th> labels in _details_html.
-_DETAILS_COL_DESC = [
-    ("rank",   "kite peak rank for this array (1 = highest kite score)."),
-    ("period", "peak periodicity in bp."),
-    ("score",  "kite periodicity score: k-mer autocorrelation strength vs a "
-               "composition-matched random background (≈ a significance score; "
-               "high = real periodicity, ~0 = composition noise)."),
-    ("id_med", "median pairwise identity between monomer copies at this period."),
-    ("id_iqr", "interquartile range of that identity (spread; a high IQR with "
-               "high id_med flags a bimodal / subrepeat signal)."),
-    ("occ",    "scan_occupancy_frac — fraction of the array actually tiled by "
-               "this period."),
-    ("scan_n", "scan_n_intervals — number of scan windows evaluated."),
-    ("cov",    "coverage_frac — fraction of the array length the period's "
-               "tiling covers."),
-    ("spat",   "spatial_contrast — how localised the period is (high = "
-               "concentrated in one part of the array; low = array-wide)."),
-    ("autoF",  "kmer_autocorr_founder — k-mer autocorrelation measured at the "
-               "Founder period."),
-    ("phaseC", "kmer_phase_contrast — phase contrast of the k-mer signal "
-               "(structural support for a real, in-phase repeat)."),
-    ("sub",    "✓ = kitehor's bimodal-identity subrepeat heuristic fired for "
-               "this peak."),
-    ("phtm",   "✓ = phantom (sub-period harmonic); auto-rejected from subrepeat "
-               "tiering."),
-    ("tier",   "subrepeat-evidence tier for the peak — see the Tier glossary above."),
-]
+# Column glossary for the per-array Details child table — DERIVED from the
+# canonical _PEAK_COLUMNS so the top-of-page legend, the in-row tooltips/legend
+# (built in JS from the same data via #tc-coldict), and tra_peaks.tsv all share
+# one source and cannot drift.
+_DETAILS_COL_DESC = [(c[1], c[4]) for c in _PEAK_COLUMNS]
 
 
 def arrays_legend():
@@ -3273,15 +3424,26 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
     # Start column moves one slot right when the ▸ details control is
     # prepended (include_hor=True) — keep ascending order on it.
     order_col = 3 if include_hor else 2
+    # Per-TRC peak data for the lazily-built Details child rows (Part 3) —
+    # only for include_hor dashboards (SSR / minimal tables have no unfold).
+    peaks_script = _peaks_payload_script(trc["arrays"]) if include_hor else ""
+    dl = ('<p class="tc-dim" style="font-size:12px;margin:2px 0 6px">'
+          'Download tables (TSV): '
+          '<a href="../data/tra_table.tsv">tra_table</a> &middot; '
+          '<a href="../data/tra_peaks.tsv">tra_peaks</a> (unfold detail) &middot; '
+          '<a href="../data/trc_table.tsv">trc_table</a> &middot; '
+          '<a href="../data/columns.tsv">columns</a> (legend)</p>') if include_hor else ""
     arrays_section = f"""
     <h2>Tandem repeat arrays ({trc["n_arrays"]})</h2>
     {legend}
+    {dl}
     <div class="tc-table-wrap">
     <table class="tc-table tc-datatable" data-page-length="25" data-order='[[{order_col},"asc"]]'>
       <thead><tr>{head}</tr></thead>
       <tbody>{_arrays_table(trc["arrays"], include_hor=include_hor)}</tbody>
     </table>
-    </div>"""
+    </div>
+    {peaks_script}"""
 
     # Genome distribution — every TRC gets this section regardless of
     # type (arrays are always present; HOR colouring gracefully falls
@@ -3457,6 +3619,10 @@ def build_report(input_dir, prefix=None, output_dir=None, *, quiet=False):
         json.dump(model, f, indent=2, default=str)
     if not quiet:
         print(f"wrote: {out_dir / 'data' / 'report.json'}")
+    n_exp = write_table_exports(model, out_dir / "data")
+    if not quiet:
+        print(f"wrote: {out_dir / 'data'}/{{trc,tra,tra_peaks,columns}}.tsv "
+              f"({n_exp['trc']} TRC / {n_exp['tra']} TRA / {n_exp['peaks']} peak rows)")
 
     run_meta = make_run_meta(model)
     # Three depth contexts share a schema. See each field in page_shell.

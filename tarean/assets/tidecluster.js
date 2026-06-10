@@ -132,11 +132,131 @@
   }
 
   // ---------- per-array Details child row (DataTables row.child) ------------
-  // The arrays table on each TRC dashboard carries a `data-details`
-  // attribute per <tr> holding the HTML for the diagnostics panel. A
-  // click on the leading `.tc-details-control` cell toggles a child row
-  // via DataTables' row().child() API. Falls back to inserting a sibling
-  // <tr> when the table isn't a DataTable (legacy / static pages).
+  // The arrays table carries only a tiny `data-array-key` per <tr>; the heavy
+  // per-peak diagnostics are NOT inlined. They live in one embedded per-TRC
+  // JSON block (`#tc-peaks`, with column dictionary + tier map in
+  // `#tc-coldict`), and the child-row HTML is BUILT LAZILY in JS on first
+  // unfold — so satellite-rich dashboards stay light and nothing is rendered
+  // until a row is opened. Self-contained: no fetch(), works from file://.
+  var _peaksData = null, _colDict = null, _legendHtml = null;
+  function _data() {
+    if (_peaksData === null) {
+      var el = document.getElementById('tc-peaks');
+      try { _peaksData = el ? JSON.parse(el.textContent) : {}; }
+      catch (e) { _peaksData = {}; }
+      var cd = document.getElementById('tc-coldict');
+      try { _colDict = cd ? JSON.parse(cd.textContent) : {cols: [], tiers: {}}; }
+      catch (e) { _colDict = {cols: [], tiers: {}}; }
+    }
+    return _peaksData;
+  }
+  function _esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+  function _fmt(v, fmt) {
+    if (v === null || v === undefined || v === '') return '';
+    if (fmt === 'int') return String(v);
+    if (fmt === 'f3') return Number(v).toFixed(3);
+    if (fmt === 'f4') return Number(v).toFixed(4);
+    if (fmt === 'yn') return v ? '✓' : '';
+    return _esc(v);
+  }
+  function _idstr(v) { return (v === null || v === undefined) ? '' : 'id_med ' + Number(v).toFixed(3); }
+  // Shared "column meanings" legend block — built once, revealed from any
+  // child row (NOT duplicated per row).
+  function _legend() {
+    if (_legendHtml !== null) return _legendHtml;
+    var cols = (_colDict && _colDict.cols) || [];
+    var rows = cols.map(function (c) {
+      // c = [key, header, fmt, description]
+      return '<dt><code>' + _esc(c[1]) + '</code></dt><dd>' + _esc(c[3]) + '</dd>';
+    }).join('');
+    _legendHtml = '<details class="tc-col-legend"><summary>ⓘ column meanings</summary>'
+      + '<dl class="tc-legend-list tc-legend-cols">' + rows + '</dl></details>';
+    return _legendHtml;
+  }
+  function _buildDetail(key) {
+    var d = _data()[key];
+    if (!d) return '<div class="tc-dim" style="margin-top:6px">no rescored peaks for this array</div>';
+    var cols = (_colDict && _colDict.cols) || [];
+    var tiers = (_colDict && _colDict.tiers) || {};
+    // ----- header summary -----
+    var bits = [];
+    if (d.f !== null && d.f !== undefined) {
+      var fb = d.fb ? '<sup title="rescore fallback to top-scored kite peak">*</sup>' : '';
+      var cr = d.cr ? '<sup title="founder = median of summed-score peak cluster (Pass 5 rescue; rescore returned NA)">‡</sup>' : '';
+      bits.push('<strong>Founder:</strong> ' + _esc(d.f) + fb + cr
+        + ' <span class="tc-dim">' + _idstr(d.fid) + '</span>');
+    } else { bits.push('<strong>Founder:</strong> NA'); }
+    if (d.s !== null && d.s !== undefined) {
+      bits.push('<strong>Strongest:</strong> ' + _esc(d.s)
+        + ' <span class="tc-dim">' + _idstr(d.sid) + '</span>');
+    }
+    if (d.m > 1) {
+      var kraw = (d.mr !== null && d.mr !== undefined)
+        ? ' <span class="tc-dim">(k = ' + Number(d.mr).toFixed(3) + ')</span>' : '';
+      bits.push('<strong>&times;' + d.m + '</strong>'
+        + ' <span class="hor-badge hor-tier-' + _esc(d.ht) + '" title="HOR-order confidence: '
+        + _esc(d.ht) + '">' + _esc(d.htl || d.ht) + '</span>' + kraw);
+    } else { bits.push('<strong>&times;' + d.m + '</strong>'); }
+    if (d.d !== null && d.d !== undefined) {
+      var dv = Number(d.d); bits.push('<span class="tc-dim">&Delta;id ' + (dv >= 0 ? '+' : '') + dv.toFixed(2) + '&nbsp;pp</span>');
+    }
+    if (d.ws) {
+      var altxt = (d.al !== null && d.al !== undefined)
+        ? ' &nbsp;<span class="tc-dim">(longer alternative &asymp; ' + _esc(d.al) + '&nbsp;bp)</span>'
+        : ' <span class="tc-dim">(no credible longer alternative)</span>';
+      bits.push('<span class="tc-weakshort" title="short founder kept on weak kite support (founder peak kite score &lt; 0.20)">⚠ weak short founder</span>' + altxt);
+    }
+    var header = '<div class="tc-details-summary">' + bits.join(' &nbsp;·&nbsp; ') + '</div>';
+    // ----- alternative periodicities -----
+    var alt = '';
+    if (d.alt && d.alt.length) {
+      var ab = d.alt.map(function (c) {  // c = [period, score_sum, n_peaks]
+        var meta = [];
+        if (c[1] !== null && c[1] !== undefined) meta.push('&Sigma;&nbsp;' + Number(c[1]).toFixed(4));
+        if (c[2] !== null && c[2] !== undefined) meta.push('n=' + c[2]);
+        var m = meta.length ? ' <span class="tc-meta">(' + meta.join(' &middot; ') + ')</span>' : '';
+        return _esc(c[0]) + '&nbsp;bp' + m;
+      }).join(' &nbsp;&middot;&nbsp; ');
+      alt = '<div class="tc-details-alt tc-dim" style="margin-top:2px;font-size:0.9em">Other periodicities: ' + ab + '</div>';
+    }
+    // ----- SSR scan -----
+    var ssr = '';
+    if (d.ssr) {  // [motif, dom_pct, tot_pct, top]
+      ssr = '<div class="tc-details-ssr">SSR scan: <strong>' + _esc(d.ssr[0]) + '</strong>';
+      if (d.ssr[1] !== null && d.ssr[1] !== undefined) ssr += ' ' + Number(d.ssr[1]).toFixed(1) + '% dominant';
+      if (d.ssr[2] !== null && d.ssr[2] !== undefined && d.ssr[2] !== d.ssr[1]) ssr += ' &nbsp;·&nbsp; ' + Number(d.ssr[2]).toFixed(1) + '% total';
+      if (d.ssr[3] && d.ssr[3] !== d.ssr[0]) ssr += ' &nbsp;·&nbsp; top: ' + _esc(d.ssr[3]);
+      ssr += '</div>';
+    }
+    // ----- peak table -----
+    var table = '';
+    if (d.pk && d.pk.length) {
+      var thead = cols.map(function (c) {
+        return '<th title="' + _esc(c[3]) + '">' + _esc(c[1]) + '</th>';
+      }).join('');
+      var body = d.pk.map(function (row) {
+        var tds = cols.map(function (c, i) {
+          if (c[0] === 'tier') {
+            var t = row[i]; if (!t) return '<td></td>';
+            var ts = tiers[t] || ['?', 'rej'];
+            return '<td><span class="tc-tier tc-tier-' + _esc(ts[1]) + '">' + ts[0] + '</span></td>';
+          }
+          return '<td>' + _fmt(row[i], c[2]) + '</td>';
+        }).join('');
+        return '<tr>' + tds + '</tr>';
+      }).join('');
+      table = '<div class="tc-details-table-wrap"><table class="tc-details-table"><thead><tr>'
+        + thead + '</tr></thead><tbody>' + body + '</tbody></table></div>' + _legend();
+    } else {
+      table = '<div class="tc-dim" style="margin-top:6px">no rescored peaks for this array</div>';
+    }
+    return header + alt + ssr + table;
+  }
+
   function initDetailsExpand() {
     document.addEventListener('click', function (ev) {
       var ctrl = ev.target.closest('.tc-details-control');
@@ -144,8 +264,9 @@
       ev.preventDefault();
       var tr = ctrl.closest('tr');
       if (!tr) return;
-      var html = tr.getAttribute('data-details');
-      if (!html) return;
+      var key = tr.getAttribute('data-array-key');
+      if (!key) return;
+      var html = _buildDetail(key);
       // Try the DataTables path first.
       if (window.jQuery) {
         var $tr = jQuery(tr);
