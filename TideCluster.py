@@ -200,6 +200,19 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
             raise RuntimeError(F"kitehor ssr-scan failed (exit {rc2})")
         if rc3 != 0:
             raise RuntimeError(F"kitehor tandem-validate failed (exit {rc3})")
+        # Selective long-period extension: arrays whose dominant monomer is
+        # above the rescore cap get NA identity and fall back to a spurious
+        # short peak. Re-rescore only those at the higher cap (cheap — rescore
+        # is O(period²), confined to the few flagged arrays). See case 4.
+        ext_max_period = int(getattr(args, "kite_rescore_max_period_ext", 25000))
+        if ext_max_period > rescore_max_period:
+            flagged = tc.extend_long_period_rescore(
+                kite_dir, multi_fa, rescore_max_period, ext_max_period,
+                rescore_top_n, rescore_threads)
+            if flagged:
+                print(F"Re-rescored {len(flagged)} array(s) with a dominant "
+                      F"period > {rescore_max_period} bp at max-period "
+                      F"{ext_max_period}.")
         tc.build_monomer_size_csv(
             kite_tsv=F"{kite_dir}/kitehor.kite.tsv",
             ssr_tsv=F"{kite_dir}/kitehor.ssr.tsv",
@@ -1141,6 +1154,13 @@ if __name__ == "__main__":
                   "kite peak for those arrays. Default (%(default)s)")
             )
     parser_tarean.add_argument(
+            "--kite_rescore_max_period_ext", type=int, default=25000,
+            help=("Higher `rescore --max-period` for the selective long-period "
+                  "re-search: arrays whose dominant monomer exceeds "
+                  "--kite_rescore_max_period and have no confident founder below "
+                  "it are re-rescored at this cap. Default (%(default)s)")
+            )
+    parser_tarean.add_argument(
             "--kite_rescore_top_n", type=int, default=20,
             help=("kitehor `rescore --top-n` cap per array (number of kite peaks "
                   "rescored). Default (%(default)s)")
@@ -1210,6 +1230,13 @@ if __name__ == "__main__":
             help=("kitehor `rescore --max-period` cap (bp). Peaks above this stay "
                   "NA in rescore output; TideCluster falls back to the top-scored "
                   "kite peak for those arrays. Default (%(default)s)")
+            )
+    parser_run_all.add_argument(
+            "--kite_rescore_max_period_ext", type=int, default=25000,
+            help=("Higher `rescore --max-period` for the selective long-period "
+                  "re-search: arrays whose dominant monomer exceeds "
+                  "--kite_rescore_max_period and have no confident founder below "
+                  "it are re-rescored at this cap. Default (%(default)s)")
             )
     parser_run_all.add_argument(
             "--kite_rescore_top_n", type=int, default=20,

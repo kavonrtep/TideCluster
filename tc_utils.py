@@ -1,4 +1,6 @@
 """ Utilities for the project. """
+import collections
+import csv
 import glob
 import gzip
 import itertools
@@ -2078,6 +2080,83 @@ def build_kite_multifasta(fasta_dir, out_fa):
                     fh_out.write(f">{trc}:{hdr}\n{half}\n")
                     n_records += 1
     return n_records
+
+
+_LONG_RESCORE_ID_GATE = 0.7   # below-cap best id_med under which we re-search
+
+
+def extend_long_period_rescore(kite_dir, multi_fa, max_period, ext_max_period,
+                               top_n, threads):
+    """Selectively re-rescore arrays whose dominant monomer exceeds `max_period`.
+
+    rescore emits `identity_med = NA` for periods above its `--max-period` cap,
+    so an array whose true monomer is longer than the cap (e.g. a ~16 kb
+    satellite under a 15 kb cap) falls back to a spurious short peak. This finds
+    arrays that have a peak above `max_period` AND no confident founder below the
+    cap (best below-cap `identity_med` < _LONG_RESCORE_ID_GATE), re-runs
+    `kitehor rescore` for *only those* records at `ext_max_period`, and merges the
+    new rows back into `kitehor.rescored.peaks.tsv`. Returns the re-rescored
+    case_ids. rescore is O(period²) so confining the high cap to the few flagged
+    arrays keeps the cost negligible (measured ~3 s per 112 kb array)."""
+    rescored = F"{kite_dir}/kitehor.rescored.peaks.tsv"
+    if not os.path.exists(rescored):
+        return []
+    by_case = collections.OrderedDict()
+    with open(rescored, newline="") as fh:
+        rd = csv.DictReader(fh, delimiter="\t")
+        header = rd.fieldnames
+        for r in rd:
+            by_case.setdefault(r["case_id"], []).append(r)
+
+    def _n(v):
+        try: return float(v)
+        except (TypeError, ValueError): return None
+
+    flagged = set()
+    for cid, peaks in by_case.items():
+        best_id = max([(_n(p.get("identity_med")) or -1.0) for p in peaks],
+                      default=-1.0)
+        above_cap = any((_n(p.get("period")) or 0.0) > max_period for p in peaks)
+        if above_cap and best_id < _LONG_RESCORE_ID_GATE:
+            flagged.add(cid)
+    if not flagged:
+        return []
+
+    sub_fa = F"{kite_dir}/_kite_input_longext.fasta"
+    with open(multi_fa) as fin, open(sub_fa, "w") as fout:
+        keep = False
+        for line in fin:
+            if line.startswith(">"):
+                keep = line[1:].strip().split()[0] in flagged
+            if keep:
+                fout.write(line)
+    kite_peaks = F"{kite_dir}/kitehor.kite.peaks.tsv"
+    sub_peaks = F"{kite_dir}/_kite_peaks_longext.tsv"
+    with open(kite_peaks, newline="") as fin, open(sub_peaks, "w", newline="") as fout:
+        rd = csv.reader(fin, delimiter="\t")
+        hrow = next(rd)
+        ci = hrow.index("case_id")
+        fout.write("\t".join(hrow) + "\n")
+        for row in rd:
+            if row and row[ci] in flagged:
+                fout.write("\t".join(row) + "\n")
+
+    out_prefix = F"{kite_dir}/_rescored_longext"
+    run_cmd(F"kitehor rescore --peaks {sub_peaks} --out {out_prefix}"
+            F" --max-period {ext_max_period} --top-n {top_n}"
+            F" --threads {threads} {sub_fa}")
+
+    ext_rows = collections.defaultdict(list)
+    with open(F"{out_prefix}.peaks.tsv", newline="") as fh:
+        for r in csv.DictReader(fh, delimiter="\t"):
+            ext_rows[r["case_id"]].append(r)
+    with open(rescored, "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=header, delimiter="\t",
+                           lineterminator="\n", extrasaction="ignore")
+        w.writeheader()
+        for cid, peaks in by_case.items():
+            w.writerows(ext_rows.get(cid, peaks) if cid in flagged else peaks)
+    return sorted(flagged)
 
 
 # Map kitehor's finer-grained verdict + confidence onto the legacy
