@@ -16,4 +16,7 @@ python3 "$ROOT/tests/test_strongest_by_identity.py"
 echo "=== unit: HOR-order confidence tier ==="
 python3 "$ROOT/tests/test_hor_order_confidence.py"
 
+echo "=== unit: report TSV bundle + lazy child rows ==="
+python3 "$ROOT/tests/test_report_exports.py"
+
 echo "unit tests OK"
