@@ -2209,6 +2209,16 @@ def _kitehor_status(verdict, confidence):
 _FOUNDER_ID_MIN  = 0.7    # rescore --subrepeat-founder-id-min default
 _KMAX            = 30     # rescore --rule-k-max default
 _RATIO_TOL       = 0.05   # how close to integer multiplicity must be
+# Prevalent-founder anchor (Lever 4) — k-scaled integer tolerance for deepening a
+# long-HOR founder to the TRC consensus when the array's dominant peak IS the
+# consensus. The bp residual |S - m*P| ~ period-estimation error, so the
+# tolerance on |k - round(k)| grows ~linearly with k (measured on confident
+# TRC_4 divisors: dev/k ≈ 0.3 % constant across k=2..150). Above k ≈ 0.5/frac the
+# integer test is vacuous (every k is within 0.5 of an integer) -> trust the
+# family consensus instead. frac ≈ 3x the measured scatter.
+_RATIO_TOL_FRAC  = 0.01   # per-k integer tolerance for the consensus anchor
+_CONS_ANCHOR_BP  = 5      # rank-1 must be within max(bp, pct) of the consensus
+_CONS_ANCHOR_PCT = 0.05
 _SUBREP_RATIO    = 0.33   # period <= founder/3 ⇒ qualifies as candidate band
 
 # --- Short-founder review aids (kitehor >= 0.13.2) ---------------------------
@@ -3144,6 +3154,49 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
             e["multiplicity_raw"] = k_raw
             e["irregular"]        = True
             e["rescue_method"]    = "pass3"
+
+    # ---- Lever 4: prevalent-founder anchor (consensus-anchored deepening) ----
+    # Recover long-HOR arrays whose founder landed on a non-consensus intermediate
+    # because the strict k<=_KMAX / |k-round|<=_RATIO_TOL divisor gate rejected a
+    # high or non-clean multiplicity (e.g. TRC_4 chr8:13133296: founder 150,
+    # strongest 2106, while 53 — the family's prevalent founder — is the rank-1
+    # kite peak; 2106/53 = 39.7 fails the strict gate). When the array's DOMINANT
+    # (rank-1-by-score) peak IS the TRC consensus and passes the id gate, deepen
+    # the founder to it, tolerating high/non-clean k via the k-scaled integer test
+    # (the family vouches for the basic; above k≈0.5/frac the test is vacuous and
+    # consensus alone carries it). Only deepens (founder > consensus), so Group-1
+    # near-neighbour founders below the consensus are left alone and satellites
+    # (already at consensus) are untouched. Marks `~` irregular when not clean.
+    _rt = trc_repeat_type or {}
+    for e in pass1:
+        if e["fallback"] or e.get("ssr_override") or e["trc"] in _rt:
+            continue
+        tc_cons = consensus_by_trc.get(e["trc"])
+        sp = e["strongest_period"]
+        fp = e["founder_period"]
+        if (tc_cons is None or tc_cons <= 0 or sp is None or fp is None
+                or fp <= tc_cons * (1.0 + _CONS_ANCHOR_PCT)):
+            continue
+        p0     = _num(e["rank1"].get("period"))
+        p0_idm = _num(e["rank1"].get("identity_med"))
+        if (p0 is None or p0 <= 0 or p0_idm is None
+                or p0_idm < _FOUNDER_ID_MIN
+                or abs(p0 - tc_cons) > max(_CONS_ANCHOR_BP,
+                                           tc_cons * _CONS_ANCHOR_PCT)):
+            continue
+        k  = sp / p0
+        kr = int(round(k))
+        if kr < 2:
+            continue
+        tol = _RATIO_TOL_FRAC * k
+        if abs(k - kr) > tol and tol < 0.5:   # integer test still meaningful + fails
+            continue
+        e["founder_peak"]     = e["rank1"]
+        e["founder_period"]   = int(round(p0))
+        e["multiplicity"]     = kr
+        e["multiplicity_raw"] = k
+        e["irregular"]        = abs(k - kr) > _RATIO_TOL
+        e["rescue_method"]    = "pass2"
 
     # ---- Pass 4: SSR founder from the clustering repeat_type classification ----
     # SSR families are identified up front at clustering: a TRA *consensus* that
