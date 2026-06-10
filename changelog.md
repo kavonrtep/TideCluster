@@ -1,3 +1,39 @@
+## 1.15.0 (2026-06-10)
+- **Problematic founder/SSR calls fixed** (root-cause analysis in
+  `docs/problematic_calls_analysis.md`):
+  - SSR founder now follows the **clustering** classification: a TRC tagged
+    `repeat_type=SSR` (TRA consensus > 0.9 simple-sequence) gets its fundamental
+    motif length as the founder for every array, regardless of kitehor coverage.
+    The old kitehor per-array 95 % coverage override is removed (it mis-set a
+    lone ATC-rich array in a satellite TRC). Fixes e.g. *S. lycopersicum*
+    TRC_18/TRC_5 → 3 bp, TRC_2 → ~9491 bp.
+  - **Harmonic-basis founder deepening**: when the rank-1-by-kite-score peak
+    passes the identity gate, is shorter than the founder, and the founder is a
+    clean integer multiple of it, the founder is deepened to that basic monomer
+    (bypassing the divisor-search ceiling). Recovers e.g. TRC_4 → 53 bp.
+  - **Prevalent-founder anchor** for long HORs: when an array's dominant peak is
+    the TRC consensus founder, it is adopted under a **k-scaled** integer
+    tolerance (`|k − round(k)| ≤ frac·k`); above k ≈ 50 the integer test is
+    vacuous and the family consensus carries the call.
+  - **Selective long-period rescore**: arrays whose dominant period exceeds the
+    rescore cap are re-rescored at a higher cap (`--kite_rescore_max_period_ext`,
+    default 25000) only when needed, recovering large monomers (e.g. TRC_10 →
+    16326 bp) without the cost of a global high cap.
+- **HOR-order confidence tier** (`hor_order_confidence` in
+  `monomer_size_top3_estimats.csv`): `none | strict | supported | weak`,
+  distinguishing a recovered founder from a confidently-ordered higher-order
+  structure. The HTML report counts "HOR" as `strict ∪ supported`; `weak`
+  arrays render as *founder recovered (HOR ≈)* — irregular, very high k, or a
+  relaxed rescue. Purely additive (founder values unchanged).
+- **Spectral HOR classifier retired** from the report. The unreliable 4-bin
+  spectral HOR (strong/moderate/weak/none from the monomer score spectrum) is
+  removed everywhere; the raw spectral scores remain as table columns / input to
+  detailed analysis. **Report schema bumped to v3** (`hor_order_confidence`
+  counts replace the spectral `hor_status` fields).
+- **HTML report**: per-TRC distribution ideograms now show array **positions
+  only** (single neutral colour, no structural class colour-coding, so a non-HOR
+  TRC no longer reads as HOR).
+
 ## 1.14.1 (2026-06-10)
 - **kitehor 0.13.2** (pinned in `conda-deps.txt`): improved short-monomer
   detection that limits false positives. kitehor 0.13.1's short-monomer
