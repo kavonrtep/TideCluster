@@ -51,8 +51,8 @@ higher-order repeats and captures the variability in monomer size across differe
 repeat arrays.
 
 Starting in TideCluster 1.10.0, the KITE step is powered by
-[kitehor](https://github.com/kavonrtep/kitehor) (`0.13.0` since
-TideCluster 1.13.0) — a sequence-agnostic Rust reimplementation of the
+[kitehor](https://github.com/kavonrtep/kitehor) (`0.13.2` since
+TideCluster 1.14.1) — a sequence-agnostic Rust reimplementation of the
 same k-mer-interval principle. The pipeline runs `kitehor
 kite-periodicity` and `kitehor rule-classify`, followed in parallel by
 `kitehor rescore` (banded semi-global alignment scoring of the top-N
@@ -81,6 +81,12 @@ higher-order repeats.
   (`hor_basic_period`) and adopts it when it is a meaningfully deeper
   (≥ 20 %), clean, near-full-coverage array-wide tandem that the strict
   divisor gate missed (`founder_method = kh_deeper`).
+- Short-founder review aids (since 1.14.1): a short founder (≤ 30 bp)
+  whose founder peak has weak kite support (score < 0.20) is flagged
+  (`weak_short_founder_flag`) with its dominant longer-period alternative
+  (`alt_longer_period`) and an amber `⚠short` badge in the report, so the
+  rare surviving weak short call can be eyeballed. Purely diagnostic — the
+  founder call is unchanged.
 - Subrepeat candidates: since 1.13.0 sourced from `kitehor
   tandem-validate` and gated against TideCluster's founder — only
   genuine partial-occupancy nested motifs that do **not** coincide with
@@ -187,7 +193,7 @@ TideCluster.py --version
 ```
 
 To pin a specific release, append `=<version>` (e.g.
-`tidecluster=1.13.1`).
+`tidecluster=1.14.1`).
 
 ### Singularity / Apptainer
 
@@ -196,7 +202,7 @@ Pre-built SIF images are published as OCI artefacts on GHCR:
 ```bash
 apptainer pull oras://ghcr.io/kavonrtep/tidecluster/sif:latest
 # or pin a release:
-# apptainer pull oras://ghcr.io/kavonrtep/tidecluster/sif:1.13.1
+# apptainer pull oras://ghcr.io/kavonrtep/tidecluster/sif:1.14.1
 
 apptainer exec tidecluster_latest.sif TideCluster.py --version
 ```
