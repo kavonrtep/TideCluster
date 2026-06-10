@@ -36,90 +36,64 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-__version__ = "2"  # schema version for report.json (v2: 4-bin HOR)
+__version__ = "3"  # schema version for report.json
+#   v2: 4-bin spectral HOR (retired)
+#   v3: founder-arithmetic HOR tier (hor_order_confidence: none|strict|
+#       supported|weak); spectral compute_hor classifier removed.
 
 # ----------------------------------------------------------------------
-# HOR classification — mirrors tarean/kite.R. See
-# docs/hor_classification.md for the algorithm and rationale.
+# HOR-order confidence tier — see docs/hor_order_confidence_design.md.
+# The spectral HOR classifier (compute_hor, 4-bin strong/moderate/weak/none
+# from the m1/m2/m3 score spectrum) was unreliable and is retired; the raw
+# spectral scores remain as table columns / input to detailed analysis.
+# tc_utils.build_monomer_size_csv now emits `hor_order_confidence` per array:
+#   none      multiplicity == 1 — no higher-order structure
+#   strict    clean integer divisor, low-k          \  reported as
+#   supported family/anchor-rescued, clean, low-k    /  "HOR"
+#   weak      founder solid but order not confidently integer (irregular,
+#             high-k, or relaxed rescue) — "founder recovered (HOR ≈)"
 # ----------------------------------------------------------------------
-HOR_TOL             = 0.10
-HOR_HARMONIC_BONUS  = 0.5
-HOR_BIN_WEAK        = 0.10
-HOR_BIN_MODERATE    = 0.20
-HOR_BIN_STRONG      = 0.40
-HOR_MAX_K           = 5
-HOR_GRID_STEP       = 1
+HOR_TIERS        = ("none", "weak", "supported", "strict")   # ascending order
+HOR_REPORTED     = ("strict", "supported")                   # counted as HOR
+_HOR_TIER_RANK   = {t: i for i, t in enumerate(HOR_TIERS)}
 
 
-def _score_m_star(ms, ss, m_star):
-    if m_star is None or m_star <= 0: return None
-    total = sum(s for s in ss if s is not None and s > 0)
-    if total <= 0: return None
-    ks, errs, close = [None] * len(ms), [None] * len(ms), [0.0] * len(ms)
-    for i, m in enumerate(ms):
-        if m is None: continue
-        k = round(m / m_star)
-        if k < 1: return None
-        ks[i] = k
-        errs[i] = abs(m - k * m_star) / m_star
-        close[i] = max(0.0, 1.0 - errs[i] / HOR_TOL)
-    if not any(k == 1 for k in ks if k is not None): return None
-    if not any(k is not None and k >= 2 for k in ks): return None
-    base_w = sum(ss[i] * close[i] for i in range(len(ms))
-                 if ks[i] == 1 and ss[i] is not None)
-    harm_w = sum(ss[i] * close[i] for i in range(len(ms))
-                 if ks[i] is not None and ks[i] >= 2 and ss[i] is not None)
-    f_base, f_harm = base_w / total, harm_w / total
-    distinct = len({ks[i] for i in range(len(ms))
-                    if ks[i] is not None and ks[i] >= 2 and close[i] > 0})
-    bonus = 1.0 + HOR_HARMONIC_BONUS * max(0, distinct - 1)
-    conf = ((max(0.0, f_base) * max(0.0, f_harm)) ** 0.5) * bonus
-    contributing = [ks[i] for i in range(len(ms))
-                    if ks[i] is not None and ks[i] >= 2 and close[i] > 0]
-    k_max = max(contributing) if contributing else None
-    return {"m_star": float(m_star), "ks": ks, "confidence": conf,
-            "distinct": distinct, "k_max": k_max}
+def _hor_tier(arr):
+    """The array's HOR-order tier (one of HOR_TIERS), falling back to a coarse
+    multiplicity-derived tier for legacy CSVs that predate the column."""
+    t = (arr.get("hor_order_confidence") or "").strip()
+    if t in _HOR_TIER_RANK:
+        return t
+    # Legacy / older formats: derive coarsely. mult>1 with no certified order
+    # is "weak" (founder recovered, order unverified); else "none".
+    mult = arr.get("multiplicity") or arr.get("hor_multiplicity") or 1
+    return "weak" if mult and mult > 1 else "none"
 
 
-def _hor_candidates(ms):
-    valid = [m for m in ms if m is not None and m > 0]
-    if not valid: return []
-    out = {round(m) for m in valid}
-    for k in range(2, HOR_MAX_K + 1):
-        out.update(round(m / k) for m in valid)
-    lo = max(5, int(min(valid) * 0.5))
-    hi = int(max(valid) * 0.55)
-    if hi > lo:
-        out.update(range(lo, hi + 1, HOR_GRID_STEP))
-    return [x for x in out if x > 0]
+def _hor_tier_rank(arr):
+    return _HOR_TIER_RANK.get(_hor_tier(arr), 0)
 
 
-def compute_hor(m1, m2, m3, s1, s2, s3):
-    """Return dict of HOR fields for one array (mirrors kite.R).
+def _is_hor(arr):
+    """True when the array is a confidently-ordered HOR (strict ∪ supported)."""
+    return _hor_tier(arr) in HOR_REPORTED
 
-    Fields: status, confidence, base_monomer, hor_period, n_harmonics."""
-    ms, ss = [m1, m2, m3], [s1, s2, s3]
-    best = None
-    for m_star in _hor_candidates(ms):
-        fit = _score_m_star(ms, ss, m_star)
-        if fit and (best is None or fit["confidence"] > best["confidence"]):
-            best = fit
-    conf = best["confidence"] if best else 0.0
-    if conf < HOR_BIN_WEAK:     status = "No HOR"
-    elif conf < HOR_BIN_MODERATE: status = "HOR weak"
-    elif conf < HOR_BIN_STRONG:   status = "HOR moderate"
-    else:                         status = "HOR strong"
-    if best:
-        base_monomer = int(round(best["m_star"]))
-        hor_period   = (int(round(best["k_max"] * best["m_star"]))
-                        if best["k_max"] else None)
-        n_harmonics  = int(best["distinct"])
-    else:
-        base_monomer = hor_period = None
-        n_harmonics  = 0
-    return {"hor_status": status, "hor_confidence": round(conf, 4),
-            "hor_base_monomer": base_monomer, "hor_hor_period": hor_period,
-            "hor_n_harmonics": n_harmonics}
+
+_HOR_TIER_LABEL = {
+    "strict":    "HOR (strict)",
+    "supported": "HOR (supported)",
+    "weak":      "founder recovered (HOR ≈)",
+    "none":      "—",
+}
+
+
+def hor_tier_badge(arr):
+    """Per-array HOR-order tier badge (replaces the spectral hor_badge)."""
+    t = _hor_tier(arr)
+    if t == "none":
+        return ""
+    return (f'<span class="hor-badge hor-tier-{t}">'
+            f'{esc(_HOR_TIER_LABEL[t])}</span>')
 
 # ----------------------------------------------------------------------
 # Minimal Markdown → HTML converter (stdlib only).
@@ -336,22 +310,6 @@ def fmt_bp(n):
     if n >= 1_000_000: return f"{n/1_000_000:.2f} Mb"
     if n >= 1_000:     return f"{n/1_000:.1f} kb"
     return f"{n} bp"
-
-
-def hor_badge(status):
-    if not status:
-        return ""
-    cls = {"HOR strong":   "hor-strong",
-           "HOR moderate": "hor-mod",
-           "HOR weak":     "hor-weak",
-           "No HOR":       "hor-none"}.get(status, "hor-none")
-    return f'<span class="hor-badge {cls}">{esc(status)}</span>'
-
-
-def hor_count_cell(n, kind):
-    cls = {"strong": "hor-cnt-strong", "mod":  "hor-cnt-mod",
-           "weak":   "hor-cnt-weak",   "none": "hor-cnt-none"}[kind]
-    return f'<span class="{cls}">{int(n)}</span>'
 
 
 # ----------------------------------------------------------------------
@@ -942,7 +900,8 @@ def load_kite_top3(paths):
       - 1.9.x (legacy R kite.R): capitalised `HOR_status` /
         `HOR_confidence` / `HOR_base_monomer` / `HOR_hor_period` /
         `HOR_n_harmonics`.
-      - pre-1.9.0: no HOR columns; recomputed via `compute_hor()`."""
+      - pre-1.9.0: no HOR columns; no HOR tier available (the spectral
+        recompute that once filled this is retired)."""
     p = paths["kite_top3_csv"]
     if not p:
         return {}
@@ -976,13 +935,15 @@ def load_kite_top3(paths):
 
         if is_v012:
             hor = {
-                # The cascade is gone; keep these keys present (None) so
-                # downstream model code that still references them doesn't
-                # KeyError. The new fields below carry the meaning.
-                "hor_status": None, "hor_confidence": None,
+                # The combined_class cascade is gone; keep these keys present
+                # (None) so downstream model code that still references them
+                # doesn't KeyError. The new fields below carry the meaning.
                 "hor_base_monomer": None, "hor_hor_period": None,
                 "hor_n_harmonics": 0, "hor_multiplicity": None,
                 "combined_class": None,
+                # Founder-arithmetic HOR tier (replaces spectral hor_status).
+                "hor_order_confidence":
+                                    (row.get("hor_order_confidence") or "").strip() or None,
                 # v0.12 per-array summary
                 "founder_period":   ni(row.get("founder_period")),
                 "strongest_period": ni(row.get("strongest_period")),
@@ -1037,8 +998,9 @@ def load_kite_top3(paths):
             }
         elif is_kitehor:
             hor = {
-                "hor_status":       (row.get("hor_status") or "").strip() or "No HOR",
-                "hor_confidence":   num(row.get("hor_confidence")) or 0.0,
+                # Spectral hor_status/hor_confidence retired; HOR is now the
+                # founder-arithmetic tier, derived coarsely from multiplicity
+                # for this older format (see _hor_tier).
                 # Map kitehor's hor_founder / hor_tile / hor_multiplicity to
                 # the names the downstream model already publishes.
                 "hor_base_monomer": ni(row.get("hor_founder")),
@@ -1070,14 +1032,16 @@ def load_kite_top3(paths):
             }
         elif is_legacy:
             hor = {
-                "hor_status":       (row.get("HOR_status") or "").strip() or "No HOR",
-                "hor_confidence":   num(row.get("HOR_confidence")) or 0.0,
+                # Spectral HOR_status/HOR_confidence retired (see _hor_tier).
                 "hor_base_monomer": ni(row.get("HOR_base_monomer")),
                 "hor_hor_period":   ni(row.get("HOR_hor_period")),
                 "hor_n_harmonics":  ni(row.get("HOR_n_harmonics")) or 0,
             }
         else:
-            hor = compute_hor(m1, m2, m3, s1, s2, s3)
+            # Pre-1.9 CSVs without HOR columns: the spectral classifier that
+            # used to recompute a status here is retired; no HOR tier is
+            # available for this ancient format.
+            hor = {}
 
         out[(trc, sid, start, end)] = {
             "m1": m1, "s1": s1, "m2": m2, "s2": s2, "m3": m3, "s3": s3,
@@ -1302,9 +1266,8 @@ def build_model(input_dir: Path, prefix: str):
     for trc_id in sorted(tras_by_trc, key=_trc_sort_key):
         arrays = tras_by_trc[trc_id]
         # Merge KITE per-array fields
-        kite_counts = {"no_hor": 0, "hor_weak": 0, "hor_moderate": 0,
-                       "hor_strong": 0}
-        confidences = []
+        # HOR-order tier tally (replaces the spectral 4-bin counts).
+        tier_counts = {t: 0 for t in HOR_TIERS}
         m1_values = []
         combined_class_counter = Counter()
         n_subrepeat = 0
@@ -1317,13 +1280,7 @@ def build_model(input_dir: Path, prefix: str):
                 # Attach the per-array rescored peak list (kitehor v0.12+)
                 # for the Details child row. List of dicts (rank-sorted).
                 arr["rescored_peaks"] = rescored_peaks.get(key) or []
-                status = k.get("hor_status")
-                if   status == "HOR strong":    kite_counts["hor_strong"]   += 1
-                elif status == "HOR moderate":  kite_counts["hor_moderate"] += 1
-                elif status == "HOR weak":      kite_counts["hor_weak"]     += 1
-                elif status == "No HOR":        kite_counts["no_hor"]       += 1
-                c = k.get("hor_confidence")
-                if c is not None: confidences.append(c)
+                tier_counts[_hor_tier(arr)] += 1
                 if k.get("m1") is not None:
                     m1_values.append(k["m1"])
                 cc = k.get("combined_class")
@@ -1377,12 +1334,13 @@ def build_model(input_dir: Path, prefix: str):
             n_irreg = sum(1 for a in arrays if a.get("irregular_multiplicity"))
             kite_block = {
                 "monomer_primary":  int(monomer_primary),
-                "n_no_hor":         kite_counts["no_hor"],
-                "n_hor_weak":       kite_counts["hor_weak"],
-                "n_hor_moderate":   kite_counts["hor_moderate"],
-                "n_hor_strong":     kite_counts["hor_strong"],
-                "median_confidence": (round(statistics.median(confidences), 4)
-                                      if confidences else None),
+                # HOR-order tier counts (v3; replaced the spectral 4-bin counts).
+                "n_hor_none":       tier_counts["none"],
+                "n_hor_weak":       tier_counts["weak"],
+                "n_hor_supported":  tier_counts["supported"],
+                "n_hor_strict":     tier_counts["strict"],
+                # confidently-ordered HOR arrays = strict ∪ supported
+                "n_hor":            tier_counts["strict"] + tier_counts["supported"],
                 "profile_png":      f"{kite_dir_rel}/profile_plots/profile_{trc_id}.png",
                 "profile_top3_png": f"{kite_dir_rel}/profile_plots/profile_top3_{trc_id}.png",
                 # New kitehor-derived per-TRC aggregates (None on legacy data).
@@ -1834,13 +1792,17 @@ def render_index(model, out_path, run_meta, ctx):
 
     # Per-array aggregates: counts + SSR motif tally weighted by bp.
     # Fallback-founder count is intentionally not surfaced here (see TRC card).
-    n_hor = n_subrep = n_ssr_signal = n_ssr_dom = 0
+    n_hor = n_hor_approx = n_subrep = n_ssr_signal = n_ssr_dom = 0
     ssr_bp = Counter()
     total_ssr_bp = 0
     for t in model["trcs"]:
         for a in t["arrays"]:
-            if (a.get("multiplicity") or 1) > 1:
+            # Confident HOR order (strict ∪ supported) vs "founder recovered,
+            # order approximate" (weak tier) — see hor_order_confidence.
+            if _is_hor(a):
                 n_hor += 1
+            elif _hor_tier(a) == "weak":
+                n_hor_approx += 1
             if a.get("subrepeat_1_tier"):
                 n_subrep += 1
             motif = (a.get("ssr_dominant_motif") or "").strip()
@@ -1895,10 +1857,11 @@ def render_index(model, out_path, run_meta, ctx):
     array_rows = [("total (KITE-analysed)", stats.get("n_tras"))]
     if is_v012:
         array_rows += [
-            ("HOR (×k≥2)",           n_hor),
-            ("with subrepeat",       n_subrep),
-            ("with SSR signal",      n_ssr_signal),
-            ("SSR-dominant (≥50 %)", n_ssr_dom),
+            ("HOR (confident order)",      n_hor),
+            ("founder recovered (HOR ≈)",  n_hor_approx),
+            ("with subrepeat",             n_subrep),
+            ("with SSR signal",            n_ssr_signal),
+            ("SSR-dominant (≥50 %)",       n_ssr_dom),
         ]
     else:
         # Legacy roll-up for pre-v0.12 dirs.
@@ -2082,7 +2045,7 @@ def render_kite(model, out_path, run_meta, ctx):
     with SSR, with fallback founders."""
     is_v012 = model.get("is_v012")
     rows = []
-    tot_hor = tot_subrep = tot_ssr = tot_fb = 0
+    tot_hor = tot_hor_approx = tot_subrep = tot_ssr = tot_fb = 0
     for t in model["trcs"]:
         if not t["kite"]:
             continue
@@ -2092,13 +2055,15 @@ def render_kite(model, out_path, run_meta, ctx):
         tarean_mon = (t["tarean"] or {}).get("monomer_length")
         kite_mon   = k.get("monomer_primary")
         if is_v012:
-            n_hor    = sum(1 for a in t["arrays"]
-                           if (a.get("multiplicity") or 1) > 1)
+            n_hor    = sum(1 for a in t["arrays"] if _is_hor(a))
+            n_hor_approx = sum(1 for a in t["arrays"]
+                               if _hor_tier(a) == "weak")
             n_subrep = sum(1 for a in t["arrays"] if a.get("subrepeat_1_tier"))
             n_ssr    = sum(1 for a in t["arrays"]
                            if (a.get("ssr_dominant_motif") or "NA") != "NA")
             n_fb     = sum(1 for a in t["arrays"] if a.get("founder_fallback"))
-            tot_hor    += n_hor; tot_subrep += n_subrep
+            tot_hor    += n_hor; tot_hor_approx += n_hor_approx
+            tot_subrep += n_subrep
             tot_ssr    += n_ssr; tot_fb     += n_fb
             rows.append(
                 "<tr>"
@@ -2108,6 +2073,7 @@ def render_kite(model, out_path, run_meta, ctx):
                 f'<td data-order="{t["n_arrays"]}">{t["n_arrays"]}</td>'
                 f'<td data-order="{t["total_size"]}">{fmt_bp(t["total_size"])}</td>'
                 f'<td data-order="{n_hor}">{n_hor or ""}</td>'
+                f'<td data-order="{n_hor_approx}">{n_hor_approx or ""}</td>'
                 f'<td data-order="{n_subrep}">{n_subrep or ""}</td>'
                 f'<td data-order="{n_ssr}">{n_ssr or ""}</td>'
                 f'<td data-order="{n_fb}">{("*" * min(n_fb,3)) if n_fb else ""}</td>'
@@ -2138,7 +2104,8 @@ def render_kite(model, out_path, run_meta, ctx):
                 '<th>Monomer<br>(TAREAN)</th>'
                 '<th>Arrays</th>'
                 '<th>Total size</th>'
-                '<th>HOR<br>(×k≥2)</th>'
+                '<th>HOR<br>(confident)</th>'
+                '<th>HOR&approx;<br>(founder rec.)</th>'
                 '<th>Subrep</th>'
                 '<th>SSR</th>'
                 '<th>Fallback</th>'
@@ -2147,7 +2114,8 @@ def render_kite(model, out_path, run_meta, ctx):
         summary = (
             '<h3>Structural signal counts across all analysed arrays</h3>'
             '<p style="font-size:12px;color:var(--fg-muted)">'
-            f'HOR (×k≥2): <strong>{tot_hor}</strong> &nbsp;·&nbsp; '
+            f'HOR confident: <strong>{tot_hor}</strong> &nbsp;·&nbsp; '
+            f'HOR&approx; (founder recovered): <strong>{tot_hor_approx}</strong> &nbsp;·&nbsp; '
             f'subrepeat: <strong>{tot_subrep}</strong> &nbsp;·&nbsp; '
             f'SSR: <strong>{tot_ssr}</strong> &nbsp;·&nbsp; '
             f'fallback founder: <strong>{tot_fb}</strong>. '
@@ -2158,8 +2126,11 @@ def render_kite(model, out_path, run_meta, ctx):
             '<p style="font-size:12px;color:var(--fg-muted)">'
             '<strong>Monomer (KITE)</strong> is the most-frequent primary '
             'rescore founder period across the arrays of a given TRC. '
-            '<strong>HOR (×k≥2)</strong> counts arrays whose strongest '
-            'period is an integer multiple of the founder; '
+            '<strong>HOR (confident)</strong> counts arrays with a confidently '
+            'ordered higher-order structure (founder tier <em>strict</em> or '
+            '<em>supported</em>); <strong>HOR&approx; (founder rec.)</strong> '
+            'counts arrays where the founder is recovered but the ×k order is '
+            'only approximate (irregular, very high k, or relaxed rescue); '
             '<strong>Subrep</strong> counts arrays with at least one '
             'HIGH/LIKELY subrepeat candidate; <strong>SSR</strong> counts '
             'arrays with a dominant short-motif tandem; '
@@ -2330,12 +2301,14 @@ def _array_title(arr):
         # v0.12 label assembled from structural signals.
         parts = []
         mult = arr.get("multiplicity") or 1
-        if mult > 1: parts.append(f"HOR ×{mult}")
+        if mult > 1:
+            parts.append(f"HOR ×{mult}" if _is_hor(arr)
+                         else f"HOR ≈×{mult}")
         if arr.get("subrepeat_1_tier"): parts.append("subrepeat")
         if (arr.get("ssr_dominant_motif") or "NA") != "NA":
             parts.append("SSR")
         if arr.get("founder_fallback"): parts.append("fallback")
-        label = " · ".join(parts) if parts else (arr.get("hor_status") or "—")
+        label = " · ".join(parts) if parts else "—"
     span = f"{arr['seqid']}:{arr['start']:,}-{arr['end']:,}"
     length = f"{fmt_bp(arr['end'] - arr['start'])}"
     return f"{span} · {length} · {label}"
@@ -2382,8 +2355,7 @@ def _render_ideogram(majors, by_seqid):
         # prominent without a border muting their colour. Empty list for
         # major scaffolds that carry no arrays of this TRC — the backing
         # contig bar stays visible (absence is informative).
-        arrs = sorted(by_seqid.get(sid, []),
-                      key=lambda a: (a.get("hor_confidence") or 0))
+        arrs = sorted(by_seqid.get(sid, []), key=_hor_tier_rank)
         for arr in arrs:
             x_start = label_w + (arr["start"] / max_len) * bar_w
             w = max(min_rect_w, ((arr["end"] - arr["start"]) / max_len) * bar_w)
@@ -2430,7 +2402,7 @@ def _render_minor_table(minors, by_seqid, is_v012=False):
         mini.append(
             f'<rect x="0" y="4" width="{TRC_DIST_MINI_WIDTH}" height="4" '
             f'fill="#e6e6e6" stroke="none"/>')
-        for arr in sorted(arrs, key=lambda a: (a.get("hor_confidence") or 0)):
+        for arr in sorted(arrs, key=_hor_tier_rank):
             x_start = (arr["start"] / max(length, 1)) * TRC_DIST_MINI_WIDTH
             w = max(1.5, ((arr["end"] - arr["start"]) / max(length, 1))
                     * TRC_DIST_MINI_WIDTH)
@@ -2730,13 +2702,16 @@ def _details_html(a):
         head_bits.append(
             f'<strong>Strongest:</strong> {esc(sp)} '
             f'<span class="tc-dim">{_idstr(s_id)}</span>')
-    irreg     = a.get("irregular_multiplicity")
     mult_raw  = a.get("multiplicity_raw")
-    if irreg and mult_raw is not None:
+    if mult > 1:
+        tier  = _hor_tier(a)
+        kraw  = (f' <span class="tc-dim">(k = {mult_raw:.3f})</span>'
+                 if mult_raw is not None else '')
         head_bits.append(
-            f'<strong>&times;{mult}</strong> '
-            f'<span class="tc-irreg" title="irregular multiplicity">irreg</span>'
-            f' <span class="tc-dim">(k = {mult_raw:.3f})</span>')
+            f'<strong>&times;{mult}</strong>'
+            f' <span class="hor-badge hor-tier-{tier}" '
+            f'title="HOR-order confidence: {tier}">'
+            f'{esc(_HOR_TIER_LABEL.get(tier, tier))}</span>{kraw}')
     else:
         head_bits.append(f'<strong>&times;{mult}</strong>')
     if delta is not None:
@@ -2890,12 +2865,22 @@ def _arrays_table(arrays, include_hor=True):
             sp_html = esc(sp) if sp is not None else "—"
             delta_html = (f"{delta:+.1f}<span class='tc-meta'>&nbsp;pp</span>"
                           if delta is not None else "—")
-            irreg     = a.get("irregular_multiplicity")
             mult_raw  = a.get("multiplicity_raw")
             mult_html = f"&times;{mult}"
-            if irreg and mult_raw is not None:
-                mult_html += (' <span class="tc-irreg" '
-                              f'title="irregular multiplicity (k = {mult_raw:.2f})">~</span>')
+            if mult > 1:
+                tier = _hor_tier(a)
+                if tier == "supported":
+                    mult_html += (' <span class="tc-hor-supported" '
+                                  'title="HOR order supported by cross-array '
+                                  'founder consensus (founder method '
+                                  'pass2/kh_deeper)">ˢ</span>')
+                elif tier == "weak":
+                    kr = (f" (k = {mult_raw:.2f})"
+                          if mult_raw is not None else "")
+                    mult_html += (' <span class="tc-hor-approx" '
+                                  f'title="founder recovered; HOR order '
+                                  f'approximate{kr} — irregular, very high k, '
+                                  f'or relaxed rescue">≈</span>')
             details_attr = html.escape(_details_html(a), quote=True)
             rows.append(
                 f'<tr data-details="{details_attr}">'
@@ -3008,8 +2993,16 @@ def arrays_legend():
         (score &lt; 0.20) — hover for the longer alternative to review against.</dd>
     <dt>&Delta;id</dt><dd>id(Strongest) − id(Founder), pp. NA when
         Founder = Strongest.</dd>
-    <dt>&times;k</dt><dd>round(Strongest / Founder); 1 if none. Amber
-        <code>~</code> pill = irregular (non-integer); hover for raw k.</dd>
+    <dt>&times;k</dt><dd>round(Strongest / Founder); 1 if none — the
+        higher-order (HOR) multiplicity. A <strong>HOR-order confidence
+        tier</strong> qualifies it: <em>strict</em> (clean integer divisor,
+        low k — confident order, no marker); <em>supported</em>
+        (<span class="tc-hor-supported">ˢ</span>, order backed by cross-array
+        founder consensus); <em>weak</em>
+        (<span class="tc-hor-approx">≈</span>, founder recovered but the order
+        is approximate — irregular, very high k where the integer test is
+        vacuous, or relaxed rescue; hover for raw k). Reported "HOR" counts =
+        strict&nbsp;∪&nbsp;supported.</dd>
     <dt>Other periods</dt><dd>peaks with id_med ≥ 0.7 other than
         Founder and Strongest, plus short peaks (period &lt;
         rescore's min-period) whose kite rank is better than the
@@ -3137,8 +3130,8 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
                 class_rows.append(("Median HOR confidence",
                                    f'{kite["median_confidence"]:.3f}'))
     if is_v012:
-        n_hor    = sum(1 for a in trc["arrays"]
-                       if (a.get("multiplicity") or 1) > 1)
+        n_hor    = sum(1 for a in trc["arrays"] if _is_hor(a))
+        n_hor_ap = sum(1 for a in trc["arrays"] if _hor_tier(a) == "weak")
         n_subrep = sum(1 for a in trc["arrays"] if a.get("subrepeat_1_tier"))
         n_ssr    = sum(1 for a in trc["arrays"]
                        if (a.get("ssr_dominant_motif") or "NA") != "NA")
@@ -3166,7 +3159,12 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
             mc_str = ", ".join(f'×{k} ({v})'
                                for k, v in sorted(mc.items()))
             class_rows.append(("HOR multiplicities", mc_str))
-        class_rows.append(("Arrays with HOR call (×k≥2)", str(n_hor)))
+        class_rows.append(("Arrays with confident HOR order", str(n_hor)))
+        if n_hor_ap:
+            class_rows.append(
+                ("Arrays with founder recovered (HOR ≈)",
+                 f'{n_hor_ap} <span class="tc-dim">(order approximate — '
+                 f'irregular / high-k / relaxed rescue)</span>'))
         if n_irreg:
             class_rows.append(
                 ("Arrays with irregular multiplicity",
@@ -3434,15 +3432,17 @@ def build_report(input_dir, prefix=None, output_dir=None, *, quiet=False):
     if not quiet:
         if model.get("is_v012"):
             n_hor    = sum(1 for t in model["trcs"] for a in t["arrays"]
-                           if (a.get("multiplicity") or 1) > 1)
+                           if _is_hor(a))
+            n_hor_ap = sum(1 for t in model["trcs"] for a in t["arrays"]
+                           if _hor_tier(a) == "weak")
             n_subrep = sum(1 for t in model["trcs"] for a in t["arrays"]
                            if a.get("subrepeat_1_tier"))
             n_ssr    = sum(1 for t in model["trcs"] for a in t["arrays"]
                            if (a.get("ssr_dominant_motif") or "NA") != "NA")
             n_fb     = sum(1 for t in model["trcs"] for a in t["arrays"]
                            if a.get("founder_fallback"))
-            signal_str = (f"HOR(×k≥2): {n_hor}, subrep: {n_subrep}, "
-                          f"SSR: {n_ssr}, fallback: {n_fb}")
+            signal_str = (f"HOR-confident: {n_hor}, HOR≈: {n_hor_ap}, "
+                          f"subrep: {n_subrep}, SSR: {n_ssr}, fallback: {n_fb}")
         else:
             cls_total = class_totals(model)
             signal_str = ", ".join(f"{class_label(raw)}: {cls_total[raw]}"

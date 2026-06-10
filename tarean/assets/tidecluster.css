@@ -248,6 +248,17 @@ table.tc-table img            { max-width: none; }
 .hor-cnt-weak   { background: var(--hor-cnt-weak-bg);   display: block; text-align: center; padding: 2px 8px; }
 .hor-cnt-none   { background: var(--hor-cnt-none-bg);   display: block; text-align: center; padding: 2px 8px; }
 
+/* ======== HOR-order confidence tier badges (v3) ========
+   Replaces the retired spectral HOR badges. The tier qualifies the ×k
+   multiplicity: strict / supported = confident order (counted as HOR);
+   weak = founder recovered, order approximate. See
+   docs/hor_order_confidence_design.md. min-width narrower than the old
+   .hor-badge so the tier fits inline next to the Details ×k figure. */
+.hor-badge.hor-tier-strict    { background: #cdebd0; color: #1c5a28; min-width: 0; }
+.hor-badge.hor-tier-supported { background: #d6e7f7; color: #1c4a78; min-width: 0; }
+.hor-badge.hor-tier-weak      { background: #ffe0b3; color: #8a4b00; min-width: 0; }
+.hor-badge.hor-tier-none      { background: #ececec; color: #555;    min-width: 0; }
+
 /* ======== kitehor combined_class badges + count pills (legacy) ========
    Only rendered for pre-v0.12 report dirs that still carry the
    combined_class column. v0.12 reports surface HOR / subrep / SSR as
@@ -335,6 +346,29 @@ table.tc-table img            { max-width: none; }
   vertical-align: middle;
   margin-left: 3px;
   white-space: nowrap;
+}
+/* Inline HOR-order tier glyphs in the array table ×k cell: ˢ = supported
+   (order backed by cross-array founder consensus), ≈ = weak (founder
+   recovered, order approximate). strict shows no glyph. */
+.tc-hor-supported {
+  display: inline-block;
+  padding: 0 4px;
+  background: #d6e7f7; color: #1c4a78;
+  font-size: 10px; font-weight: 700;
+  border-radius: 2px;
+  cursor: help;
+  vertical-align: middle;
+  margin-left: 2px;
+}
+.tc-hor-approx {
+  display: inline-block;
+  padding: 0 5px;
+  background: #ffd9a6; color: #6b3f00;
+  font-size: 11px; font-weight: 600;
+  border-radius: 2px;
+  cursor: help;
+  vertical-align: middle;
+  margin-left: 2px;
 }
 
 /* ======== per-array Details child row (DataTables row.child) ======== */
