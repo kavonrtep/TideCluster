@@ -3000,6 +3000,39 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
                 founder_peak     = strongest_peak
                 multiplicity     = 1
                 multiplicity_raw = 1.0
+        # Harmonic-basis deepening (case 2). The dominant kite-score periodicity
+        # (rank-1 by score) is the basic monomer of a harmonic series; when the
+        # founder chosen above is a clean integer multiple of it, deepen the
+        # founder to it. Recovers TRC_4-type cases where `strongest =
+        # argmax(id_med)` landed on a long noisy period (7617) and the k<=_KMAX
+        # divisor search settled on an intermediate multiple (318 = 6*53) instead
+        # of the real basic (53) — even though 53 is the top kite peak and passes
+        # the id gate. Guards: rank-1 must pass the id gate, be SHORTER than the
+        # founder, and the founder/rank1 ratio must be a clean integer in
+        # [2,_KMAX] (so a real 178 bp satellite, whose rank-1 peak IS 178, never
+        # collapses to an internal sub-period).
+        irregular_h = False
+        if not fallback:
+            p0_period = _num(rank1.get("period"))
+            p0_idm    = _num(rank1.get("identity_med"))
+            if (p0_period is not None and p0_period > 0
+                    and founder_period is not None
+                    and p0_period < founder_period
+                    and p0_idm is not None and p0_idm >= _FOUNDER_ID_MIN):
+                k_basic  = founder_period / p0_period
+                kr_basic = round(k_basic)
+                if (2 <= kr_basic <= _KMAX
+                        and abs(k_basic - kr_basic) <= _RATIO_TOL):
+                    founder_peak   = rank1
+                    founder_period = int(round(p0_period))
+                    if strongest_period:
+                        multiplicity_raw = strongest_period / founder_period
+                        multiplicity     = int(round(multiplicity_raw))
+                        # flag irregular when strongest isn't a clean multiple
+                        # of the basic (the basic still wins — the HOR period
+                        # just isn't an exact integer multiple).
+                        irregular_h = (abs(multiplicity_raw - multiplicity)
+                                       > _RATIO_TOL)
         pass1.append({
             "record_id":         record_id,
             "trc":               trc,
@@ -3019,7 +3052,7 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
             "multiplicity":      multiplicity,
             "multiplicity_raw":  multiplicity_raw,
             "fallback":          fallback,
-            "irregular":         False,
+            "irregular":         irregular_h,
             # rescue_method records which Pass produced the final founder.
             # Default reflects Pass 1's outcome: "strict" when multiplicity
             # >= 2 (real HOR call), "none" when mult=1 (rescore returned a
