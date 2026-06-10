@@ -33,7 +33,7 @@ import re
 import shutil
 import statistics
 import sys
-from collections import Counter
+from collections import Counter, namedtuple
 from pathlib import Path
 
 __version__ = "3"  # schema version for report.json
@@ -79,12 +79,31 @@ def _is_hor(arr):
     return _hor_tier(arr) in HOR_REPORTED
 
 
-_HOR_TIER_LABEL = {
-    "strict":    "HOR (strict)",
-    "supported": "HOR (supported)",
-    "weak":      "founder recovered (HOR ≈)",
-    "none":      "—",
+# Single source for the HOR-order tier: {tier: (label, one-line meaning)}.
+# Referenced by the ×k array-table legend, the hor_order_confidence column
+# description, the per-array badge, and (label only) the JS payload — so the
+# tier text is defined exactly once (was duplicated in up to six places).
+TIER_DEFS = {
+    "strict":    ("HOR (strict)",
+                  "clean integer divisor, low k — confident higher-order order"),
+    "supported": ("HOR (supported)",
+                  "order backed by cross-array founder consensus"),
+    "weak":      ("founder recovered (HOR ≈)",
+                  "founder reliable, order approximate — irregular, very high k "
+                  "(integer test vacuous), or a relaxed rescue"),
+    "none":      ("—", "no higher-order structure (multiplicity 1)"),
 }
+_HOR_TIER_LABEL = {t: d[0] for t, d in TIER_DEFS.items()}
+
+# Single description shape for every report table column (R1 single-source).
+#   key    machine key (JSON / internal / array-or-model field default)
+#   header HTML + TSV column label (HTML-facing name)
+#   source model/array field or kitehor raw column; None ⇒ computed at write time
+#   fmt    int | f3 | f4 | yn | bool | raw | str   (display formatting)
+#   desc   one-line description — drives columns.tsv, the HTML legend, <th title>
+# COLUMN_DICT (assembled further down, once the per-table lists are defined) maps
+# "trc_table" / "tra_table" / "tra_peaks" to lists of these.
+ColSpec = namedtuple("ColSpec", "key header source fmt desc")
 
 
 def hor_tier_badge(arr):
@@ -2667,10 +2686,10 @@ def _ssr_cell(a):
 #   • `tra_peaks.tsv` in the report/data bundle (Part 2),
 #   • the column dictionary (`columns.tsv`) and HTML legend.
 # Order matters: the JSON peak rows are positional in this order.
-# Each entry: (key, html_header, raw_kitehor_source, fmt, description).
+# Each entry is a ColSpec(key, header, source, fmt, desc).
 # fmt: int | f3 | f4 | yn | str  (how the value is displayed).
 # ----------------------------------------------------------------------
-_PEAK_COLUMNS = [
+_PEAK_COLUMNS = [ColSpec(*_t) for _t in [
     ("rank",   "rank",   "rank",                  "int",
         "kite peak rank for this array (1 = highest kite score)."),
     ("period", "period", "period",                "int",
@@ -2707,9 +2726,9 @@ _PEAK_COLUMNS = [
         "✓ = phantom (sub-period harmonic); auto-rejected from subrepeat tiering."),
     ("tier",   "tier",   "(computed)",            "str",
         "subrepeat-evidence tier for the peak — see the Tier glossary."),
-]
-_PEAK_COL_KEYS    = [c[0] for c in _PEAK_COLUMNS]
-_PEAK_COL_HEADERS = [c[1] for c in _PEAK_COLUMNS]
+]]
+_PEAK_COL_KEYS    = [c.key for c in _PEAK_COLUMNS]
+_PEAK_COL_HEADERS = [c.header for c in _PEAK_COLUMNS]
 
 
 def _peak_cell_values(p, fp_f):
@@ -2926,7 +2945,7 @@ def _peaks_payload_script(arrays):
                for a in arrays if (a.get("rescored_peaks") is not None
                                    or a.get("founder_period") is not None)}
     coldict = {
-        "cols":  [[c[0], c[1], c[3], c[4]] for c in _PEAK_COLUMNS],
+        "cols":  [[c.key, c.header, c.fmt, c.desc] for c in _PEAK_COLUMNS],
         "tiers": _TIER_SHORT,
     }
     j = json.dumps(payload, separators=(",", ":"), default=str)
@@ -2948,8 +2967,9 @@ def _peaks_payload_script(arrays):
 #   columns.tsv     data dictionary   (table · column · description · source)
 # HTML-facing column names; columns.tsv carries the raw kitehor source name.
 # ----------------------------------------------------------------------
-# (column, source-field-in-model, description). source=None ⇒ computed below.
-_TRC_TABLE_COLS = [
+# Per-table column specs (ColSpec). header == key for the flat export tables;
+# source=None ⇒ value is computed at write time. Wrapped into COLUMN_DICT below.
+_TRC_TABLE_COLS = [ColSpec(col, col, src, "raw", desc) for (col, src, desc) in [
     ("TRC_ID",            "id",               "tandem repeat cluster id."),
     ("repeat_type",       "repeat_type",      "TR or SSR (clustering classification)."),
     ("n_arrays",          "n_arrays",         "number of tandem repeat arrays in the TRC."),
@@ -2968,9 +2988,12 @@ _TRC_TABLE_COLS = [
     ("ssr_motif",         "ssr_motif",        "SSR motif for SSR-typed TRCs."),
     ("superfamily",       "superfamily",      "superfamily id this TRC belongs to."),
     ("annotation",        "annotation",       "TRC annotation, if any."),
-]
-# (column, array-field, fmt, description). fmt: raw | bool
-_TRA_TABLE_COLS = [
+]]
+# HOR-order-tier column description, composed once from TIER_DEFS (single source).
+_HOR_CONF_DESC = ("HOR-order confidence tier — "
+                  + "; ".join(f"{t}: {TIER_DEFS[t][1]}"
+                              for t in ("strict", "supported", "weak", "none")))
+_TRA_TABLE_COLS = [ColSpec(col, col, src, fmt, desc) for (col, src, fmt, desc) in [
     ("TRC_ID",                  None,                "raw", "parent TRC id."),
     ("seqid",                   "seqid",             "raw", "sequence / contig id."),
     ("start",                   "start",             "raw", "array start (1-based)."),
@@ -2983,7 +3006,7 @@ _TRA_TABLE_COLS = [
     ("strongest_id_med",       "strongest_id_med",   "raw", "median pairwise identity at the strongest period."),
     ("multiplicity",            "multiplicity",      "raw", "round(strongest/founder); 1 = no higher-order structure."),
     ("multiplicity_raw",        "multiplicity_raw",  "raw", "exact strongest/founder ratio."),
-    ("hor_order_confidence",    "hor_order_confidence","raw","none | strict | supported | weak (HOR-order tier)."),
+    ("hor_order_confidence",    "hor_order_confidence","raw", _HOR_CONF_DESC),
     ("irregular_multiplicity",  "irregular_multiplicity","bool","strongest is not a clean integer multiple of founder."),
     ("founder_method",          "founder_method",    "raw", "which pass set the founder (strict|pass2|kh_deeper|pass3|cluster|ssr|fallback|none)."),
     ("founder_fallback",        "founder_fallback",  "bool","rescore returned NA; fell back to the top kite peak."),
@@ -3002,7 +3025,15 @@ _TRA_TABLE_COLS = [
     ("ssr_total_coverage_pct",  "ssr_total_coverage_pct","raw","total SSR coverage of the array (%)."),
     ("copy_number",             "copy_number",       "raw", "array_length / founder period (approx. copies)."),
     ("consensus_period_bp",     "consensus_period_bp","raw","TRC consensus founder period (bp)."),
-]
+]]
+
+# The one mapping that drives every flat report table: the TSV bundle, the
+# columns.tsv dictionary, the unfold headers/tooltips, and the legend.
+COLUMN_DICT = {
+    "trc_table": _TRC_TABLE_COLS,
+    "tra_table": _TRA_TABLE_COLS,
+    "tra_peaks": _PEAK_COLUMNS,
+}
 
 
 def _tsv_cell(v):
@@ -3023,7 +3054,7 @@ def write_table_exports(model, data_dir):
     # ---- trc_table.tsv ----
     with (data_dir / "trc_table.tsv").open("w", newline="") as fh:
         w = _csv.writer(fh, delimiter="\t", lineterminator="\n")
-        w.writerow([c[0] for c in _TRC_TABLE_COLS])
+        w.writerow([c.header for c in COLUMN_DICT["trc_table"]])
         for t in trcs:
             k = t.get("kite") or {}
             ta = t.get("tarean") or {}
@@ -3037,28 +3068,25 @@ def write_table_exports(model, data_dir):
                 "n_subrepeat":       k.get("n_subrepeat"),
                 "n_ssr":             k.get("n_ssr"),
             }
-            w.writerow([_tsv_cell(comp[col] if src is None else t.get(src))
-                        for col, src, _ in _TRC_TABLE_COLS])
+            w.writerow([_tsv_cell(comp[c.key] if c.source is None else t.get(c.source))
+                        for c in COLUMN_DICT["trc_table"]])
 
     # ---- tra_table.tsv ----
     with (data_dir / "tra_table.tsv").open("w", newline="") as fh:
         w = _csv.writer(fh, delimiter="\t", lineterminator="\n")
-        w.writerow([c[0] for c in _TRA_TABLE_COLS])
+        w.writerow([c.header for c in COLUMN_DICT["tra_table"]])
         for t in trcs:
             for a in t.get("arrays", []):
-                row = []
-                for col, src, fmt, _ in _TRA_TABLE_COLS:
-                    if col == "TRC_ID":
-                        row.append(_tsv_cell(t.get("id")))
-                    else:
-                        row.append(_tsv_cell(a.get(src)))
-                w.writerow(row)
+                w.writerow([_tsv_cell(t.get("id") if c.key == "TRC_ID"
+                                      else a.get(c.source))
+                            for c in COLUMN_DICT["tra_table"]])
 
     # ---- tra_peaks.tsv (exactly the unfold columns) ----
     n_peaks = 0
     with (data_dir / "tra_peaks.tsv").open("w", newline="") as fh:
         w = _csv.writer(fh, delimiter="\t", lineterminator="\n")
-        w.writerow(["TRC_ID", "seqid", "start", "end"] + _PEAK_COL_HEADERS)
+        w.writerow(["TRC_ID", "seqid", "start", "end"]
+                   + [c.header for c in COLUMN_DICT["tra_peaks"]])
         for t in trcs:
             tid = t.get("id")
             for a in t.get("arrays", []):
@@ -3066,7 +3094,8 @@ def write_table_exports(model, data_dir):
                 fp_f = float(fp) if fp is not None else None
                 for p in (a.get("rescored_peaks") or []):
                     vals = _peak_cell_values(p, fp_f)
-                    cells = [_fmt_peak_cell(v, c[3]) for v, c in zip(vals, _PEAK_COLUMNS)]
+                    cells = [_fmt_peak_cell(v, c.fmt)
+                             for v, c in zip(vals, COLUMN_DICT["tra_peaks"])]
                     w.writerow([tid, a.get("seqid"), a.get("start"), a.get("end")] + cells)
                     n_peaks += 1
 
@@ -3074,12 +3103,14 @@ def write_table_exports(model, data_dir):
     with (data_dir / "columns.tsv").open("w", newline="") as fh:
         w = _csv.writer(fh, delimiter="\t", lineterminator="\n")
         w.writerow(["table", "column", "description", "kitehor_source"])
-        for col, _src, desc in _TRC_TABLE_COLS:
-            w.writerow(["trc_table", col, desc, ""])
-        for col, src, _fmt, desc in _TRA_TABLE_COLS:
-            w.writerow(["tra_table", col, desc, src or ""])
-        for key, header, raw, fmt, desc in _PEAK_COLUMNS:
-            w.writerow(["tra_peaks", header, desc, "" if raw == "(computed)" else raw])
+        for table, specs in COLUMN_DICT.items():
+            for c in specs:
+                # kitehor_source is only meaningful for the kite-derived tables;
+                # trc_table columns come from clustering/TAREAN/model fields.
+                src = ("" if (table == "trc_table"
+                              or c.source in (None, "(computed)"))
+                       else c.source)
+                w.writerow([table, c.header, c.desc, src])
 
     n_tra = sum(len(t.get("arrays", [])) for t in trcs)
     return {"trc": len(trcs), "tra": n_tra, "peaks": n_peaks}
@@ -3115,58 +3146,69 @@ _TIER_DESC = [
 # canonical _PEAK_COLUMNS so the top-of-page legend, the in-row tooltips/legend
 # (built in JS from the same data via #tc-coldict), and tra_peaks.tsv all share
 # one source and cannot drift.
-_DETAILS_COL_DESC = [(c[1], c[4]) for c in _PEAK_COLUMNS]
+_DETAILS_COL_DESC = [(c.header, c.desc) for c in _PEAK_COLUMNS]
+
+
+def _array_table_legend():
+    """The visible array-table columns (composite cells) as structured
+    (label, html_description) pairs. The ×k entry's tier wording is composed
+    from TIER_DEFS so the HOR-order tier text is defined exactly once."""
+    hi, li = _tier_pill("HIGH"), _tier_pill("LIKELY")
+    xk = (
+        'round(Strongest / Founder); 1 if none — the higher-order (HOR) '
+        'multiplicity, qualified by an <strong>HOR-order confidence tier</strong>: '
+        f'<em>strict</em> ({TIER_DEFS["strict"][1]}; no marker); '
+        f'<em>supported</em> (<span class="tc-hor-supported">ˢ</span>, '
+        f'{TIER_DEFS["supported"][1]}); '
+        f'<em>weak</em> (<span class="tc-hor-approx">≈</span>, '
+        f'{TIER_DEFS["weak"][1]}; hover for raw k). '
+        'Reported "HOR" = strict&nbsp;∪&nbsp;supported.')
+    return [
+        ("Founder / Strongest",
+            '<strong>Strongest</strong> = highest-identity peak (rescore\'s '
+            '<code>founder_period</code>). <strong>Founder</strong> = smallest '
+            'divisor P of Strongest with k ∈ [2, 30] and id_med ≥ 0.7; falls '
+            'back to Strongest. Red <code>*</code> = NA from rescore, fell back '
+            'to top kite peak. <span class="tc-weakshort">⚠short</span> = a short '
+            'founder (≤ 30 bp) whose founder peak has weak kite support '
+            '(score &lt; 0.20) — hover for the longer alternative to review against.'),
+        ("&Delta;id",
+            "id(Strongest) − id(Founder), pp. NA when Founder = Strongest."),
+        ("&times;k", xk),
+        ("Other periods",
+            "peaks with id_med ≥ 0.7 other than Founder and Strongest, plus short "
+            "peaks (period &lt; rescore's min-period) whose kite rank is better "
+            "than the Founder's. Sorted by identity desc."),
+        ("Subrepeat",
+            "≤ 2 candidates ≤ Founder/3 with partial occupancy, ranked by "
+            f"<code>scan_occupancy_frac</code> desc. Tiered {hi} (scan + alignment "
+            f"/ k-mer support agree) or {li} (scan only). Click "
+            '<span class="tc-details-control tc-details-control-static"></span> '
+            "on a row for every peak with its tier and full diagnostics."),
+        ("SSR",
+            "dominant short-motif tandem repeat from kitehor's ssr-scan + "
+            "coverage %; top motifs in the expanded child row."),
+    ]
 
 
 def arrays_legend():
     """Per-TRA column legend + tier glossary + Details-table column glossary.
     Wrapped in a <details> so it stays collapsed by default; click the summary
-    to unfold. The tier and Details-column sections document the expanded
-    child row (every rescored peak with its diagnostics and tier pill)."""
+    to unfold. All three sections are generated from data (R1 single-source):
+    _array_table_legend() (visible columns + TIER_DEFS), _TIER_DESC (subrepeat
+    tiers), and COLUMN_DICT["tra_peaks"] via _DETAILS_COL_DESC (peak columns)."""
+    arr_rows = "".join(f"<dt>{label}</dt><dd>{desc}</dd>"
+                       for label, desc in _array_table_legend())
     tier_rows = "".join(
         f'<dt>{_tier_pill(t)}</dt><dd>{desc}</dd>' for t, desc in _TIER_DESC)
     col_rows = "".join(
         f'<dt><code>{esc(c)}</code></dt><dd>{desc}</dd>'
         for c, desc in _DETAILS_COL_DESC)
-    hi, li = _tier_pill("HIGH"), _tier_pill("LIKELY")
     return f"""
 <details class="tc-legend">
   <summary>Column legend &amp; tier glossary</summary>
   <p class="tc-legend-head"><strong>Array table columns</strong></p>
-  <dl class="tc-legend-list">
-    <dt>Founder / Strongest</dt><dd>
-        <strong>Strongest</strong> = highest-identity peak (rescore's
-        <code>founder_period</code>). <strong>Founder</strong> = smallest
-        divisor P of Strongest with k ∈ [2, 30] and id_med ≥ 0.7; falls
-        back to Strongest. Red <code>*</code> = NA from rescore, fell
-        back to top kite peak. <span class="tc-weakshort">⚠short</span> =
-        a short founder (≤ 30 bp) whose founder peak has weak kite support
-        (score &lt; 0.20) — hover for the longer alternative to review against.</dd>
-    <dt>&Delta;id</dt><dd>id(Strongest) − id(Founder), pp. NA when
-        Founder = Strongest.</dd>
-    <dt>&times;k</dt><dd>round(Strongest / Founder); 1 if none — the
-        higher-order (HOR) multiplicity. A <strong>HOR-order confidence
-        tier</strong> qualifies it: <em>strict</em> (clean integer divisor,
-        low k — confident order, no marker); <em>supported</em>
-        (<span class="tc-hor-supported">ˢ</span>, order backed by cross-array
-        founder consensus); <em>weak</em>
-        (<span class="tc-hor-approx">≈</span>, founder recovered but the order
-        is approximate — irregular, very high k where the integer test is
-        vacuous, or relaxed rescue; hover for raw k). Reported "HOR" counts =
-        strict&nbsp;∪&nbsp;supported.</dd>
-    <dt>Other periods</dt><dd>peaks with id_med ≥ 0.7 other than
-        Founder and Strongest, plus short peaks (period &lt;
-        rescore's min-period) whose kite rank is better than the
-        Founder's. Sorted by identity desc.</dd>
-    <dt>Subrepeat</dt><dd>≤ 2 candidates ≤ Founder/3 with partial
-        occupancy, ranked by <code>scan_occupancy_frac</code> desc.
-        Tiered {hi} (scan + alignment / k-mer support agree) or
-        {li} (scan only). Click
-        <span class="tc-details-control tc-details-control-static"></span>
-        on a row for every peak with its tier and full diagnostics.</dd>
-    <dt>SSR</dt><dd>dominant short-motif tandem repeat from kitehor's
-        ssr-scan + coverage %; top motifs in the expanded child row.</dd>
-  </dl>
+  <dl class="tc-legend-list">{arr_rows}</dl>
   <p class="tc-legend-head"><strong>Subrepeat-evidence tiers</strong>
      (pills in the expanded Details row)</p>
   <dl class="tc-legend-list tc-legend-tiers">{tier_rows}</dl>

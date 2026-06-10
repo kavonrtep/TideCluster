@@ -140,6 +140,30 @@ if os.path.isdir(FIX):
 else:
     print("SKIP fixture size guardrail (no run_e2e output present)")
 
+# ---- R1: single-source guards (legend ≡ COLUMN_DICT ≡ TIER_DEFS) ----
+check(set(rr.COLUMN_DICT) == {"trc_table", "tra_table", "tra_peaks"},
+      "COLUMN_DICT has the three report tables")
+for tbl, specs in rr.COLUMN_DICT.items():
+    check(all(c.header and c.desc for c in specs),
+          f"COLUMN_DICT[{tbl}]: every column has a header + description")
+# columns.tsv documents exactly COLUMN_DICT (same set, same order per table).
+documented_by_table = {}
+for r in col_rows:
+    documented_by_table.setdefault(r["table"], []).append(r["column"])
+for tbl, specs in rr.COLUMN_DICT.items():
+    check([c.header for c in specs] == documented_by_table.get(tbl),
+          f"columns.tsv {tbl} rows == COLUMN_DICT[{tbl}] (order + set)")
+# The HOR-order tier text is single-sourced: every TIER_DEFS meaning must
+# appear verbatim in the rendered legend (fails if the legend re-hardcodes it).
+legend = rr.arrays_legend()
+for t, (label, meaning) in rr.TIER_DEFS.items():
+    if t == "none":
+        continue
+    check(meaning in legend, f"legend embeds TIER_DEFS['{t}'] meaning (single source)")
+# The peak-column legend derives from COLUMN_DICT["tra_peaks"].
+check([h for h, _ in rr._DETAILS_COL_DESC] == [c.header for c in rr.COLUMN_DICT["tra_peaks"]],
+      "_DETAILS_COL_DESC (legend) derives from COLUMN_DICT['tra_peaks']")
+
 print()
 if _fail:
     print(f"{_fail} FAILURE(S)")
