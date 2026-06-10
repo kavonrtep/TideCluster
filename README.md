@@ -50,6 +50,36 @@ with each tandem array analyzed individually. This method facilitates the detect
 higher-order repeats and captures the variability in monomer size across different tandem
 repeat arrays.
 
+**How each array is described**
+
+Each tandem repeat array (TRA) is summarised with a few terms:
+
+| Term | In simple words |
+|---|---|
+| **Founder** | The basic repeat unit — the shortest building block the array is actually made of (its monomer). |
+| **Strongest** | The period the sequence matches most precisely. Equals the founder for a simple array; a multiple of it when there is higher-order structure. |
+| **Multiplicity (×k)** | How many founder copies make up the strongest unit. ×1 = no higher-order structure. |
+| **HOR (higher-order repeat)** | An array where the strongest unit is k≥2 founders joined together — whole monomers organised into a larger repeating block. |
+| **Subrepeat** | A short tandem repeat *inside* the founder monomer (period much shorter than the founder — only part of one monomer). The opposite direction to HOR: HOR groups whole monomers into a bigger unit, a subrepeat is a smaller pattern within a single monomer. |
+| **SSR (simple sequence repeat)** | Just a tandem repeat with a very short monomer — a simple short motif repeated (e.g. `AT`, `ATC`). Recognised from its consensus; the motif and its length are reported directly. |
+| **HOR-order confidence** | How trustworthy the ×k call is: **strict/supported** = a confident higher-order pattern; **weak** = the founder is reliable but the exact ×k is only approximate (very long, irregular, or rescued). |
+
+In short: every array gets a *founder* (its monomer). If the cleanest match is
+several whole founders long, it is an *HOR* (×k). If there is a shorter pattern
+*within* the monomer, that is a *subrepeat*. An array whose monomer is itself a
+very short simple motif is an *SSR*.
+
+These calls come from two complementary signals that TideCluster (via `kitehor`)
+measures along each array. The first is **periodicity**: the array is scanned for
+the spacing at which its sequence repeats, yielding a set of candidate monomer
+sizes, each with a strength score (how dominant that period is). The second is an
+**identity scan**: for each candidate period, copies one period apart are
+compared and their median sequence identity is recorded — a genuine repeat unit
+has well-conserved copies (high identity), whereas a spurious period does not.
+The **founder** is the shortest period that is both a real divisor of the array
+and well-conserved; the **strongest** is the best-conserved period overall. When
+the strongest is a whole-number multiple of the founder, the array is an **HOR**.
+
 Starting in TideCluster 1.10.0, the KITE step is powered by
 [kitehor](https://github.com/kavonrtep/kitehor) (`0.13.2` since
 TideCluster 1.14.1) — a sequence-agnostic Rust reimplementation of the
