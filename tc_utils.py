@@ -2159,6 +2159,31 @@ def extend_long_period_rescore(kite_dir, multi_fa, max_period, ext_max_period,
     return sorted(flagged)
 
 
+def parse_trc_ssr_motif_len(gff3_path):
+    """Per-TRC SSR motif length from the clustering GFF3's `repeat_type=SSR`
+    classification. SSR families are decided at clustering — a TRA *consensus*
+    that is > 90 % simple-sequence is pulled out, grouped by motif, and tagged
+    `repeat_type=SSR` + `ssr=MOTIF (pct%)` (e.g. `ssr=ATC (98.6%)`). Returns
+    {TRC_ID: len(MOTIF)} for SSR TRCs only (ATC -> 3, AAACCCT -> 7); TR TRCs and
+    older runs without the attributes yield an empty/partial map. This is the
+    authoritative SSR founder signal — kitehor's per-array ssr-scan is secondary
+    (it annotates SSR content inside any TRC, e.g. a 500 bp founder that is also
+    SSR-rich)."""
+    out = {}
+    if not gff3_path or not os.path.exists(gff3_path):
+        return out
+    with open(gff3_path) as fh:
+        for line in fh:
+            if line.startswith("#") or "repeat_type=SSR" not in line:
+                continue
+            attrs = line.rstrip("\n").split("\t")[-1]
+            m_name = re.search(r"Name=([^;]+)", attrs)
+            m_ssr  = re.search(r"ssr=\s*([A-Za-z]+)", attrs)
+            if m_name and m_ssr:
+                out[m_name.group(1)] = len(m_ssr.group(1))
+    return out
+
+
 # Map kitehor's finer-grained verdict + confidence onto the legacy
 # 4-bin status string that the report consumes. Thresholds match
 # HOR_BIN_WEAK / MODERATE / STRONG from the removed tarean/kite.R so
@@ -2643,7 +2668,7 @@ def _cluster_rescue_founder(peaks):
 
 
 def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
-                           tandem_validate_tsv=None):
+                           tandem_validate_tsv=None, trc_repeat_type=None):
     """Build the per-array summary CSV (one row per array) from kitehor
     >=0.12.0 outputs: the rescored peaks TSV (`<prefix>.rescored.peaks.tsv`,
     24 cols = kite + 15 rescore) and the ssr-scan summary
@@ -3087,43 +3112,41 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
             e["irregular"]        = True
             e["rescue_method"]    = "pass3"
 
-    # ---- Pass 4: SSR-founder override ----
-    # On SSR-pure (≥95 %) arrays rescore's identity-driven founder pick
-    # is unreliable: the SSR period sits below rescore's min-period and
-    # gets NA identity; every long-period peak it can evaluate has
-    # near-perfect id_med (because the array is literally `(motif)ₙ`,
-    # any multiple-of-motif period aligns perfectly). Force founder =
-    # strongest = kite top peak so the report shows the actual SSR
-    # period. Mark `ssr_override` so the report can surface a badge.
-    # The flag fires on every SSR-pure array — even when rescue/
-    # fallback already produced the same period — because the SSR
-    # badge supersedes the red-`*` fallback marker for these rows
-    # (rescore-NA on a sub-min-period SSR motif is the expected case,
-    # not an anomaly worth flagging).
+    # ---- Pass 4: SSR founder from the clustering repeat_type classification ----
+    # SSR families are identified up front at clustering: a TRA *consensus* that
+    # is > 90 % simple-sequence is pulled out of clustering, grouped by motif, and
+    # tagged `repeat_type=SSR` + `ssr=MOTIF` in the clustering GFF3 (see
+    # TideCluster.py). `trc_repeat_type` maps such TRCs -> the fundamental motif
+    # length (ATC -> 3, AAACCCT -> 7). For EVERY array of an SSR-family TRC the
+    # founder IS that motif length, regardless of the per-array kite peaks /
+    # coverage / rescore — the consensus call already settled the monomer, and the
+    # per-array kite signal is noisy (one ATC family spans 16-100 % coverage on
+    # the full sequence because the consensus hides per-array noise). This both
+    # (a) propagates the motif to low-coverage members the old per-array 95 %
+    # coverage override missed (-> founder 6/9), and (b) stops a TR satellite's
+    # lone SSR-rich array from being flipped to the motif: TR families are absent
+    # from `trc_repeat_type`, so e.g. TRC_2's 96 %-ATC array keeps its real 9490
+    # founder (the SSR content stays in the row as annotation). No HOR
+    # decomposition is attempted on an SSR motif. kitehor's per-array ssr-scan is
+    # now purely secondary (annotates SSR-rich content inside any TRC).
+    trc_repeat_type = trc_repeat_type or {}
     for e in pass1:
         e["ssr_override"] = False
-        ssr = ssr_by_rec.get(e["record_id"], {})
-        cov = _num(ssr.get("total_ssr_coverage_pct"))
-        motif = (ssr.get("dominant_motif") or "").strip()
-        if cov is None or cov < _SSR_OVERRIDE_COVERAGE:
+        motif_len = trc_repeat_type.get(e["trc"])
+        if not motif_len:
             continue
-        if not motif or motif == "NA":
-            continue
-        kite_top_period = _num(e["rank1"].get("period"))
-        if kite_top_period is None:
-            continue
-        e["founder_period"]   = kite_top_period
-        e["strongest_period"] = kite_top_period
+        peak_at = next((p for p in e["peaks"]
+                        if _num(p.get("period")) == motif_len), e["rank1"])
+        e["founder_period"]   = motif_len
+        e["strongest_period"] = motif_len
         e["multiplicity"]     = 1
         e["multiplicity_raw"] = 1.0
         e["irregular"]        = False
-        e["fallback"]         = False   # SSR badge supersedes fallback
-        # Re-point the peak refs to rank-1 so id_med (typically NA on
-        # the SSR period) and other diagnostics come from the right row.
-        e["founder_peak"]   = e["rank1"]
-        e["strongest_peak"] = e["rank1"]
-        e["ssr_override"]   = True
-        e["rescue_method"]  = "ssr"
+        e["fallback"]         = False
+        e["founder_peak"]     = peak_at
+        e["strongest_peak"]   = peak_at
+        e["ssr_override"]     = True
+        e["rescue_method"]    = "ssr"
 
     # ---- Pass 5: peak-cluster fallback rescue ----
     # Fires only when rescore returned NA (fallback=True) AND no SSR

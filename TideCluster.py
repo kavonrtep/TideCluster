@@ -213,12 +213,17 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
                 print(F"Re-rescored {len(flagged)} array(s) with a dominant "
                       F"period > {rescore_max_period} bp at max-period "
                       F"{ext_max_period}.")
+        # SSR families are classified at clustering (repeat_type=SSR + ssr motif
+        # in the clustering GFF3); their founder is the fundamental motif length
+        # for all arrays, set in build_monomer_size_csv.
+        trc_repeat_type = tc.parse_trc_ssr_motif_len(F"{prefix}_clustering.gff3")
         tc.build_monomer_size_csv(
             kite_tsv=F"{kite_dir}/kitehor.kite.tsv",
             ssr_tsv=F"{kite_dir}/kitehor.ssr.tsv",
             rescored_peaks_tsv=F"{kite_dir}/kitehor.rescored.peaks.tsv",
             tandem_validate_tsv=F"{kite_dir}/kitehor.tandem_validate.tsv",
-            out_csv=F"{kite_dir}/monomer_size_top3_estimats.csv")
+            out_csv=F"{kite_dir}/monomer_size_top3_estimats.csv",
+            trc_repeat_type=trc_repeat_type)
         print("Rendering per-TRC profile heatmaps.")
         tc.run_cmd(F"{script_path}/tarean/kite_heatmaps.R"
                    F" --periodogram {kite_dir}/kitehor.periodogram"
