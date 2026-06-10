@@ -105,6 +105,40 @@ _HOR_TIER_LABEL = {t: d[0] for t, d in TIER_DEFS.items()}
 # "trc_table" / "tra_table" / "tra_peaks" to lists of these.
 ColSpec = namedtuple("ColSpec", "key header source fmt desc")
 
+# Centralized explanatory blurbs (R2) — one home for the concept prose that
+# describes the structural signals, so wording changes happen here rather than
+# inside render code. Format-strings with {named} placeholders for live counts.
+BLURBS = {
+    "trc_signal_counts": (
+        '<h3>Structural signal counts across all analysed arrays</h3>'
+        '<p style="font-size:12px;color:var(--fg-muted)">'
+        'HOR confident: <strong>{tot_hor}</strong> &nbsp;·&nbsp; '
+        'HOR&approx; (founder recovered): <strong>{tot_hor_approx}</strong> &nbsp;·&nbsp; '
+        'subrepeat: <strong>{tot_subrep}</strong> &nbsp;·&nbsp; '
+        'SSR: <strong>{tot_ssr}</strong> &nbsp;·&nbsp; '
+        'fallback founder: <strong>{tot_fb}</strong>. '
+        'Subrepeat counts use the strict HIGH/LIKELY tiers '
+        '(see <em>Subrepeat</em> column legend on any TRC page).'
+        '</p>'),
+    "trc_structural_summary": (
+        '<h2>Per-TRC structural summary</h2>'
+        '<p style="font-size:12px;color:var(--fg-muted)">'
+        '<strong>Monomer (KITE)</strong> is the most-frequent primary '
+        'rescore founder period across the arrays of a given TRC. '
+        '<strong>HOR (confident)</strong> counts arrays with a confidently '
+        'ordered higher-order structure (founder tier <em>strict</em> or '
+        '<em>supported</em>); <strong>HOR&approx; (founder rec.)</strong> '
+        'counts arrays where the founder is recovered but the ×k order is '
+        'only approximate (irregular, very high k, or relaxed rescue); '
+        '<strong>Subrep</strong> counts arrays with at least one '
+        'HIGH/LIKELY subrepeat candidate; <strong>SSR</strong> counts '
+        'arrays with a dominant short-motif tandem; '
+        '<strong>Fallback</strong> marks arrays where rescore could '
+        'not assign a founder and TideCluster fell back to the top-'
+        'scored kite peak.'
+        '</p>'),
+}
+
 
 def hor_tier_badge(arr):
     """Per-array HOR-order tier badge (replaces the spectral hor_badge)."""
@@ -2131,32 +2165,10 @@ def render_kite(model, out_path, run_meta, ctx):
                 '<th>Profile</th>'
                 '</tr>')
         summary = (
-            '<h3>Structural signal counts across all analysed arrays</h3>'
-            '<p style="font-size:12px;color:var(--fg-muted)">'
-            f'HOR confident: <strong>{tot_hor}</strong> &nbsp;·&nbsp; '
-            f'HOR&approx; (founder recovered): <strong>{tot_hor_approx}</strong> &nbsp;·&nbsp; '
-            f'subrepeat: <strong>{tot_subrep}</strong> &nbsp;·&nbsp; '
-            f'SSR: <strong>{tot_ssr}</strong> &nbsp;·&nbsp; '
-            f'fallback founder: <strong>{tot_fb}</strong>. '
-            'Subrepeat counts use the strict HIGH/LIKELY tiers '
-            '(see <em>Subrepeat</em> column legend on any TRC page).'
-            '</p>'
-            '<h2>Per-TRC structural summary</h2>'
-            '<p style="font-size:12px;color:var(--fg-muted)">'
-            '<strong>Monomer (KITE)</strong> is the most-frequent primary '
-            'rescore founder period across the arrays of a given TRC. '
-            '<strong>HOR (confident)</strong> counts arrays with a confidently '
-            'ordered higher-order structure (founder tier <em>strict</em> or '
-            '<em>supported</em>); <strong>HOR&approx; (founder rec.)</strong> '
-            'counts arrays where the founder is recovered but the ×k order is '
-            'only approximate (irregular, very high k, or relaxed rescue); '
-            '<strong>Subrep</strong> counts arrays with at least one '
-            'HIGH/LIKELY subrepeat candidate; <strong>SSR</strong> counts '
-            'arrays with a dominant short-motif tandem; '
-            '<strong>Fallback</strong> marks arrays where rescore could '
-            'not assign a founder and TideCluster fell back to the top-'
-            'scored kite peak.'
-            '</p>')
+            BLURBS["trc_signal_counts"].format(
+                tot_hor=tot_hor, tot_hor_approx=tot_hor_approx,
+                tot_subrep=tot_subrep, tot_ssr=tot_ssr, tot_fb=tot_fb)
+            + BLURBS["trc_structural_summary"])
     else:
         cls_total = class_totals(model)
         total = sum(cls_total.values()) or 1
