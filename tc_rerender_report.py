@@ -2298,6 +2298,12 @@ _CLASS_FILL = {
 }
 
 
+# Per-TRC distribution ideogram shows TRA *positions* only — a single neutral
+# fill, no structural class colour-coding (a non-HOR TRC must not read as HOR).
+# The index genome ideogram is already neutral (CSS .tc-idx-tra fill #888).
+_TRA_NEUTRAL_FILL = "#9aa0a6"
+
+
 def _class_fill(arr):
     cc = arr.get("combined_class")
     if cc:
@@ -2384,7 +2390,7 @@ def _render_ideogram(majors, by_seqid):
             parts.append(
                 f'<rect class="tc-tra" x="{x_start:.2f}" y="{y}" '
                 f'width="{w:.2f}" height="{bar_h}" '
-                f'fill="{_class_fill(arr)}" stroke="none" '
+                f'fill="{_TRA_NEUTRAL_FILL}" stroke="none" '
                 f'data-title="{esc(_array_title(arr))}">'
                 f'<title>{esc(_array_title(arr))}</title></rect>'
             )
@@ -2431,7 +2437,7 @@ def _render_minor_table(minors, by_seqid, is_v012=False):
             mini.append(
                 f'<rect class="tc-tra" x="{x_start:.2f}" y="2" '
                 f'width="{w:.2f}" height="8" '
-                f'fill="{_class_fill(arr)}" stroke="none" '
+                f'fill="{_TRA_NEUTRAL_FILL}" stroke="none" '
                 f'data-title="{esc(_array_title(arr))}">'
                 f'<title>{esc(_array_title(arr))}</title></rect>')
         mini.append("</svg>")
@@ -2540,7 +2546,8 @@ def render_trc_distribution(trc, seqid_lengths):
         + " · ".join(summary_parts) +
         f'. Every major scaffold is drawn even when it carries no '
         f'arrays of this TRC &mdash; absence is informative too. '
-        f'{colour_intro}{class_legend_inline(is_v012=is_v012)}.'
+        f'Rectangles mark array positions only (single neutral colour, no '
+        f'structural class colour-coding).'
         f' {hover_hint}'
         f'</p>'
     )
