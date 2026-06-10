@@ -33,6 +33,23 @@
 - **HTML report**: per-TRC distribution ideograms now show array **positions
   only** (single neutral colour, no structural class colour-coding, so a non-HOR
   TRC no longer reads as HOR).
+- **Lighter TRC dashboards (satellite-rich genomes)**: the per-array Details
+  child row is no longer embedded as HTML per row — each row carries a small key
+  and the diagnostics live in one compact embedded per-TRC JSON block, with the
+  child row built lazily in JS on unfold (self-contained, works from `file://`).
+  A large centromeric-satellite dashboard drops ~4× (e.g. 5.3 MB → 1.3 MB) and
+  no longer stalls the browser on expand.
+- **Accessible TSV bundle** in `<prefix>_report/data/`, written from the same
+  model the HTML renders from (so it mirrors the report): `tra_table.tsv`
+  (per array), `trc_table.tsv` (per TRC), `tra_peaks.tsv` (per rescored peak),
+  and `columns.tsv` (a data dictionary). A *Download tables (TSV)* link sits
+  under each arrays table. `monomer_size_top3_estimats.csv` is unchanged.
+- **Unfold column legend**: the per-peak diagnostics table now documents itself
+  — column tooltips plus a shared *column meanings* glossary in the expanded row.
+- **Report content single-sourced** (maintainability): one `COLUMN_DICT` drives
+  every report table's headers, descriptions, the HTML legend, the TSV bundle and
+  `columns.tsv`; one `TIER_DEFS` defines the HOR-order tier text once; structural
+  blurbs live in one place. A CI check guards legend ≡ dictionary ≡ tier text.
 
 ## 1.14.1 (2026-06-10)
 - **kitehor 0.13.2** (pinned in `conda-deps.txt`): improved short-monomer
