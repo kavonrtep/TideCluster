@@ -2213,7 +2213,7 @@ def _hor_order_confidence(multiplicity, multiplicity_raw, irregular,
         return "weak"
     if founder_method == "strict":
         return "strict"
-    if founder_method in ("pass2", "kh_deeper"):
+    if founder_method in ("pass2", "kh_deeper", "ladder"):
         return "supported"
     return "weak"   # pass3 / cluster / fallback / other relaxed rescue
 
@@ -2238,6 +2238,21 @@ _CONS_ANCHOR_PCT = 0.05
 # prevalent-founder anchor uses (0.5 / 0.01 = 50).
 _HOR_ORDER_HIGH_K = round(0.5 / _RATIO_TOL_FRAC)
 _SUBREP_RATIO    = 0.33   # period <= founder/3 ⇒ qualifies as candidate band
+
+# Harmonic-ladder founder (Pass 7) — recover the basic monomer of a divergent HOR
+# satellite when it sits below the strict id gate but a clean harmonic ladder
+# (peaks at integer multiples m·P0) corroborates it. See
+# docs/harmonic_ladder_founder_plan.md. Gates are deliberately conservative;
+# tools/founder_diff.py is the blast-radius check.
+_LADDER_KMIN      = 2     # strongest must be >= 2x the fundamental (k=2 only via the exceptional path)
+_LADDER_MIN_RUNGS = 3     # >=3 distinct integer multiples present (incl. P0 and S) for the k>=3 path
+_LADDER_ID_FLOOR  = 0.60  # P0 / rung id_med floor — a diverged real monomer, not noise
+_LADDER_IQR_MAX   = 0.10  # P0 id_iqr ceiling — consistent identity (k>=3 path)
+_LADDER_OCC_MIN   = 0.50  # P0 scan_occupancy floor — tiles a real fraction (k>=3 path)
+# Exceptionally-clean ×2 path (only 2 rungs ⇒ stricter, plus a HOR-conservation test):
+_LADDER_X2_IQR_MAX   = 0.05   # P0 id_iqr ceiling (stricter)
+_LADDER_X2_OCC_MIN   = 0.85   # P0 scan_occupancy floor (stricter)
+_LADDER_X2_HOR_DELTA = 0.10   # id_med(2*P0) - id_med(P0): the double must be a genuine HOR unit
 
 # --- Short-founder review aids (kitehor >= 0.13.2) ---------------------------
 # kitehor 0.13.1's "shorter-monomer scanning" computed a pairwise identity_med
@@ -2687,6 +2702,66 @@ def _cluster_rescue_founder(peaks):
         return None
     founder_period = int(round(best["median_period"]))
     return best, founder_period
+
+
+def _harmonic_ladder_founder(peaks, strongest_period, strongest_id):
+    """Pass 7 helper. Recover the basic monomer P0 of a divergent HOR satellite
+    when the strongest period S sits atop a clean harmonic ladder (peaks at
+    integer multiples m·P0). Returns (founder_peak, founder_period, multiplicity)
+    or None. P0 may be below the strict id gate — that is the point; the ladder
+    + tight-IQR + occupancy gates substitute for the missing identity. See
+    docs/harmonic_ladder_founder_plan.md.
+
+    Two regimes:
+      k ≥ 3  → require ≥ _LADDER_MIN_RUNGS distinct integer multiples present
+               (incl. P0 and S), tight IQR, decent occupancy.
+      k == 2 → "exceptionally clean" only: stricter IQR + occupancy, AND the
+               double must be a genuine HOR unit (id_med(2·P0) − id_med(P0) ≥
+               _LADDER_X2_HOR_DELTA) — the conservation gap that tells the half
+               is the diverged fundamental, not a sidelobe of a real 2·P0 monomer.
+    """
+    S = _num_or_none(strongest_period)
+    if S is None or S <= 0:
+        return None
+    cand = []
+    for p in peaks:
+        P = _num_or_none(p.get("period"))
+        idm = _num_or_none(p.get("identity_med"))
+        if (P is None or P <= 0 or P >= S
+                or idm is None or idm < _LADDER_ID_FLOOR):
+            continue
+        cand.append((P, p, idm))
+    cand.sort(key=lambda t: t[0])               # smallest period (true fundamental) first
+    for P0, p0, id0 in cand:
+        k = int(round(S / P0))
+        if k < _LADDER_KMIN or abs(S / P0 - k) > _RATIO_TOL:
+            continue                            # S must be a clean rung of P0
+        iqr0 = _num_or_none(p0.get("identity_iqr"))
+        occ0 = _num_or_none(p0.get("scan_occupancy_frac"))
+        if iqr0 is None or occ0 is None:
+            continue
+        if k >= _LADDER_MIN_RUNGS:              # --- k >= 3: rung-count path ---
+            if iqr0 > _LADDER_IQR_MAX or occ0 < _LADDER_OCC_MIN:
+                continue
+            rungs = set()
+            for m in range(1, k + 1):
+                target = m * P0
+                tol = max(_RATIO_TOL * target, 1.0)
+                for q in peaks:
+                    qp = _num_or_none(q.get("period"))
+                    qid = _num_or_none(q.get("identity_med"))
+                    if (qp is not None and abs(qp - target) <= tol
+                            and qid is not None and qid >= _LADDER_ID_FLOOR):
+                        rungs.add(m)
+                        break
+            if len(rungs) >= _LADDER_MIN_RUNGS and 1 in rungs and k in rungs:
+                return p0, P0, k
+        elif k == 2:                            # --- exceptionally-clean ×2 ---
+            sid = _num_or_none(strongest_id)
+            if (iqr0 <= _LADDER_X2_IQR_MAX and occ0 >= _LADDER_X2_OCC_MIN
+                    and sid is not None and (sid - id0) >= _LADDER_X2_HOR_DELTA):
+                return p0, P0, 2
+    return None
 
 
 def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
@@ -3336,6 +3411,31 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
         # flag irregular only when the integer ratio needed the relaxed gate
         e["irregular"]        = abs(k - kr) > _RATIO_TOL
         e["rescue_method"]    = "kh_deeper"
+
+    # ---- Pass 7: harmonic-ladder founder (divergent HOR basic monomer) ----
+    # Final rescue for arrays the earlier passes left at founder == strongest
+    # (multiplicity == 1): the basic monomer was below the strict id gate, so no
+    # deeper founder was found. When the strongest sits atop a clean harmonic
+    # ladder (peaks at integer multiples m·P0), adopt the fundamental P0 as the
+    # founder with ×k. See docs/harmonic_ladder_founder_plan.md.
+    _rt7 = trc_repeat_type or {}
+    for e in pass1:
+        if e["fallback"] or e.get("ssr_override") or e["trc"] in _rt7:
+            continue
+        if e["multiplicity"] != 1 or e["strongest_period"] is None:
+            continue
+        sp = e.get("strongest_peak") or {}
+        res = _harmonic_ladder_founder(
+            e["peaks"], e["strongest_period"], _num(sp.get("identity_med")))
+        if res is None:
+            continue
+        p0, P0, k = res
+        e["founder_peak"]     = p0
+        e["founder_period"]   = P0
+        e["multiplicity"]     = k
+        e["multiplicity_raw"] = e["strongest_period"] / P0
+        e["irregular"]        = abs(e["multiplicity_raw"] - k) > _RATIO_TOL
+        e["rescue_method"]    = "ladder"
 
     # ---- Build output rows ----
     rows = []
