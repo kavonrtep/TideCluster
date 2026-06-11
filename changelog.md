@@ -1,3 +1,18 @@
+## 1.15.1 (2026-06-11)
+- **Harmonic-ladder founder** (founder Pass 7) for divergent-HOR satellites:
+  when no single short peak clears the identity gate but the surviving peaks
+  form a clean harmonic ladder (`p, 2p, 3p, …`), the founder is recovered as the
+  ladder's fundamental `p` and tagged `founder_method="ladder"`. Recovers the
+  basic monomer of high-divergence HOR arrays the strict/divisor passes miss
+  (validated *A. thaliana* TRC_47 179×6 and *D. rapa* TRC_158 111×3). Purely
+  additive — strict-path founder values are unchanged.
+- **Report fix**: TRCs below the TAREAN size threshold (combined array length
+  `< -M`, skipped by TAREAN) now still surface their KITE per-array founder
+  results in the report instead of an empty section.
+- **Report fix**: the per-array SSR section now trusts the pipeline's SSR call
+  and shows **raw** per-array SSR coverage (`ssr_raw_*`) rather than the inflated
+  kitehor consensus coverage (`ssr_consensus_*`).
+
 ## 1.15.0 (2026-06-10)
 - **Problematic founder/SSR calls fixed** (root-cause analysis in
   `docs/problematic_calls_analysis.md`):
