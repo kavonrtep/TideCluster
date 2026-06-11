@@ -99,12 +99,36 @@ checks; `long` runs `run_all` on the bundled
   regression; it needs a multi-sample fixture and **skips** if none is
   present (looks for `$TC_COMPARATIVE_FIXTURE`, `tests/data/comparative`,
   then `test_data/analysis_1.10.5`).
+- `tests/unit.sh` is the fast, self-contained suite (founder/HOR/SSR/report
+  exports). The SSR + founder regressions run over a **committed real-kite
+  fixture** at `tests/data/kite_fixture/` (no external run dir needed).
+
+## Dev helpers (`tools/`)
+
+- **`tools/tc_regen.sh <run_dir> [prefix]`** — regenerate the KITE monomer CSV
+  from a run's existing `kitehor.*` output **and** re-render the report, in one
+  command (PATH-shadows the pinned kitehor env). Use this after any
+  `tc_utils`/`tc_rerender_report` change instead of hand-writing the
+  `build_monomer_size_csv(...)` + `tc_rerender_report.py` two-step.
+  **To point it at a newer kitehor:** bump `KITEHOR_ENV` at the top of the
+  script (or `export KITEHOR_ENV=…`); set it to `""` once the dev env itself is
+  current.
+- **`tools/founder_diff.py <run_dir> …`** — rebuild the monomer CSV with the
+  working tree vs `git HEAD` and diff the founder columns. Run before committing
+  a `tc_utils` change to confirm it's additive / display-only (0 diffs).
 
 ### Gotchas
 
+- **The HTML report renders from `<prefix>_kite/monomer_size_top3_estimats.csv`,
+  not from live code.** After changing founder/SSR logic you must **regenerate
+  the CSV and then re-render** (`tools/tc_regen.sh`) — a stale report can show
+  the *old* call while the code is already fixed. (This bit the TRC_2 SSR
+  diagnosis: CSV said 9520, report said 3.)
 - `<prefix>_kite/monomer_size_top3_estimats.csv` is **TAB-delimited**
   despite the `.csv` name — read it with `delimiter='\t'` /
-  `sep="\t"`, not comma.
+  `sep="\t"`, not comma. Its SSR coverage columns are split into
+  `ssr_consensus_*` (kitehor consensus_single — can be an inflated artifact) and
+  `ssr_raw_*` (real per-array content); the report shows **raw**.
 - The sandbox has **no `/usr/bin/time` and no `bc`**. Time things with
   `date +%s%N` (integer-ns deltas) and do arithmetic in Python, not `bc`.
 - Founder / strongest / multiplicity / HOR / subrepeat have precise,
