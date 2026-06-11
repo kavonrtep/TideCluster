@@ -1,0 +1,31 @@
+record_id	verdict	host_period	multiplicity	window_bp	n_candidates	candidates	best_candidate_period	best_candidate_kind	density	spatial_contrast	phase_contrast	subrepeat_identity	n_windows_total	n_windows_present	decision_hint	reason
+TRC_18:chr2_15537518_15544888	unresolved	3	1		0						NA	NA	0	0	no_candidates	no_candidates
+TRC_18:chr2_15694677_15702269	simple_tr	3501.01	1	1167	1	other/9:d=0.000:sc=0.000:pc=0.000:id=nan:no_signal	9	other	0	0	0	NA	24	0	no_signal	other:no_signal
+TRC_18:chr3_21052539_21058155	simple_tr	24	1	24	1	other/6:d=0.206:sc=0.252:pc=nan:id=0.833:localized	6	other	0.2058	0.2519	NA	0.8333	933	192	localized_subrepeat	other:localized
+TRC_18:chr5_53197899_53202949	unresolved	3	1		0						NA	NA	0	0	no_candidates	no_candidates
+TRC_18:chr8_29790032_29803249	unresolved	3	1		0						NA	NA	0	0	no_candidates	no_candidates
+TRC_18:chr12_37892750_37898990	unresolved	9	1		0						NA	NA	0	0	no_candidates	no_candidates
+TRC_2:chr2_66282_295518	unresolved	9491	1	3164	2	other/53:d=0.216:sc=0.207:pc=0.875:id=0.925:localized;other/141:d=0.000:sc=0.000:pc=0.000:id=nan:no_signal	53	other	0.216	0.2069	0.875	0.9245	287	62	localized_subrepeat	other:localized
+TRC_2:chr2_362666_1028754	unresolved	9491	1	3164	2	other/53:d=0.251:sc=0.206:pc=0.514:id=0.925:localized;other/141:d=0.004:sc=0.012:pc=0.014:id=0.872:localized	53	other	0.2512	0.2064	0.5143	0.9245	840	211	localized_subrepeat	other:localized
+TRC_2:chr2_1045760_1532377	unresolved	9491	1	3164	2	other/53:d=0.246:sc=0.123:pc=0.706:id=0.925:localized;other/141:d=0.010:sc=0.048:pc=0.049:id=0.879:localized	53	other	0.2463	0.1231	0.7059	0.9245	613	151	localized_subrepeat	other:localized
+TRC_2:chr2_2193575_2915748	unresolved	9491	1	3164	2	other/53:d=0.218:sc=0.113:pc=0.566:id=0.925:localized;other/141:d=0.001:sc=0.011:pc=0.013:id=0.876:no_signal	53	other	0.2176	0.1128	0.5658	0.9245	910	198	localized_subrepeat	other:localized
+TRC_2:chr2_2925888_4029240	unresolved	9491	1	3164	2	other/53:d=0.272:sc=0.152:pc=0.853:id=0.925:localized;other/141:d=0.006:sc=0.014:pc=0.069:id=0.872:localized	53	other	0.2723	0.1522	0.8534	0.9245	1392	379	localized_subrepeat	other:localized
+TRC_2:chr2_4186682_5064700	unresolved	9491	1	3164	2	other/53:d=0.217:sc=0.090:pc=0.435:id=0.925:localized;other/141:d=0.005:sc=0.018:pc=0.027:id=0.872:localized	53	other	0.2166	0.0901	0.4348	0.9245	1108	240	localized_subrepeat	other:localized
+TRC_2:chr2_5516171_5601606	unresolved	9491	1	3164	2	other/53:d=0.245:sc=0.152:pc=1.000:id=0.925:localized;other/141:d=0.000:sc=0.000:pc=0.000:id=nan:no_signal	53	other	0.2453	0.1515	1	0.9245	106	26	localized_subrepeat	other:localized
+TRC_2:chr2_6519111_6648674	unresolved	9490	1	3163	2	other/53:d=0.329:sc=0.231:pc=1.000:id=0.925:localized;other/141:d=0.019:sc=0.125:pc=0.143:id=0.872:localized	53	other	0.3292	0.2314	1	0.9245	161	53	localized_subrepeat	other:localized
+TRC_2:chr2_7005575_7070580	unresolved	53	1		0						NA	NA	0	0	no_candidates	no_candidates
+TRC_2:chr2_7104557_7325932	unresolved	9491	1	3164	2	other/53:d=0.274:sc=0.277:pc=0.957:id=0.925:localized;other/141:d=0.025:sc=0.071:pc=0.152:id=0.872:localized	53	other	0.2744	0.2775	0.9565	0.9245	277	76	localized_subrepeat	other:localized
+TRC_2:chr2_7522051_7856600	unresolved	9490	1	3163	2	other/53:d=0.230:sc=0.143:pc=0.821:id=0.925:localized;other/141:d=0.002:sc=0.024:pc=0.020:id=0.869:no_signal	53	other	0.2304	0.1429	0.8205	0.9245	421	97	localized_subrepeat	other:localized
+TRC_2:chr2_8024276_9074916	unresolved	9491	1	3164	2	other/53:d=0.235:sc=0.126:pc=0.396:id=0.925:localized;other/141:d=0.002:sc=0.008:pc=0.009:id=0.872:localized	53	other	0.2345	0.1256	0.3964	0.9245	1326	311	localized_subrepeat	other:localized
+TRC_2:chr2_9503128_9577930	unresolved	9490	1	3163	2	other/53:d=0.239:sc=0.700:pc=0.625:id=0.925:localized;other/141:d=0.000:sc=0.000:pc=0.000:id=nan:no_signal	53	other	0.2391	0.7	0.625	0.9245	92	22	localized_subrepeat	other:localized
+TRC_2:chr2_9629252_10688604	unresolved	9491	1	3164	2	other/53:d=0.256:sc=0.097:pc=0.541:id=0.925:localized;other/141:d=0.001:sc=0.015:pc=0.018:id=0.872:no_signal	53	other	0.2558	0.097	0.5405	0.9245	1337	342	localized_subrepeat	other:localized
+TRC_2:chr2_11171815_11477699	unresolved	9491	1	3164	2	other/53:d=0.271:sc=0.277:pc=0.750:id=0.925:localized;other/141:d=0.003:sc=0.026:pc=0.016:id=0.872:no_signal	53	other	0.2708	0.2765	0.75	0.9245	384	104	localized_subrepeat	other:localized
+TRC_2:chr2_12001093_12204784	unresolved	53	1		0						NA	NA	0	0	no_candidates	no_candidates
+TRC_2:chr2_12328977_12457258	unresolved	53	1		0						NA	NA	0	0	no_candidates	no_candidates
+TRC_2:chr2_12536962_12866889	unresolved	9491	1	3164	2	other/53:d=0.277:sc=0.143:pc=0.514:id=0.925:localized;other/141:d=0.010:sc=0.025:pc=0.088:id=0.879:localized	53	other	0.2771	0.1429	0.5143	0.9245	415	115	localized_subrepeat	other:localized
+TRC_2:chr2_13217685_13575898	unresolved	9491	1	3164	2	other/53:d=0.200:sc=0.221:pc=0.473:id=0.925:localized;other/141:d=0.004:sc=0.044:pc=0.027:id=0.879:no_signal	53	other	0.2	0.2207	0.473	0.9245	450	90	localized_subrepeat	other:localized
+TRC_2:chr2_14041161_14378283	unresolved	9491	1	3164	2	other/53:d=0.278:sc=0.195:pc=0.743:id=0.925:localized;other/141:d=0.000:sc=0.000:pc=0.000:id=nan:no_signal	53	other	0.2783	0.1949	0.7429	0.9245	424	118	localized_subrepeat	other:localized
+TRC_2:chr2_14562307_14697397	unresolved	9491	1	3164	2	other/53:d=0.190:sc=0.316:pc=0.429:id=0.925:localized;other/141:d=0.006:sc=0.062:pc=0.071:id=0.876:no_signal	53	other	0.1905	0.3162	0.4286	0.9245	168	32	localized_subrepeat	other:localized
+TRC_2:chr2_14721374_14951355	unresolved	9491	1	3164	2	other/53:d=0.198:sc=0.275:pc=0.833:id=0.925:localized;other/141:d=0.000:sc=0.000:pc=0.000:id=nan:no_signal	53	other	0.1979	0.2746	0.8333	0.9245	288	57	localized_subrepeat	other:localized
+TRC_2:chr2_15535707_15614778	unresolved	53	1		0						NA	NA	0	0	no_candidates	no_candidates
+TRC_2:chr11_20008170_20250397	unresolved	9490	1	3163	2	other/53:d=0.230:sc=0.073:pc=0.960:id=0.925:localized;other/141:d=0.003:sc=0.032:pc=0.024:id=0.879:no_signal	53	other	0.2303	0.0731	0.96	0.9245	304	70	localized_subrepeat	other:localized

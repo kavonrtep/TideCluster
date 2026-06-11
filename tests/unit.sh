@@ -19,4 +19,7 @@ python3 "$ROOT/tests/test_hor_order_confidence.py"
 echo "=== unit: report TSV bundle + lazy child rows ==="
 python3 "$ROOT/tests/test_report_exports.py"
 
+echo "=== unit: SSR raw/consensus + founder (real kite fixture) ==="
+python3 "$ROOT/tests/test_ssr_raw_fixture.py"
+
 echo "unit tests OK"
