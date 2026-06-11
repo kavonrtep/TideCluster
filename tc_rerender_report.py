@@ -87,7 +87,8 @@ TIER_DEFS = {
     "strict":    ("HOR (strict)",
                   "clean integer divisor, low k — confident higher-order order"),
     "supported": ("HOR (supported)",
-                  "order backed by cross-array founder consensus"),
+                  "order backed by corroborating evidence — cross-array founder "
+                  "consensus or a harmonic ladder"),
     "weak":      ("founder recovered (HOR ≈)",
                   "founder reliable, order approximate — irregular, very high k "
                   "(integer test vacuous), or a relaxed rescue"),
@@ -3014,7 +3015,7 @@ _TRA_TABLE_COLS = [ColSpec(col, col, src, fmt, desc) for (col, src, fmt, desc) i
     ("multiplicity_raw",        "multiplicity_raw",  "raw", "exact strongest/founder ratio."),
     ("hor_order_confidence",    "hor_order_confidence","raw", _HOR_CONF_DESC),
     ("irregular_multiplicity",  "irregular_multiplicity","bool","strongest is not a clean integer multiple of founder."),
-    ("founder_method",          "founder_method",    "raw", "which pass set the founder (strict|pass2|kh_deeper|pass3|cluster|ssr|fallback|none)."),
+    ("founder_method",          "founder_method",    "raw", "which pass set the founder (strict|pass2|kh_deeper|ladder|pass3|cluster|ssr|fallback|none)."),
     ("founder_fallback",        "founder_fallback",  "bool","rescore returned NA; fell back to the top kite peak."),
     ("cluster_rescue",          "cluster_rescue",    "bool","founder = median of a summed-score peak cluster (Pass 5)."),
     ("subrepeat_1_period",      "subrepeat_1_period","raw", "top subrepeat candidate period (bp; inside the monomer)."),

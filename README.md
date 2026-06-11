@@ -111,6 +111,16 @@ higher-order repeats.
   (`hor_basic_period`) and adopts it when it is a meaningfully deeper
   (≥ 20 %), clean, near-full-coverage array-wide tandem that the strict
   divisor gate missed (`founder_method = kh_deeper`).
+- Harmonic-ladder founder: for a **divergent** HOR satellite the basic
+  monomer can fall *below* the `identity_med ≥ 0.7` gate (its copies are
+  only ~65–70 % identical) while the higher-order unit is conserved — so
+  the founder defaults to the HOR unit. When the strongest period sits
+  atop a clean **harmonic ladder** (peaks at integer multiples of the
+  fundamental: ≥ 3 distinct rungs, or an exceptionally-clean ×2 whose
+  double is a genuinely more-conserved HOR unit), TideCluster adopts the
+  fundamental as the founder with the implied ×k
+  (`founder_method = ladder`, HOR-order tier `supported`) — e.g. recovering
+  a 179 bp monomer reported as ×6 of a 1073 bp unit.
 - Short-founder review aids (since 1.14.1): a short founder (≤ 30 bp)
   whose founder peak has weak kite support (score < 0.20) is flagged
   (`weak_short_founder_flag`) with its dominant longer-period alternative

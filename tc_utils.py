@@ -2193,8 +2193,8 @@ def _hor_order_confidence(multiplicity, multiplicity_raw, irregular,
 
       none      multiplicity <= 1 — founder == strongest, no HOR claim.
       strict    clean integer divisor, low-k, strict path → confident HOR order.
-      supported family/anchor-rescued (pass2 / kh_deeper), clean, low-k — order
-                plausible, leans on cross-array support.
+      supported family/anchor/ladder-rescued (pass2 / kh_deeper / ladder),
+                clean, low-k — order plausible, leans on corroborating evidence.
       weak      founder solid but order not confidently integer: irregular
                 multiplicity, OR k >= _HOR_ORDER_HIGH_K (integer test vacuous),
                 OR a relaxed rescue path (pass3 / cluster / fallback).
@@ -2821,6 +2821,17 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
       fragmented evidence is collectively dominant. See
       `_cluster_rescue_founder()` for the gate logic.
 
+    - **Pass 7 (harmonic-ladder founder)**: final rescue for arrays still
+      at `founder == strongest` (mult == 1) — the basic monomer is below
+      the strict id gate, so no deeper founder was found. When the
+      strongest sits atop a clean harmonic ladder (peaks at integer
+      multiples m·P0; ≥ 3 distinct rungs, or an *exceptionally-clean* ×2
+      whose double is a genuine HOR unit), adopt the fundamental P0 with
+      ×k. The ladder + tight-IQR + occupancy substitute for the missing
+      identity. Recovers divergent-HOR satellites (e.g. 179 ×6, 111 ×3).
+      Marks `founder_method = "ladder"`. See `_harmonic_ladder_founder()`
+      and docs/harmonic_ladder_founder_plan.md.
+
     Other columns:
     - **kitehor_founder_period**: kitehor's original rescore pick for
       this case_id, preserved unchanged. When it differs from
@@ -2837,8 +2848,8 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
       kitehor's spurious near-2× over-splits are not adopted. Marks
       `founder_method = "kh_deeper"`.
     - **founder_method**: enum recording which pass produced the final
-      founder — `strict` / `none` / `kh_deeper` / `pass2` / `pass3` /
-      `ssr` / `cluster` / `fallback`.
+      founder — `strict` / `none` / `kh_deeper` / `ladder` / `pass2` /
+      `pass3` / `ssr` / `cluster` / `fallback`.
     - **cluster_rescue**: true when Pass 5 promoted a cluster median
       to founder. Diagnostic counterpart of `founder_method = cluster`.
     - **delta_id_pp**: identity_med(strongest) − identity_med(founder)
@@ -3581,8 +3592,8 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
             "founder_fallback":  "true" if e["fallback"] else "false",
             "ssr_founder_override": "true" if e.get("ssr_override") else "false",
             # Cluster-rescue diagnostics + founder_method enum
-            # (strict | none | kh_deeper | pass2 | pass3 | ssr | cluster
-            #  | fallback).
+            # (strict | none | kh_deeper | ladder | pass2 | pass3 | ssr |
+            #  cluster | fallback).
             "founder_method":     e.get("rescue_method") or "",
             "cluster_rescue":     "true" if e.get("cluster_rescue") else "false",
             "subrepeat_1_period": _fmt_bp(sr1[1]) if sr1 else "",
