@@ -126,9 +126,14 @@ cd = json.loads(cm.group(1).replace("<\\/", "</"))
 check(len(cd["cols"]) == len(rr._PEAK_COLUMNS) and "tiers" in cd,
       "coldict carries column dictionary + tier map for the JS builder")
 
-# ---- size guardrail on real output (skip if the fixture isn't present) ----
-FIX = os.path.join(ROOT, "test_data/Solanum_lycopersicum/run_e2e/tc_report/trc")
-if os.path.isdir(FIX):
+# ---- size guardrail on real output (skip if no fixture is present) ----
+FIX = next((d for d in (
+    "test_data/Solanum_lycopersicum/run_e2e/tc_report/trc",
+    "test_data/Solanum_lycopersicum/tc_report/trc",
+    "test_data/Arabidopsis_thaliana/run_e2e/tc_report/trc",
+) if os.path.isdir(os.path.join(ROOT, d))), None)
+FIX = os.path.join(ROOT, FIX) if FIX else ""
+if FIX and os.path.isdir(FIX):
     dashboards = glob.glob(f"{FIX}/*.html")
     inline = [f for f in dashboards if "data-details=" in open(f).read()]
     check(not inline, f"fixture: no dashboard uses inline data-details ({len(inline)} do)")
@@ -163,6 +168,29 @@ for t, (label, meaning) in rr.TIER_DEFS.items():
 # The peak-column legend derives from COLUMN_DICT["tra_peaks"].
 check([h for h, _ in rr._DETAILS_COL_DESC] == [c.header for c in rr.COLUMN_DICT["tra_peaks"]],
       "_DETAILS_COL_DESC (legend) derives from COLUMN_DICT['tra_peaks']")
+
+# ---- SSR fix: render-time override retired; per-array display = raw ----
+check(not hasattr(rr, "_apply_ssr_founder_override"),
+      "render-time SSR founder override is retired (pipeline is authoritative)")
+# A TR array with high CONSENSUS coverage (artifact) but low RAW coverage must
+# keep its CSV founder (not be clobbered to m1) and surface the RAW coverage.
+import pathlib  # noqa: E402
+_csv = pathlib.Path(tempfile.mkdtemp()) / "monomer_size_top3_estimats.csv"
+_hdr = ["TRC_ID", "seqid", "start", "end", "array_length", "monomer_size",
+        "founder_period", "strongest_period", "multiplicity", "multiplicity_raw",
+        "hor_order_confidence", "ssr_flag", "ssr_consensus_dominant_motif",
+        "ssr_consensus_total_coverage_pct", "ssr_raw_dominant_motif",
+        "ssr_raw_dominant_motif_coverage_pct", "ssr_raw_total_coverage_pct",
+        "ssr_founder_override"]
+_row = ["TRC_9", "chr2", "100", "9620", "9520", "3", "9520", "9520", "1", "1.0",
+        "none", "no", "ATC", "96.23", "ATC", "6.39", "6.41", "false"]
+_csv.write_text("\t".join(_hdr) + "\n" + "\t".join(_row) + "\n")
+_m = rr.load_kite_top3({"kite_top3_csv": _csv})
+_rec = next(iter(_m.values()))
+check(_rec["founder_period"] == 9520,
+      f"TR array (96% consensus / 6% raw) keeps founder 9520, not m1=3 (got {_rec['founder_period']})")
+check(abs((_rec["ssr_total_coverage_pct"] or 0) - 6.41) < 0.01,
+      f"per-array SSR coverage = raw 6.41, not consensus 96.23 (got {_rec['ssr_total_coverage_pct']})")
 
 print()
 if _fail:
