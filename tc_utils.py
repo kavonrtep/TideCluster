@@ -2376,15 +2376,9 @@ _RESCUE_WINDOW_PCT        = 0.10   # ± this fraction of trc_consensus_founder
 _RESCUE_WINDOW_BP_MIN     = 20     # ... or this many bp, whichever is larger
 _RELAXED_RATIO_TOL        = 0.20   # solo-TRA fallback: relaxed k tolerance
 
-# SSR-founder override: when an array is SSR-pure (≥ this fraction of
-# the array length covered by the dominant SSR motif), the kite top
-# peak IS the SSR period — but rescore can't evaluate that period (it's
-# below rescore's min-period) and instead picks a noise peak with high
-# id_med but vanishingly small kite score. The override forces
-# founder = strongest = kite top peak. Threshold chosen from drapa data:
-# the count of override candidates is flat across [70, 99] %, dropping
-# only below 50 %.
-_SSR_OVERRIDE_COVERAGE    = 95.0   # ssr_total_coverage_pct threshold
+# (The former coverage-based SSR-founder override was removed: SSR founders now
+# come from the clustering repeat_type classification, not per-array kitehor SSR
+# coverage. The threshold constant that drove it is gone.)
 _RELAXED_ID_MIN           = 0.7    # solo-TRA fallback: keeps strict id_med gate
 
 # Pass 5 — peak-cluster fallback rescue (kitehor.rescored.peaks.tsv).
@@ -3515,11 +3509,25 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
             "alt_cluster_2_n_peaks":      str(alt2["n_peaks"])            if alt2 else "",
             "alt_cluster_2_cov_frac_max": _fmt_id(alt2["cov_frac_max"])   if alt2 else "",
             "ssr_flag":           ssr.get("ssr_flag", ""),
-            "ssr_dominant_motif": ssr.get("dominant_motif", ""),
-            "ssr_dominant_motif_coverage_pct":
+            # Per-array CONSENSUS SSR (kitehor consensus_single): coverage of the
+            # dominant motif measured against a motif-periodic *consensus* — can
+            # be inflated (a consensus artifact on motif-rich satellites, e.g.
+            # 96 % on a 6 %-ATC array). Kept for transparency, named so it cannot
+            # be mistaken for the real per-array content.
+            "ssr_consensus_dominant_motif": ssr.get("dominant_motif", ""),
+            "ssr_consensus_dominant_motif_coverage_pct":
                                   ssr.get("dominant_motif_coverage_pct", ""),
-            "ssr_total_coverage_pct": ssr.get("total_ssr_coverage_pct", ""),
-            "ssr_top_motifs":     ssr.get("top_motifs", ""),
+            "ssr_consensus_total_coverage_pct": ssr.get("total_ssr_coverage_pct", ""),
+            "ssr_consensus_top_motifs": ssr.get("top_motifs", ""),
+            # Per-array RAW SSR: actual per-sequence composition (varies between
+            # arrays, usually much lower than the consensus). The honest per-array
+            # SSR content — this is what the report's SSR column shows.
+            "ssr_raw_dominant_motif": ssr.get("ssr_raw_dominant_motif", ""),
+            "ssr_raw_dominant_motif_coverage_pct":
+                                  ssr.get("ssr_raw_dominant_motif_coverage_pct", ""),
+            "ssr_raw_total_coverage_pct": ssr.get("ssr_raw_total_coverage_pct", ""),
+            "ssr_raw_n_regions":  ssr.get("ssr_raw_n_regions", ""),
+            "ssr_raw_top_motifs": ssr.get("ssr_raw_top_motifs", ""),
             "consensus_period_bp":ssr.get("consensus_period_bp", ""),
         })
 
@@ -3550,9 +3558,13 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
         "alt_cluster_1_n_peaks", "alt_cluster_1_cov_frac_max",
         "alt_cluster_2_period", "alt_cluster_2_score_sum",
         "alt_cluster_2_n_peaks", "alt_cluster_2_cov_frac_max",
-        "ssr_flag", "ssr_dominant_motif",
-        "ssr_dominant_motif_coverage_pct", "ssr_total_coverage_pct",
-        "ssr_top_motifs", "consensus_period_bp",
+        "ssr_flag",
+        "ssr_consensus_dominant_motif",
+        "ssr_consensus_dominant_motif_coverage_pct",
+        "ssr_consensus_total_coverage_pct", "ssr_consensus_top_motifs",
+        "ssr_raw_dominant_motif", "ssr_raw_dominant_motif_coverage_pct",
+        "ssr_raw_total_coverage_pct", "ssr_raw_n_regions", "ssr_raw_top_motifs",
+        "consensus_period_bp",
     ]
     with open(out_csv, "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=header, delimiter="\t",

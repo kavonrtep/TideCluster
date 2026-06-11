@@ -355,6 +355,16 @@ def esc(x):
     return html.escape(str(x), quote=True)
 
 
+def _raw_or(row, raw_key, legacy_key):
+    """Value of `raw_key` if present/non-empty, else `legacy_key`. Lets the
+    report prefer the raw per-array SSR columns while still rendering pre-fix
+    CSVs that only carry the old (consensus) column names. "" if neither."""
+    v = row.get(raw_key)
+    if v not in (None, ""):
+        return v
+    return row.get(legacy_key) or ""
+
+
 def fmt_bp(n):
     """Human-readable length in bp/kb/Mb."""
     if n is None: return ""
@@ -1041,12 +1051,21 @@ def load_kite_top3(paths):
                 "weak_short_founder_flag":
                                     (row.get("weak_short_founder_flag") or "").strip() == "true",
                 "alt_longer_period":  ni(row.get("alt_longer_period")),
-                # SSR
+                # SSR — the per-array figures shown in the report are the RAW
+                # per-sequence content (honest, varies array to array), NOT the
+                # consensus_single coverage (a consensus artifact that can read
+                # 96 % on a 6 %-ATC satellite). `_raw_or` falls back to the legacy
+                # consensus columns on pre-fix CSVs that lack ssr_raw_*. The TRC's
+                # consensus family call is shown separately (trc.ssr_motif).
                 "ssr_flag":           (row.get("ssr_flag") or "").strip() or None,
-                "ssr_dominant_motif": (row.get("ssr_dominant_motif") or "").strip() or None,
-                "ssr_dominant_motif_coverage_pct": num(row.get("ssr_dominant_motif_coverage_pct")),
-                "ssr_total_coverage_pct": num(row.get("ssr_total_coverage_pct")),
-                "ssr_top_motifs":     (row.get("ssr_top_motifs") or "").strip() or None,
+                "ssr_dominant_motif": (_raw_or(row, "ssr_raw_dominant_motif",
+                                               "ssr_dominant_motif")).strip() or None,
+                "ssr_dominant_motif_coverage_pct": num(_raw_or(row,
+                    "ssr_raw_dominant_motif_coverage_pct", "ssr_dominant_motif_coverage_pct")),
+                "ssr_total_coverage_pct": num(_raw_or(row,
+                    "ssr_raw_total_coverage_pct", "ssr_total_coverage_pct")),
+                "ssr_top_motifs":     (_raw_or(row, "ssr_raw_top_motifs",
+                                               "ssr_top_motifs")).strip() or None,
                 "consensus_period_bp": ni(row.get("consensus_period_bp")),
             }
         elif is_kitehor:
@@ -1102,40 +1121,15 @@ def load_kite_top3(paths):
             "array_length": ni(row.get("array_length")),
             **hor,
         }
-        # Idempotent SSR-founder override applied at load time so CSVs
-        # produced before the fix (drapa-style) render correctly without
-        # a full re-run. The condition mirrors tc_utils._SSR_OVERRIDE_*.
-        if is_v012:
-            _apply_ssr_founder_override(out[(trc, sid, start, end)])
+        # NOTE: the report does NOT re-derive the SSR founder. The pipeline
+        # (build_monomer_size_csv, driven by clustering repeat_type) is the sole
+        # authority for founder / ssr_founder_override; the renderer trusts the
+        # CSV. The former render-time _apply_ssr_founder_override was retired
+        # because it keyed on the per-array *consensus* SSR coverage (a
+        # consensus_single artifact, e.g. 96 % on a 6 %-ATC satellite) and could
+        # clobber a correct satellite founder. Old pre-1.13 CSVs that need an SSR
+        # founder should be re-run through build_monomer_size_csv.
     return out
-
-
-# Module-level constant (mirrors tc_utils._SSR_OVERRIDE_COVERAGE).
-_SSR_OVERRIDE_COVERAGE_PCT = 95.0
-
-
-def _apply_ssr_founder_override(rec):
-    """In-place: on SSR-pure (≥95 %) arrays, force founder = strongest
-    = kite top peak (m1) and stamp the provenance flag. Always clears
-    `founder_fallback` because the SSR badge supersedes that marker
-    (on SSR-pure arrays rescore is expected to return NA — the red `*`
-    isn't an anomaly worth flagging). Idempotent."""
-    cov   = rec.get("ssr_total_coverage_pct")
-    motif = rec.get("ssr_dominant_motif")
-    m1    = rec.get("m1")
-    if (cov is None or cov < _SSR_OVERRIDE_COVERAGE_PCT
-            or not motif or motif == "NA" or m1 is None):
-        return
-    rec["founder_period"]   = m1
-    rec["strongest_period"] = m1
-    rec["multiplicity"]     = 1
-    rec["multiplicity_raw"] = 1.0
-    rec["irregular_multiplicity"] = False
-    rec["founder_id_med"]   = None
-    rec["strongest_id_med"] = None
-    rec["delta_id_pp"]      = None
-    rec["founder_fallback"] = False
-    rec["ssr_founder_override"] = True
 
 
 def load_rescored_peaks(paths):
@@ -3033,8 +3027,8 @@ _TRA_TABLE_COLS = [ColSpec(col, col, src, fmt, desc) for (col, src, fmt, desc) i
     ("alt_longer_period",       "alt_longer_period", "raw", "dominant credible longer-period alternative (bp)."),
     ("alt_cluster_1_period",    "alt_cluster_1_period","raw","top alternative periodicity cluster (bp)."),
     ("alt_cluster_2_period",    "alt_cluster_2_period","raw","second alternative periodicity cluster (bp)."),
-    ("ssr_dominant_motif",      "ssr_dominant_motif","raw", "dominant SSR motif from kitehor ssr-scan."),
-    ("ssr_total_coverage_pct",  "ssr_total_coverage_pct","raw","total SSR coverage of the array (%)."),
+    ("ssr_raw_dominant_motif",     "ssr_dominant_motif","raw", "dominant SSR motif in this array (raw per-sequence content)."),
+    ("ssr_raw_total_coverage_pct", "ssr_total_coverage_pct","raw","SSR coverage of this array — raw per-sequence %, the real content (varies between arrays; usually far below the TRC consensus call)."),
     ("copy_number",             "copy_number",       "raw", "array_length / founder period (approx. copies)."),
     ("consensus_period_bp",     "consensus_period_bp","raw","TRC consensus founder period (bp)."),
 ]]
@@ -3198,8 +3192,10 @@ def _array_table_legend():
             '<span class="tc-details-control tc-details-control-static"></span> '
             "on a row for every peak with its tier and full diagnostics."),
         ("SSR",
-            "dominant short-motif tandem repeat from kitehor's ssr-scan + "
-            "coverage %; top motifs in the expanded child row."),
+            "dominant short-motif tandem repeat in this array, with its "
+            "<strong>raw per-array coverage %</strong> (actual per-sequence "
+            "content — varies between arrays, usually well below the TRC's "
+            "consensus family call); top motifs in the expanded child row."),
     ]
 
 
@@ -3407,14 +3403,18 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
     # Classification details (SSR motif / HOR / below-threshold callouts)
     callouts = []
     if _is_ssr(trc):
-        detail = ("TAREAN is not performed on SSR TRCs by design; the "
-                  "per-array table below carries the kitehor SSR classification "
-                  "and motif coverage." if kite else
+        detail = ("TAREAN is not performed on SSR TRCs by design. "
+                  "The SSR column in the per-array table below shows each array's "
+                  "<em>raw</em> SSR content, which reflects real composition and is "
+                  "typically lower than the family consensus and varies between "
+                  "arrays." if kite else
                   "TAREAN and KITE are not performed on SSR TRCs by design.")
         callouts.append(
             f'<div class="tc-callout"><strong>Simple Sequence Repeat.</strong> '
-            f'{detail} '
-            f'Motif(s): <code>{esc((trc.get("ssr_motif") or "").replace("%25","%"))}</code></div>')
+            f'Consensus family call (TideHunter consensus, used to cluster this '
+            f'family): '
+            f'<code>{esc((trc.get("ssr_motif") or "").replace("%25","%"))}</code>. '
+            f'{detail}</div>')
     elif not trc.get("tarean"):
         callouts.append(
             '<div class="tc-callout"><strong>Below TAREAN threshold.</strong> '
