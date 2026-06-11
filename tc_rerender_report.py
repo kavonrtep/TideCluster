@@ -3416,11 +3416,25 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
             f'<code>{esc((trc.get("ssr_motif") or "").replace("%25","%"))}</code>. '
             f'{detail}</div>')
     elif not trc.get("tarean"):
-        callouts.append(
-            '<div class="tc-callout"><strong>Below TAREAN threshold.</strong> '
-            f'Total TRC length {fmt_bp(trc["total_size"])} is less than the '
-            f'run&#39;s minimum total length; TAREAN and KITE were not '
-            'performed for this cluster.</div>')
+        # KITE (kitehor) runs per array regardless of the TAREAN total-length
+        # threshold, so a below-threshold TRC still has per-array founder /
+        # monomer-size estimates — only the TAREAN *consensus* is skipped. Only
+        # claim KITE was skipped when there genuinely are no per-array results.
+        kite_ran = any(a.get("founder_period") is not None for a in trc["arrays"])
+        if kite_ran:
+            callouts.append(
+                '<div class="tc-callout"><strong>Below TAREAN threshold.</strong> '
+                f'Total TRC length {fmt_bp(trc["total_size"])} is less than the '
+                "run&#39;s minimum total length, so the TAREAN <em>consensus</em> "
+                'was not computed for this cluster. Per-array KITE estimates '
+                '(founder / strongest / &times;k monomer size) <strong>are</strong> '
+                'available in the array table below.</div>')
+        else:
+            callouts.append(
+                '<div class="tc-callout"><strong>Below TAREAN threshold.</strong> '
+                f'Total TRC length {fmt_bp(trc["total_size"])} is less than the '
+                "run&#39;s minimum total length; neither TAREAN nor KITE was "
+                'performed for this cluster.</div>')
 
     # Consensus + graph/logo
     consensus_block = ""
