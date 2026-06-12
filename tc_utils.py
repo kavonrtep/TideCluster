@@ -2771,6 +2771,75 @@ def _harmonic_ladder_founder(peaks, strongest_period, strongest_id):
     return None
 
 
+# Dominant-score harmonic-ladder founder (Pass 7b) — the off-ladder counterpart
+# to Pass 7. Pass 7 anchors the ladder on `strongest` (argmax id_med) and only
+# helps when strongest = k·P0 is a CLEAN integer multiple of the fundamental.
+# For a divergent satellite whose highest-identity peak is a long, OFF-ladder
+# period (e.g. FabTR-53: strongest=3150, monomer=188, 3150/188=16.76), that
+# decomposition either collapses (founder=strongest, mult=1) or lands on a
+# non-monomer period (165, 168, 347, 1808). Pass 7b instead anchors on the
+# rank-1-by-SCORE peak P0 — the true monomer of these satellites — and adopts it
+# when P0 carries a self-standing harmonic ladder, regardless of where strongest
+# sits. See docs/dominant_ladder_founder_plan.md.
+_DOM_LADDER_MIN_RUNGS = 3      # distinct integer multiples m·P0 present (incl. m=1)
+_DOM_LADDER_KH_TOL    = 0.05   # |kitehor_founder − P0| / max ≤ this ⇒ kitehor corroborates P0
+
+
+def _commensurate(a, b, tol=_RATIO_TOL):
+    """True when a and b are integer multiples of one another within an
+    *absolute* |k − round(k)| ≤ tol (not k-scaled): a ≈ b (k=1), a ≈ k·b, or
+    b ≈ k·a. Used as Pass 7b's safety guard — an array whose founder is already
+    commensurate with its dominant-score peak is left untouched."""
+    if not a or not b or a <= 0 or b <= 0:
+        return False
+    for x, y in ((a, b), (b, a)):
+        k = x / y
+        if round(k) >= 1 and abs(k - round(k)) <= tol:
+            return True
+    return False
+
+
+def _dominant_ladder_founder(peaks, strongest_period, dominant_peak):
+    """Pass 7b helper. Adopt the rank-1-by-score peak P0 as the founder when it
+    sits atop a clean harmonic ladder (peaks at integer multiples m·P0),
+    independent of whether `strongest` (= argmax id_med) is a clean multiple of
+    P0. Returns (P0_peak, P0, multiplicity) or None. multiplicity = round(S/P0)
+    — irregular when non-integer, which is the honest state for an off-ladder
+    strongest. Gates mirror the k≥3 path of _harmonic_ladder_founder: P0 id_med
+    above the ladder floor, tight IQR, decent occupancy, and
+    ≥ _DOM_LADDER_MIN_RUNGS distinct rungs present (incl. m=1)."""
+    S = _num_or_none(strongest_period)
+    if dominant_peak is None or S is None or S <= 0:
+        return None
+    P0 = _num_or_none(dominant_peak.get("period"))
+    if P0 is None or P0 <= 0 or P0 >= S:
+        return None
+    id0  = _num_or_none(dominant_peak.get("identity_med"))
+    iqr0 = _num_or_none(dominant_peak.get("identity_iqr"))
+    occ0 = _num_or_none(dominant_peak.get("scan_occupancy_frac"))
+    if (id0 is None or id0 < _LADDER_ID_FLOOR
+            or iqr0 is None or iqr0 > _LADDER_IQR_MAX
+            or occ0 is None or occ0 < _LADDER_OCC_MIN):
+        return None
+    kmax = int(round(S / P0))
+    # Assign each peak to its single nearest integer multiple of P0 (so one far
+    # peak cannot fill several adjacent rungs through a width-growing tolerance).
+    rungs = set()
+    for q in peaks:
+        qp  = _num_or_none(q.get("period"))
+        qid = _num_or_none(q.get("identity_med"))
+        if qp is None or qp <= 0 or qid is None or qid < _LADDER_ID_FLOOR:
+            continue
+        m = int(round(qp / P0))
+        if 1 <= m <= kmax and abs(qp - m * P0) <= max(_RATIO_TOL * m * P0, 2.0):
+            rungs.add(m)
+    # Require a genuine LOW ladder: P0 (m=1), its dimer (m=2), and >= 3 distinct
+    # rungs overall — not P0 plus a couple of scattered high multiples.
+    if {1, 2} <= rungs and len(rungs) >= _DOM_LADDER_MIN_RUNGS:
+        return dominant_peak, P0, max(1, kmax)
+    return None
+
+
 def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
                            tandem_validate_tsv=None, trc_repeat_type=None):
     """Build the per-array summary CSV (one row per array) from kitehor
@@ -3454,6 +3523,48 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
         e["multiplicity_raw"] = e["strongest_period"] / P0
         e["irregular"]        = abs(e["multiplicity_raw"] - k) > _RATIO_TOL
         e["rescue_method"]    = "ladder"
+
+    # ---- Pass 7b: dominant-score harmonic-ladder founder ----
+    # Complementary to Pass 7. Pass 7 flips founder==strongest only when
+    # strongest = k·P0 is a CLEAN multiple of a ladder fundamental. Pass 7b
+    # handles the off-ladder case: the argmax(id_med) strongest is NOT a clean
+    # multiple of the dominant monomer (e.g. FabTR-53 strongest=3150,
+    # monomer=188, 3150/188=16.76), so the divisor search either collapsed
+    # (mult=1) or landed on a non-monomer period (165, 168, 347, 1808). When the
+    # rank-1-by-SCORE peak P0 carries a strong, self-standing harmonic ladder,
+    # the current founder is incommensurate with P0 (neither founder=k·P0 nor
+    # P0=k·founder within _RATIO_TOL), AND kitehor's own k-mer-autocorrelation
+    # founder_period corroborates P0 (same monomer), adopt P0. Two guards keep it
+    # tight: the incommensurate test leaves every array already consistent with
+    # its dominant monomer untouched (incl. the clean k·P0 cases Pass 7 just
+    # fixed — 179×6, 111×3 — and ordinary HOR calls); the kitehor-corroboration
+    # test requires an independent method to agree the dominant-score peak is the
+    # founder, so a lone high-score peak that kitehor itself does not call a
+    # founder (e.g. an array with a genuine ~12 kb HOR unit) is not overridden.
+    # See docs/dominant_ladder_founder_plan.md.
+    for e in pass1:
+        if e["fallback"] or e.get("ssr_override") or e["trc"] in _rt7:
+            continue
+        if e["strongest_period"] is None:
+            continue
+        P0v = _num(e["rank1"].get("period"))
+        if P0v is None or _commensurate(e["founder_period"], P0v):
+            continue
+        # kitehor's own founder pick must agree that P0 is the monomer.
+        kh = _num(e["kitehor_founder_period"])
+        if kh is None or abs(kh - P0v) > _DOM_LADDER_KH_TOL * max(kh, P0v):
+            continue
+        res = _dominant_ladder_founder(
+            e["peaks"], e["strongest_period"], e["rank1"])
+        if res is None:
+            continue
+        p0, P0, k = res
+        e["founder_peak"]     = p0
+        e["founder_period"]   = P0
+        e["multiplicity"]     = k
+        e["multiplicity_raw"] = e["strongest_period"] / P0
+        e["irregular"]        = abs(e["multiplicity_raw"] - k) > _RATIO_TOL
+        e["rescue_method"]    = "dominant_ladder"
 
     # ---- Build output rows ----
     rows = []

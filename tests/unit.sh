@@ -28,4 +28,7 @@ python3 "$ROOT/tests/test_harmonic_ladder.py"
 echo "=== unit: RepeatMasker empty-.out guard ==="
 python3 "$ROOT/tests/test_repeatmasker_empty_out.py"
 
+echo "=== unit: dominant-score ladder founder (Pass 7b) ==="
+python3 "$ROOT/tests/test_dominant_ladder.py"
+
 echo "unit tests OK"
