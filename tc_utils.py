@@ -1960,13 +1960,20 @@ def run_repeatmasker_with_renaming(input_fasta, library, cpu=1, additional_param
     rm_file_renamed = F"{input_renamed}.out"
     rm_file_original = F"{input_fasta}.out"
 
-    # Restore original sequence names in RepeatMasker output
-    restore_sequence_names_in_repeatmasker_output(rm_file_renamed, rm_file_original, name_mapping)
+    # RepeatMasker writes no .out file when the input FASTA is empty or no
+    # repeats are detected. Treat that as "zero annotations" (an empty .out
+    # that get_repeatmasker_annotation parses to {}) instead of crashing on the
+    # missing file.
+    if os.path.exists(rm_file_renamed):
+        # Restore original sequence names in RepeatMasker output
+        restore_sequence_names_in_repeatmasker_output(rm_file_renamed, rm_file_original, name_mapping)
+        os.remove(rm_file_renamed)
+    else:
+        open(rm_file_original, 'w').close()
 
     # Clean up renamed files
-    os.remove(input_renamed)
-    if os.path.exists(rm_file_renamed):
-        os.remove(rm_file_renamed)
+    if os.path.exists(input_renamed):
+        os.remove(input_renamed)
 
     return rm_file_original
 

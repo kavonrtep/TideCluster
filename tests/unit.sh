@@ -25,4 +25,7 @@ python3 "$ROOT/tests/test_ssr_raw_fixture.py"
 echo "=== unit: harmonic-ladder founder (Pass 7) ==="
 python3 "$ROOT/tests/test_harmonic_ladder.py"
 
+echo "=== unit: RepeatMasker empty-.out guard ==="
+python3 "$ROOT/tests/test_repeatmasker_empty_out.py"
+
 echo "unit tests OK"
