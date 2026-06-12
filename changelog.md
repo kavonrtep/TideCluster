@@ -1,3 +1,26 @@
+## 1.15.2 (2026-06-12)
+- **Dominant-score ladder founder** (founder Pass 7b) for divergent satellites
+  whose highest-identity peak is a long, *off-ladder* period. Pass 1 anchors the
+  strongest peak on `argmax(identity_med)`; when that lands on a period that is
+  not a clean integer multiple of the true monomer (e.g. strongest=3150,
+  monomer=188, 3150/188=16.76), the divisor search either collapsed the founder
+  to the long period (mult=1) or to a non-monomer `strongest/round(k)` value.
+  Pass 7b instead anchors the ladder on the **rank-1-by-score** peak and adopts
+  it as the founder when (a) it is incommensurate with the current founder,
+  (b) it carries a genuine low harmonic ladder (m=1 and m=2 present, ≥3 distinct
+  rungs, tight IQR/occupancy), and (c) kitehor's own `founder_period`
+  corroborates it. `founder_method = "dominant_ladder"` (HOR-order tier `weak`).
+  Recovers e.g. *Pisum* FabTR-53 arrays 3150/347/1808/168/165 → ~188, and aligns
+  off-ladder outliers to their family monomer on *Solanum lycopersicum* (TRC_4
+  48/50 → 53) and *Arabidopsis* (160 → 178). Validated genome-wide with
+  `tools/founder_diff.py`; every flip is kitehor-corroborated with
+  equal-or-higher identity, and the previously-validated 179×6 / 111×3 / 178×10
+  calls are unchanged.
+- **Annotation no longer crashes when RepeatMasker writes no `.out`** (empty
+  input FASTA or no library hits, e.g. annotating omitted short regions on a
+  contig with no hits). The missing output is now treated as zero annotations
+  instead of aborting `run_all` before TAREAN.
+
 ## 1.15.1 (2026-06-11)
 - **Harmonic-ladder founder** (founder Pass 7) for divergent-HOR satellites:
   when no single short peak clears the identity gate but the surviving peaks
