@@ -1,4 +1,5 @@
 """ Utilities for the project. """
+import bisect
 import collections
 import csv
 import glob
@@ -106,9 +107,20 @@ def filter_intervals(gr_filter, gr):
 
     Returns:
     - List of Grange intervals from listB that are within intervals in listA.
+
+    A GRange ``g`` from ``gr`` is kept iff some interval ``f`` in ``gr_filter``
+    on the same seqid has ``f.name == g.name`` and ``g`` is contained in ``f``
+    (``f.start <= g.start`` and ``g.end <= f.end``), i.e. ``g.within(f)``.
+
+    Implementation: a per-(seqid, name) sweep. For each name the filter
+    intervals are sorted by start and a running maximum of their ends is
+    precomputed. Every filter with ``start <= g.start`` is a containment
+    candidate, so containment reduces to "is the largest end among those
+    candidates >= g.end" — a single binary search answers it. This is
+    O((N+M) log M) and returns exactly the same objects, in the same order, as
+    the previous O(N*M) nested loop (the outer iteration order over ``gr`` per
+    seqid, sorted by start, is preserved).
     """
-
-
     # Split and sort lists by seqid and start position
     dict_filter = {}
     dict_gr = {}
@@ -117,8 +129,6 @@ def filter_intervals(gr_filter, gr):
     for grange in gr:
         dict_gr.setdefault(grange.seqid, []).append(grange)
 
-    for seqid in dict_filter:
-        dict_filter[seqid].sort(key=lambda x: x.start)
     for seqid in dict_gr:
         dict_gr[seqid].sort(key=lambda x: x.start)
 
@@ -127,12 +137,31 @@ def filter_intervals(gr_filter, gr):
     for seqid in dict_filter:
         if seqid not in dict_gr:
             continue
+        # Index this seqid's filter intervals by name: starts sorted ascending
+        # plus the running maximum of ends (prefix max), so a binary search on
+        # start gives the best containment candidate.
+        by_name = {}
+        for f in dict_filter[seqid]:
+            by_name.setdefault(f.name, []).append(f)
+        name_index = {}
+        for name, flist in by_name.items():
+            flist.sort(key=lambda x: x.start)
+            starts = [f.start for f in flist]
+            prefix_max_end = []
+            running = None
+            for f in flist:
+                running = f.end if running is None else max(running, f.end)
+                prefix_max_end.append(running)
+            name_index[name] = (starts, prefix_max_end)
+
         for grange_out in dict_gr[seqid]:
-            for grange_filter in dict_filter[seqid]:
-                if grange_out.name == grange_filter.name:
-                    if grange_out.within(grange_filter):
-                        filtered.append(grange_out)
-                        break
+            idx = name_index.get(grange_out.name)
+            if idx is None:
+                continue
+            starts, prefix_max_end = idx
+            pos = bisect.bisect_right(starts, grange_out.start) - 1
+            if pos >= 0 and prefix_max_end[pos] >= grange_out.end:
+                filtered.append(grange_out)
 
     return filtered
 
