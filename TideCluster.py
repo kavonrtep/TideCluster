@@ -320,6 +320,7 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
             print("TRC similarity clustering not performed due to lack of TAREAN "
                   "consensus sequences.", file=open(html_file, "w"))
 
+        _maybe_identify_rdna(prefix, fasta, args, cpu)
         _move_v1_to_legacy(prefix)
         _build_report_v2(prefix)
         return
@@ -367,6 +368,7 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
         F" --score_threshold {superfamily_score}")
     tc.run_cmd(cmd)
 
+    _maybe_identify_rdna(prefix, fasta, args, cpu)
     _move_v1_to_legacy(prefix)
     _build_report_v2(prefix)
 
@@ -441,6 +443,34 @@ def _build_report_v2(prefix):
     except Exception as e:
         print(F"WARNING: report v2 generation failed: {e}", file=sys.stderr)
 
+
+def _default_rdna_library():
+    """Path to the bundled rDNA reference library (next to this script)."""
+    return os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                        "data", "rdna_library.fasta")
+
+
+def _maybe_identify_rdna(prefix, fasta, args, cpu):
+    """Run rDNA (45S/5S) identification before the report is built.
+
+    Default-on; disabled by --no_rdna. Uses the bundled rDNA library unless
+    --rdna_library overrides it. Wrapped in try/except so a failure never
+    fails the pipeline (the labels are an enrichment, like the v2 report)."""
+    if getattr(args, "no_rdna", False):
+        return
+    rdna_library = getattr(args, "rdna_library", None) or _default_rdna_library()
+    if not os.path.exists(rdna_library):
+        print(F"WARNING: rDNA library not found ({rdna_library}); "
+              F"skipping rDNA identification", file=sys.stderr)
+        return
+    try:
+        tc.identify_rdna(
+            prefix, fasta, rdna_library, cpu,
+            min_coverage=getattr(args, "rdna_min_coverage", 0.7),
+            min_identity=getattr(args, "rdna_min_identity", 85.0),
+        )
+    except Exception as e:
+        print(F"WARNING: rDNA identification failed: {e}", file=sys.stderr)
 
 
 def annotation(prefix, library, gff=None, consensus_dir=None, cpu=1):
@@ -1177,6 +1207,26 @@ if __name__ == "__main__":
                   "between two TRC consensus sequences. Lower values give looser "
                   "superfamilies. Default (%(default)s)")
             )
+    parser_tarean.add_argument(
+            "--rdna_library", default=None,
+            help=("rDNA reference library (RepeatMasker name#class format, "
+                  "classes rDNA_45S/* and rDNA_5S/*) for rDNA identification. "
+                  "Defaults to the bundled data/rdna_library.fasta.")
+            )
+    parser_tarean.add_argument(
+            "--no_rdna", action="store_true", default=False,
+            help="Disable rDNA (45S/5S) identification of TRCs."
+            )
+    parser_tarean.add_argument(
+            "--rdna_min_coverage", type=float, default=0.7,
+            help=("Minimum best-subunit reference coverage to call a TRC rDNA. "
+                  "Default (%(default)s)")
+            )
+    parser_tarean.add_argument(
+            "--rdna_min_identity", type=float, default=85.0,
+            help=("Minimum percent identity for an rDNA reference hit to count. "
+                  "Default (%(default)s)")
+            )
 
     parser_run_all = subparsers.add_parser(
             'run_all', help='Run all steps of TideCluster'
@@ -1265,6 +1315,56 @@ if __name__ == "__main__":
                   "gap_openings) / longer_consensus_length, for a superfamily edge "
                   "between two TRC consensus sequences. Lower values give looser "
                   "superfamilies. Default (%(default)s)")
+            )
+    parser_run_all.add_argument(
+            "--rdna_library", default=None,
+            help=("rDNA reference library (RepeatMasker name#class format, "
+                  "classes rDNA_45S/* and rDNA_5S/*) for rDNA identification. "
+                  "Defaults to the bundled data/rdna_library.fasta.")
+            )
+    parser_run_all.add_argument(
+            "--no_rdna", action="store_true", default=False,
+            help="Disable rDNA (45S/5S) identification of TRCs."
+            )
+    parser_run_all.add_argument(
+            "--rdna_min_coverage", type=float, default=0.7,
+            help=("Minimum best-subunit reference coverage to call a TRC rDNA. "
+                  "Default (%(default)s)")
+            )
+    parser_run_all.add_argument(
+            "--rdna_min_identity", type=float, default=85.0,
+            help=("Minimum percent identity for an rDNA reference hit to count. "
+                  "Default (%(default)s)")
+            )
+
+    parser_rdna = subparsers.add_parser(
+            'rdna', help=('Identify rDNA (45S/5S) TRCs in an existing run and '
+                          'add rDNA_type/rDNA_coverage to the clustering GFF3 + '
+                          'report (re-runnable, e.g. with an extended library)')
+            )
+    parser_rdna.add_argument(
+            "-pr", "--prefix", required=True,
+            help="Prefix of an existing TideCluster run (e.g. from run_all)."
+            )
+    parser_rdna.add_argument(
+            "-f", "--fasta", required=True,
+            help="Reference fasta (gzipped supported); used for the genomic "
+                 "fallback when a TRC has no usable consensus."
+            )
+    parser_rdna.add_argument(
+            "--rdna_library", default=None,
+            help="rDNA reference library; defaults to bundled data/rdna_library.fasta."
+            )
+    parser_rdna.add_argument(
+            "-c", "--cpu", type=int, default=4, help="Number of CPUs to use"
+            )
+    parser_rdna.add_argument(
+            "--rdna_min_coverage", type=float, default=0.7,
+            help="Minimum best-subunit reference coverage. Default (%(default)s)"
+            )
+    parser_rdna.add_argument(
+            "--rdna_min_identity", type=float, default=85.0,
+            help="Minimum percent identity for an rDNA hit. Default (%(default)s)"
             )
 
     parser.description = """Wrapper of TideHunter
@@ -1401,6 +1501,10 @@ if __name__ == "__main__":
                     args=cmd_args,
                     version=__version__
                     )
+        elif cmd_args.command == "rdna":
+            _maybe_identify_rdna(cmd_args.prefix, cmd_args.fasta, cmd_args,
+                                 cmd_args.cpu)
+            _build_report_v2(cmd_args.prefix)
 
         else:
             parser.print_help()

@@ -431,6 +431,27 @@ class RepeatMaskerFeature:
         self.family = items[11]
 
 
+def merged_interval_length(intervals):
+    """Length of the union of (start, end) intervals (inclusive, 1-based).
+
+    Overlapping / adjacent intervals are merged so the total never
+    double-counts a position. Used for coverage fractions (covered length
+    divided by a sequence length stays in [0, 1]).
+    """
+    total = 0
+    cur_start = cur_end = None
+    for start, end in sorted(intervals):
+        if cur_end is None or start > cur_end + 1:
+            if cur_end is not None:
+                total += cur_end - cur_start + 1
+            cur_start, cur_end = start, end
+        else:
+            cur_end = max(cur_end, end)
+    if cur_end is not None:
+        total += cur_end - cur_start + 1
+    return total
+
+
 def get_repeatmasker_annotation(rm_file, seq_lengths, prefix, parse_id=True):
     """
     :parse repeatmasker output and calculate proportion of each annotation
@@ -446,20 +467,6 @@ def get_repeatmasker_annotation(rm_file, seq_lengths, prefix, parse_id=True):
     # sequence length, so multiple monomer hits along a tandem consensus
     # accumulate (rather than only the first hit being counted) while
     # overlapping hits are not double-counted (each annotation stays in [0, 1]).
-    def _merged_interval_length(intervals):
-        total = 0
-        cur_start = cur_end = None
-        for start, end in sorted(intervals):
-            if cur_end is None or start > cur_end + 1:
-                if cur_end is not None:
-                    total += cur_end - cur_start + 1
-                cur_start, cur_end = start, end
-            else:
-                cur_end = max(cur_end, end)
-        if cur_end is not None:
-            total += cur_end - cur_start + 1
-        return total
-
     seq_annot_intervals = {}
     with open(rm_file, 'r') as f:
         # parse repeatmasker output, first three lines are header
@@ -479,7 +486,7 @@ def get_repeatmasker_annotation(rm_file, seq_lengths, prefix, parse_id=True):
     seq_rm_info = {}
     for seqid, annot_intervals in seq_annot_intervals.items():
         seq_rm_info[seqid] = {
-            annot: _merged_interval_length(intervals) / seq_lengths[seqid]
+            annot: merged_interval_length(intervals) / seq_lengths[seqid]
             for annot, intervals in annot_intervals.items()
         }
     # for each TRC calculate mean value for each annotation
@@ -534,6 +541,241 @@ def get_repeatmasker_annotation(rm_file, seq_lengths, prefix, parse_id=True):
             f.write("\n")
     print("Annotation exported to: " + annot_table)
     return annot_description
+
+
+# ---------------------------------------------------------------------------
+# rDNA identification
+#
+# Similarity-search TRC consensus (or, as a fallback, genomic arrays) against a
+# reference library of rRNA genes in RepeatMasker `name#class` format (classes
+# `rDNA_45S/{18S,5.8S,25S}` and `rDNA_5S/5S`). A TRC is called rDNA from the
+# *best single-subunit reference coverage*: it is rDNA_45S/5S if one library
+# reference (e.g. an 18S or 25S gene) is matched near-full-length at high
+# identity. This is robust to the ITS/IGS spacer (absent from the library)
+# diluting whole-monomer coverage and to partial consensus. The search engine
+# is blastn because the chosen metric is reference coverage, which blastn yields
+# directly (query = reference) — the same blast tooling the superfamily step
+# uses.
+# ---------------------------------------------------------------------------
+
+RDNA_TOP_TYPES = ("rDNA_45S", "rDNA_5S")
+
+
+def blastn_rdna_reference_coverage(rdna_library, subject_fasta, cpu,
+                                   min_identity=85.0):
+    """
+    blastn the rDNA library (as query) against ``subject_fasta`` and return, per
+    subject sequence, the best single-reference coverage for each rDNA top type.
+
+    Reference coverage = union of the aligned query (reference) intervals for one
+    library entry, divided by that entry's length. Per subject and per top type
+    (rDNA_45S / rDNA_5S) we keep the maximum reference coverage over all
+    references of that type whose best hit meets ``min_identity``.
+
+    :param rdna_library: rDNA reference FASTA (RepeatMasker `name#class` headers)
+    :param subject_fasta: sequences to test (TRC consensus or genomic arrays)
+    :param cpu: blastn threads
+    :param min_identity: minimum percent identity for a reference to count
+    :return: {subject_seqid: {top_type: (coverage_frac, identity)}}
+    """
+    ref_len = read_fasta_sequence_size(rdna_library)
+    ref_top = {}
+    for h in ref_len:
+        cls = h.split("#", 1)[1] if "#" in h else ""
+        ref_top[h] = cls.split("/")[0]
+    work = tempfile.mkdtemp(prefix="tc_rdna_blast_")
+    db = os.path.join(work, "subjdb")
+    out = os.path.join(work, "hits.tsv")
+    subprocess.run(F"makeblastdb -in {subject_fasta} -dbtype nucl -out {db}",
+                   shell=True, check=True, stdout=subprocess.DEVNULL)
+    subprocess.run(
+        F"blastn -query {rdna_library} -db {db} -evalue 1e-5 -dust no "
+        F"-num_threads {cpu} -outfmt '6 qseqid sseqid pident qstart qend' > {out}",
+        shell=True, check=True)
+    # per (subject, reference): aligned reference intervals + best identity
+    intervals = {}
+    identity = {}
+    with open(out) as f:
+        for line in f:
+            c = line.rstrip("\n").split("\t")
+            if len(c) < 5:
+                continue
+            qseqid, sseqid, pid = c[0], c[1], float(c[2])
+            qs, qe = int(c[3]), int(c[4])
+            key = (sseqid, qseqid)
+            intervals.setdefault(key, []).append((min(qs, qe), max(qs, qe)))
+            identity[key] = max(identity.get(key, 0.0), pid)
+    shutil.rmtree(work, ignore_errors=True)
+    best = {}
+    for (sseqid, qseqid), ivs in intervals.items():
+        if identity[(sseqid, qseqid)] < min_identity:
+            continue
+        top = ref_top.get(qseqid)
+        if top not in RDNA_TOP_TYPES:
+            continue
+        cov = merged_interval_length(ivs) / ref_len[qseqid]
+        cur = best.setdefault(sseqid, {})
+        if cov > cur.get(top, (0.0, 0.0))[0]:
+            cur[top] = (cov, identity[(sseqid, qseqid)])
+    return best
+
+
+def assign_rdna_to_trcs(best_by_seqid, min_coverage):
+    """
+    Aggregate per-sequence best reference coverage (from
+    :func:`blastn_rdna_reference_coverage`) to per-TRC rDNA calls.
+
+    Subject seqids are ``TRC_<n>_...`` so the TRC id is
+    ``"TRC_" + seqid.split("_")[1]``. The maximum coverage per top type across a
+    TRC's sequences is taken, then the type with the higher coverage is called
+    if it clears ``min_coverage``.
+
+    :return: {TRC_id: (label, coverage)} e.g. {'TRC_1': ('45S', 0.92)}
+    """
+    per_trc = {}
+    for sseqid, tops in best_by_seqid.items():
+        trc = "TRC_" + sseqid.split("_")[1]
+        agg = per_trc.setdefault(trc, {})
+        for top, (cov, _ident) in tops.items():
+            if cov > agg.get(top, 0.0):
+                agg[top] = cov
+    calls = {}
+    for trc, agg in per_trc.items():
+        top = max(agg, key=agg.get)
+        if agg[top] >= min_coverage:
+            calls[trc] = (top.replace("rDNA_", ""), round(agg[top], 3))
+    return calls
+
+
+def _write_trc_consensus_subject(prefix, consensus_dir, out_fasta):
+    """Write a blast subject of per-TRC consensus dimers with clean
+    ``TRC_<n>_c<i>`` headers. Prefers the TAREAN dimer library
+    (``<prefix>_consensus_dimer_library.fasta``, headers ``TRC_x#TRC_x``) and
+    falls back to the raw clustering consensus (``TRC_x_dimers.fasta``) per TRC.
+    Returns the set of TRC ids that had a usable consensus."""
+    tarean = {}
+    dimer_lib = prefix + "_consensus_dimer_library.fasta"
+    if os.path.exists(dimer_lib):
+        for name, seq in fasta_to_list(dimer_lib):
+            tarean.setdefault(name.split("#")[0], []).append(seq)
+    clustering = {}
+    for fpath in glob.glob(os.path.join(consensus_dir, "TRC_*_dimers.fasta")):
+        trc = os.path.basename(fpath)[:-len("_dimers.fasta")]
+        clustering[trc] = [s for _n, s in fasta_to_list(fpath)]
+    covered = set()
+    with open(out_fasta, "w") as out:
+        for trc in sorted(set(tarean) | set(clustering)):
+            seqs = tarean.get(trc) or clustering.get(trc) or []
+            for i, seq in enumerate(seqs):
+                out.write(F">{trc}_c{i}\n{seq}\n")
+            if seqs:
+                covered.add(trc)
+    return covered
+
+
+def _write_trc_region_subject(gff, fasta, trc_set, out_fasta):
+    """Write a blast subject of the genomic arrays of the given TRCs, with
+    ``TRC_<n>_r<i>`` headers. Used as the last-resort fallback for TRCs without
+    a usable consensus."""
+    tmp_gff = out_fasta + ".gff3"
+    with open(gff) as fin, open(tmp_gff, "w") as fo:
+        for line in fin:
+            if line.startswith("#"):
+                fo.write(line)
+                continue
+            if Gff3Feature(line).attributes_dict.get("Name") in trc_set:
+                fo.write(line)
+    n = 0
+    counts = {}
+    with open(out_fasta, "w") as out:
+        for _seqid, seq, name in gff3_to_fasta(tmp_gff, fasta, "Name"):
+            i = counts.get(name, 0)
+            counts[name] = i + 1
+            out.write(F">{name}_r{i}\n{seq}\n")
+            n += 1
+    os.remove(tmp_gff)
+    return n
+
+
+def _write_rdna_attributes(gff, calls):
+    """Add ``rDNA_type`` and ``rDNA_coverage`` attributes to the matched TRCs in
+    ``gff`` (rewritten in place). TRCs absent from ``calls`` are left as-is."""
+    if not calls:
+        return
+    type_dict = {trc: lbl for trc, (lbl, _cov) in calls.items()}
+    cov_dict = {trc: str(cov) for trc, (_lbl, cov) in calls.items()}
+    tmp = gff + ".rdna.tmp"
+    add_attribute_to_gff(gff, tmp, "Name", "rDNA_type", type_dict)
+    add_attribute_to_gff(tmp, gff, "Name", "rDNA_coverage", cov_dict)
+    os.remove(tmp)
+
+
+def identify_rdna(prefix, fasta, rdna_library, cpu, min_coverage=0.7,
+                  min_identity=85.0, gff=None, consensus_dir=None):
+    """
+    Identify which TRCs are rDNA (45S / 5S) and write ``rDNA_type`` +
+    ``rDNA_coverage`` attributes into the clustering GFF3 (and the annotation
+    GFF3 if present, so the report picks them up).
+
+    Strategy (consensus-first, genome fallback):
+      1. blastn the rDNA library against per-TRC consensus dimers (TAREAN dimer
+         library where available, else the raw TideHunter clustering consensus).
+      2. For TRCs with no usable consensus, blastn against their genomic arrays
+         extracted from the GFF3.
+    A TRC is labelled from the best single-subunit reference coverage
+    (>= ``min_coverage`` at >= ``min_identity``); see
+    :func:`blastn_rdna_reference_coverage`.
+
+    :return: {TRC_id: (label, coverage)}
+    """
+    gff = gff or (prefix + "_clustering.gff3")
+    consensus_dir = consensus_dir or (prefix + "_consensus")
+    work = tempfile.mkdtemp(prefix="tc_rdna_")
+    all_trcs = set()
+    with open(gff) as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            all_trcs.add(Gff3Feature(line).attributes_dict.get("Name"))
+    all_trcs.discard(None)
+
+    calls = {}
+    # 1) consensus-based search
+    subject = os.path.join(work, "consensus.fasta")
+    covered = _write_trc_consensus_subject(prefix, consensus_dir, subject)
+    if os.path.getsize(subject) > 0:
+        best = blastn_rdna_reference_coverage(rdna_library, subject, cpu,
+                                              min_identity)
+        calls.update(assign_rdna_to_trcs(best, min_coverage))
+
+    # 2) genomic fallback for TRCs that had no usable consensus
+    no_consensus = all_trcs - covered
+    if no_consensus:
+        regions = os.path.join(work, "regions.fasta")
+        if _write_trc_region_subject(gff, fasta, no_consensus, regions) > 0:
+            best_g = blastn_rdna_reference_coverage(rdna_library, regions, cpu,
+                                                    min_identity)
+            calls.update(assign_rdna_to_trcs(best_g, min_coverage))
+
+    # 3) write attributes into the GFF3(s) the report reads
+    _write_rdna_attributes(gff, calls)
+    annot_gff = prefix + "_annotation.gff3"
+    if os.path.exists(annot_gff):
+        _write_rdna_attributes(annot_gff, calls)
+
+    # 4) side table
+    with open(prefix + "_rdna.tsv", "w") as f:
+        f.write("TRC\trDNA_type\tcoverage\n")
+        for trc in sorted(calls):
+            lbl, cov = calls[trc]
+            f.write(F"{trc}\t{lbl}\t{cov}\n")
+
+    shutil.rmtree(work, ignore_errors=True)
+    n45 = sum(1 for v in calls.values() if v[0] == "45S")
+    n5 = sum(1 for v in calls.values() if v[0] == "5S")
+    print(F"rDNA identification: {len(calls)} TRC(s) labelled "
+          F"({n45} x 45S, {n5} x 5S)")
+    return calls
 
 
 def read_fasta_sequence_size(fasta_file):

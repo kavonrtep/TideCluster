@@ -1,0 +1,16 @@
+# Idetification of rDNA TRC
+
+- Currently all TR are assigned to TRC however I would like to include information if TRC is potentially rDNA
+- To do that we will use similarity search against library of rRNA in @data
+- We will need to distinguish between rDNA_45S and rDNA_5S  - see anotation file
+- We already have similarity search is 'custom DB is provided so we can use the same scripts - if possible
+- However - I what this information to be included in "clustering" gff3 - not as a new file
+- the call here should be 'clear' - additional attribute with say it is 45S or 5S if coverage is above threshold - we will set this threshold based on some empirical testing
+- based on testing - we may need to extend rDNA libary - to capture better all species from viridiplance species
+- For testing will will use OZ408684.1 contig from tmp/genome_cleaned.fasta.gz
+- it is posible that multiple TRC will be assigned as 45S rDNA - there are size differences + ITS
+- results should be also reflected in reporting - first page -show list of rRNA TRC
+- then TRC page should show the TRC is member/part of rDNA
+- for TRC withoud TAREN consensus we will need fallback procedure for similarity search
+- but discovered in 45 S RNDa arrays - in some cases the TRC annotated regions overlaps - given that fact that main aim of TC pipeline is annotating each region just once we ma need to machanism to resolve these ovelaps - here in the above genome 'ther ovelap is between 'related sequences;' - variant of rDNA
+

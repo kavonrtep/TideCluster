@@ -885,6 +885,8 @@ def load_tras(paths: dict):
             "repeat_type":  attrs.get("repeat_type"),
             "repeat_unit_seq": attrs.get("repeat_unit_seq"),
             "copy_number":  attrs.get("copy_number"),
+            "rDNA_type":     attrs.get("rDNA_type"),
+            "rDNA_coverage": attrs.get("rDNA_coverage"),
         }
         trcs.setdefault(trc_id, []).append(entry)
     return trcs
@@ -1345,6 +1347,8 @@ def build_model(input_dir: Path, prefix: str):
         repeat_type = next((a["repeat_type"] for a in arrays if a.get("repeat_type")), None)
         annotation  = next((a["annotation"]  for a in arrays if a.get("annotation")),  None)
         ssr_motif   = next((a["ssr"]         for a in arrays if a.get("ssr")),         None)
+        rdna_type   = next((a["rDNA_type"]   for a in arrays if a.get("rDNA_type")),   None)
+        rdna_cov    = next((a["rDNA_coverage"] for a in arrays if a.get("rDNA_coverage")), None)
         lengths = [a["length"] for a in arrays]
         tarean = tarean_summary.get(trc_id)
         has_tarean = tarean is not None and (paths["tarean_dir"]
@@ -1412,6 +1416,8 @@ def build_model(input_dir: Path, prefix: str):
             "index": _trc_sort_key(trc_id),
             "repeat_type":  repeat_type,
             "annotation":   annotation,
+            "rdna_type":    rdna_type,
+            "rdna_coverage": rdna_cov,
             "ssr_motif":    ssr_motif,
             "n_arrays":     len(arrays),
             "total_size":   sum(lengths),
@@ -1835,6 +1841,7 @@ def render_index(model, out_path, run_meta, ctx):
                 f'<dt>{esc(k)}</dt><dd>{esc(settings[k])}</dd>')
     n_tarean    = sum(1 for t in model["trcs"] if t["tarean"])
     n_sf_peers  = sum(1 for t in model["trcs"] if t["superfamily"])
+    rdna_trcs   = [t for t in model["trcs"] if t.get("rdna_type")]
     up = ctx["up"]
     is_v012 = bool(model.get("is_v012"))
 
@@ -1902,6 +1909,13 @@ def render_index(model, out_path, run_meta, ctx):
             f'<a href="{up}superfamilies.html">{len(model["superfamilies"])}</a>'
             f' ({n_sf_peers} TRCs grouped)'),
     ]
+    if rdna_trcs:
+        n_45s = sum(1 for t in rdna_trcs if t.get("rdna_type") == "45S")
+        n_5s  = sum(1 for t in rdna_trcs if t.get("rdna_type") == "5S")
+        cluster_rows.append(
+            ("rDNA",
+             f'<a href="#rdna-trcs">{len(rdna_trcs)}</a> '
+             f'({n_45s}× 45S, {n_5s}× 5S)'))
     array_rows = [("total (KITE-analysed)", stats.get("n_tras"))]
     if is_v012:
         array_rows += [
@@ -1944,9 +1958,34 @@ def render_index(model, out_path, run_meta, ctx):
     credits_html  = load_section("credits")
     cluster_chart = render_cluster_overview(model, ctx)
     distribution_chart = render_index_distribution(model, ctx)
+
+    # rRNA / rDNA TRCs — TRCs matched to the rDNA reference library.
+    rdna_section = ""
+    if rdna_trcs:
+        items = []
+        for t in sorted(rdna_trcs, key=lambda x: x["index"]):
+            cov = t.get("rdna_coverage")
+            try:
+                cov_txt = f' — {float(cov):.0%} subunit coverage' if cov else ''
+            except (TypeError, ValueError):
+                cov_txt = ''
+            items.append(
+                f'<li><a href="{up}trc/{esc(t["id"])}.html">{esc(t["id"])}</a> '
+                f'· <strong>rDNA_{esc(t["rdna_type"])}</strong>{cov_txt} '
+                f'· {fmt_bp(t["total_size"])}</li>')
+        rdna_section = (
+            '<section class="tc-card" id="rdna-trcs">'
+            '<div class="tc-card-title">'
+            f'rRNA / rDNA tandem repeats ({len(rdna_trcs)})</div>'
+            '<p>TRCs identified as ribosomal DNA by similarity to the rDNA '
+            'reference library (labelled from the best single-subunit '
+            'reference coverage):</p>'
+            f'<ul>{"".join(items)}</ul></section>')
+
     main = f"""
     <h1>TideCluster report — {esc(model["meta"]["prefix"])}</h1>
     {cards}
+    {rdna_section}
     {cluster_chart}
     {distribution_chart}
     <section class="tc-prose">{overview_html}</section>
@@ -2995,6 +3034,8 @@ _TRC_TABLE_COLS = [ColSpec(col, col, src, "raw", desc) for (col, src, desc) in [
     ("ssr_motif",         "ssr_motif",        "SSR motif for SSR-typed TRCs."),
     ("superfamily",       "superfamily",      "superfamily id this TRC belongs to."),
     ("annotation",        "annotation",       "TRC annotation, if any."),
+    ("rDNA_type",         "rdna_type",        "rDNA class (45S / 5S) if the TRC is rDNA, else empty."),
+    ("rDNA_coverage",     "rdna_coverage",    "best single-subunit rDNA reference coverage supporting the rDNA call."),
 ]]
 # HOR-order-tier column description, composed once from TIER_DEFS (single source).
 _HOR_CONF_DESC = ("HOR-order confidence tier — "
@@ -3310,6 +3351,10 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
          f'min {fmt_bp(trc.get("min_array"))} · max {fmt_bp(trc.get("max_array"))}'),
         ("Annotation",   (trc.get("annotation") or "—").replace("%25","%")),
     ]
+    if trc.get("rdna_type"):
+        cov = trc.get("rdna_coverage")
+        cov_txt = f' ({float(cov):.0%} subunit coverage)' if cov else ''
+        stats_kv.append(("rDNA", f'part of rDNA_{trc["rdna_type"]}{cov_txt}'))
     stats_html = "".join(f'<dt>{esc(k)}</dt><dd>{esc(v)}</dd>' for k, v in stats_kv)
 
     # Classification card. For kitehor >=0.12.0 (combined_class is gone)

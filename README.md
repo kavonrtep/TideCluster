@@ -428,6 +428,42 @@ options:
 
 ```
 
+## rDNA identification
+
+During `run_all` (and the `tarean` step) TideCluster also flags which TRCs are
+**ribosomal DNA**, distinguishing **45S** (18S–5.8S–25S) from **5S** rDNA by
+similarity to a bundled reference library (`data/rdna_library.fasta`, in
+RepeatMasker `name#class` format with classes `rDNA_45S/*` and `rDNA_5S/*`).
+
+A TRC is labelled from the **best single-subunit reference coverage**: it is
+called rDNA if one library reference (e.g. an 18S or 25S gene) is matched
+near-full-length at high identity. This deliberately ignores ITS/IGS spacer
+(absent from the library, so whole-monomer coverage is diluted) and tolerates
+cross-species divergence (default identity gate 85 %). The search is
+consensus-first (TAREAN consensus, else the raw TideHunter clustering consensus)
+with a genomic-array fallback for TRCs that have no usable consensus.
+
+The call is written **into the clustering GFF3** as a clean attribute, e.g.:
+
+```
+OZ408684.1  TideCluster  tandem_repeat  187618  335146  1  .  .  Name=TRC_1;repeat_type=TR;rDNA_type=45S;rDNA_coverage=1.0
+```
+
+and a per-TRC table is written to `<prefix>_rdna.tsv`. The HTML report lists the
+rRNA/rDNA TRCs on the summary page and marks each TRC's page. Several TRCs can be
+`45S` (e.g. variants spanning one large array). Disable with `--no_rdna`; tune
+with `--rdna_library`, `--rdna_min_coverage` (0.7), `--rdna_min_identity` (85).
+
+To re-run identification on an existing run (for example after extending the
+library), use the standalone subcommand:
+
+```bash
+TideCluster.py rdna -pr prefix -f genome.fasta [--rdna_library lib.fasta] [-c CPU]
+```
+
+Note: 45S monomers are large (~9–12 kb), so a clean 45S TRC usually requires
+running TideHunter in `--long` mode (the default period cap is 3000 bp).
+
 ## Run all steps
 
 ```help

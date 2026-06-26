@@ -37,4 +37,7 @@ python3 "$ROOT/tests/test_filter_intervals.py"
 echo "=== unit: chunked/pooled RepeatMasker remap (FR-1) ==="
 python3 "$ROOT/tests/test_chunked_repeatmasker.py"
 
+echo "=== unit: rDNA (45S/5S) identification ==="
+python3 "$ROOT/tests/test_rdna.py"
+
 echo "unit tests OK"
