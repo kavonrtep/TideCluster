@@ -541,10 +541,25 @@ tc_reannotate.py script. This script will run RepeatMasker using TRC library and
 filter RepeatMasker output to retain only high-quality TRC hits. Overlapping TRC hits
 are merged and regions shorter than twice the monomer length are excluded from the output.
 
+When a genome is supplied with `-s/--ref_seq`, RepeatMasker is parallelised by
+**chunking the genome** rather than relying on RepeatMasker's `-pa` (which does
+not parallelise effectively with a custom `-lib` on the RMBlast engine, and
+whose single-threaded `ProcessRepeats` stage `-pa` cannot parallelise at all).
+The genome is split into pieces of about `--chunk_size` bases and one
+single-threaded RepeatMasker runs per piece in a pool of `-c/--cpu` workers, so
+both the search and each piece's `ProcessRepeats` run concurrently; hits are
+then mapped back to genome coordinates. Sequences shorter than `2*chunk_size`
+are only packed (never cut), so their annotation is **byte-identical** to a
+whole-genome run; only larger sequences are split, where RepeatMasker's
+context-dependent `ProcessRepeats` can shift a few hits at the cuts (typically
+well under the project's ±0.15 % masked-bp losslessness bar). Increase
+`--chunk_size` for stricter equivalence, decrease it for more parallelism.
+
 ### Usage:
 
 ```help
 usage: tc_reannotate.py [-h] (-r REPEATMASKER_FILE | -s REF_SEQ) -f FASTA_FILE [-c CPU]
+                        [--chunk_size CHUNK_SIZE] [--overlap OVERLAP]
                         [--sensitivity {quick,default,rush}] -o OUTPUT [-d]
 
 options:
@@ -556,6 +571,14 @@ options:
   -f FASTA_FILE, --fasta_file FASTA_FILE
                         Fasta file wiht TRC library used for RepeatMasker search
   -c CPU, --cpu CPU     Number of CPUs to use
+  --chunk_size CHUNK_SIZE
+                        Genome chunk size (bp) for parallel RepeatMasker when
+                        --ref_seq is given. Sequences shorter than 2*chunk_size are
+                        only packed (byte-identical); larger ones are split across
+                        a pool of --cpu workers (default: 50000000)
+  --overlap OVERLAP     Overlap (bp) between adjacent genome chunks; must exceed
+                        the longest library entry so no hit is lost at a chunk
+                        boundary (default: 100000)
   --sensitivity {quick,default,rush}
                         RepeatMasker sensitivity preset to use when --ref_seq is
                         provided

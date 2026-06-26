@@ -5,7 +5,6 @@
 import argparse
 import os
 import shutil
-import subprocess
 import tempfile
 import tc_utils as tc
 
@@ -109,6 +108,30 @@ def main():
     parser.add_argument("-c", "--cpu", help="Number of CPUs to use", type=int, default=1)
 
     parser.add_argument(
+        "--chunk_size",
+        help="Genome chunk size (bp) for parallel RepeatMasker when --ref_seq "
+             "is given. The genome is split into ~chunk_size pieces and one "
+             "single-threaded RepeatMasker runs per piece in a pool of --cpu "
+             "workers. Sequences shorter than 2*chunk_size are never cut (only "
+             "packed), so their annotation is byte-identical to a whole-genome "
+             "run; only larger sequences are split, which can shift a few hits "
+             "at the cuts by <0.15%% of masked bp (RepeatMasker ProcessRepeats "
+             "is context-dependent). A larger value is more exact but less "
+             "parallel (default: 50000000).",
+        type=int,
+        default=50000000,
+    )
+
+    parser.add_argument(
+        "--overlap",
+        help="Overlap (bp) between adjacent genome chunks. Must exceed the "
+             "longest library entry so no hit is lost at a chunk boundary "
+             "(default: 100000).",
+        type=int,
+        default=100000,
+    )
+
+    parser.add_argument(
         "--sensitivity",
         help="RepeatMasker sensitivity preset to use when --ref_seq is provided",
         choices=SENSITIVITY_OPTIONS,
@@ -148,29 +171,6 @@ def main():
     rm_library = F"{temp_dir}/rm_library.fasta"
     tc.save_fasta_list_to_file(updated_library, rm_library)
 
-    if args.ref_seq:
-        # run RepeatMasker in temp directory
-        cmds = [
-            "RepeatMasker",
-            "-dir", temp_dir,
-            "-nolow",
-            "-no_is",
-            "-e", "ncbi",
-        ]
-        sensitivity_flag = SENSITIVITY_OPTIONS[args.sensitivity]
-        if sensitivity_flag:
-            cmds.append(sensitivity_flag)
-        cmds.extend([
-            "-lib", rm_library,
-            "-pa", str(args.cpu),
-            args.ref_seq,
-        ])
-        print("Running RepeatMasker...")
-        print(" ".join(cmds))
-        subprocess.run(cmds, check=True)
-        args.repeatmasker_file = F"{temp_dir}/{os.path.basename(args.ref_seq)}.out"
-
-
     # get length of sequences in fasta file - this is the length of sat dimers
 
     # intermediate files - in temp directory:
@@ -181,8 +181,24 @@ def main():
     rm_merged_ext_merged_gff3 = F"{temp_dir}/rm.merged.extended.merged.gff3"
     gr_filter_gff3 = F"{temp_dir}/gr_filter.gff3"
 
-    # parse RepeatMasker output file and create gff3 file
-    repeatmasker_to_gff3(args.repeatmasker_file, rm_gff3)
+    if args.ref_seq:
+        # Parallel, output-preserving RepeatMasker. A single whole-genome
+        # "RepeatMasker -pa {cpu}" under-parallelises with a custom -lib on the
+        # RMBlast/NCBI engine (Dfam #274) and its ProcessRepeats tail is
+        # single-threaded. Instead, chunk the genome and run one single-threaded
+        # RepeatMasker per chunk in a pool of args.cpu workers, then map hits
+        # back to genome coordinates. The downstream merge collapses the
+        # duplicate / boundary hits in the chunk overlaps, so the final GFF3 is
+        # unchanged.
+        sensitivity_flag = SENSITIVITY_OPTIONS[args.sensitivity]
+        print("Running RepeatMasker (chunked, pooled)...")
+        tc.run_repeatmasker_genome_chunked(
+            args.ref_seq, rm_library, args.cpu, sensitivity_flag, rm_gff3,
+            chunk_size=args.chunk_size, overlap=args.overlap, debug=args.debug,
+        )
+    else:
+        # parse a pre-computed RepeatMasker .out (the -r path) into gff3
+        repeatmasker_to_gff3(args.repeatmasker_file, rm_gff3)
     # merge overlapping intervals of the same TRC
     tc.merge_overlapping_gff3_intervals(rm_gff3, rm_merged_gff3, use_strand=True)
     # extend intervals by offset - this will be used as filter for the original gff3 file

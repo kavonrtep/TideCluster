@@ -34,4 +34,7 @@ python3 "$ROOT/tests/test_dominant_ladder.py"
 echo "=== unit: filter_intervals sweep-line equivalence ==="
 python3 "$ROOT/tests/test_filter_intervals.py"
 
+echo "=== unit: chunked/pooled RepeatMasker remap (FR-1) ==="
+python3 "$ROOT/tests/test_chunked_repeatmasker.py"
+
 echo "unit tests OK"

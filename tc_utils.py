@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 from collections import OrderedDict
 from itertools import cycle
+from multiprocessing import Pool
 from shutil import rmtree
 import re
 import networkx as nx
@@ -732,6 +733,194 @@ def recalculate_gff3_coordinates(gff3_file, matching_table):
                             feature.end = new_end
                             fh_out.write(str(feature))
     return gff3_file_recalculated
+
+
+def split_fasta_to_chunk_files(fasta_file, out_dir, chunk_size=50000000,
+                               overlap=100000):
+    """
+    Split a (genome) FASTA into multiple chunk FASTA files for parallel,
+    per-chunk RepeatMasker.
+
+    Sequences longer than ``2 * chunk_size`` are cut into overlapping pieces of
+    about ``chunk_size`` bases (the overlap is added to the right edge of each
+    interior piece so a repeat straddling a cut is fully contained in at least
+    one piece); shorter sequences are emitted whole. Every piece is given a
+    short numeric header to avoid RepeatMasker's 50-character sequence-name
+    limit, and recorded in a ``matching_table`` compatible with
+    :func:`get_original_header_and_coordinates` so chunk-local hit coordinates
+    can be mapped back to genome coordinates.
+
+    Pieces are packed greedily into files of roughly ``chunk_size`` bases, so
+    the number of RepeatMasker processes stays bounded while each carries a
+    similar amount of work.
+
+    :param fasta_file: path to input FASTA
+    :param out_dir: directory to write chunk FASTA files into
+    :param chunk_size: target piece / file size in bases
+    :param overlap: bases of right-edge overlap added to each interior piece
+    :return: (list_of_chunk_fasta_paths, matching_table) where matching_table
+             rows are [orig_header, piece_index, start, end, token]
+    """
+    fasta_dict = read_fasta_sequence_size(fasta_file)
+    min_chunk_size = chunk_size * 2
+    # 1) plan pieces; each piece gets a short numeric token as its header
+    matching_table = []
+    token = 0
+    for header, size in fasta_dict.items():
+        if size > min_chunk_size:
+            number_of_chunks = int(size / chunk_size)
+            adjusted_chunk_size = int(size / number_of_chunks)
+            for i in range(number_of_chunks):
+                start = i * adjusted_chunk_size
+                end1 = (i + 1) * adjusted_chunk_size + overlap
+                end = end1 if i + 1 < number_of_chunks else size
+                matching_table.append([header, i, start, end, str(token)])
+                token += 1
+        else:
+            matching_table.append([header, 0, 0, size, str(token)])
+            token += 1
+    # 2) bin-pack pieces into files of ~chunk_size bases
+    token_to_file = {}
+    file_paths = []
+    current_load = 0
+    for row in matching_table:
+        piece_len = row[3] - row[2]
+        if not file_paths or current_load + piece_len > chunk_size:
+            file_paths.append(os.path.join(out_dir, F"chunk_{len(file_paths)}.fasta"))
+            current_load = 0
+        token_to_file[row[4]] = file_paths[-1]
+        current_load += piece_len
+    # group pieces per original header for a single streaming pass
+    pieces_by_header = {}
+    for row in matching_table:
+        pieces_by_header.setdefault(row[0], []).append(row)
+    # 3) stream the FASTA once, writing each piece to its assigned file
+    open_handles = {p: open(p, "w") for p in file_paths}
+    try:
+        with open(fasta_file) as fh:
+            for header, sequence in read_single_fasta_as_generator(fh):
+                for _orig, _i, start, end, tok in pieces_by_header.get(header, []):
+                    out_fh = open_handles[token_to_file[tok]]
+                    out_fh.write(F">{tok}\n")
+                    out_fh.write(sequence[start:end] + "\n")
+    finally:
+        for fh in open_handles.values():
+            fh.close()
+    return file_paths, matching_table
+
+
+def _repeatmasker_chunk_worker(task):
+    """Run a single-threaded RepeatMasker on one chunk FASTA.
+
+    Module-level (picklable) worker for the process pool used by
+    :func:`run_repeatmasker_genome_chunked`. Each chunk is masked in its own
+    output directory so concurrent jobs cannot clobber each other's files.
+
+    :param task: (chunk_fasta, rm_library, sensitivity_flag)
+    :return: path to the chunk's ``.out`` file, or None if RepeatMasker wrote
+             none (an empty / hit-less / all-N chunk).
+    """
+    chunk_fasta, rm_library, sensitivity_flag = task
+    out_dir = chunk_fasta + "_rmdir"
+    os.makedirs(out_dir, exist_ok=True)
+    cmds = ["RepeatMasker", "-dir", out_dir, "-nolow", "-no_is", "-e", "ncbi"]
+    if sensitivity_flag:
+        cmds.append(sensitivity_flag)
+    cmds.extend(["-lib", rm_library, "-pa", "1", chunk_fasta])
+    # Tolerate the no-hit case the way run_repeatmasker_with_renaming does:
+    # RepeatMasker writes no .out for an empty / all-N / hit-less input. Do not
+    # use check=True, so such chunks return None instead of aborting the pool.
+    subprocess.run(cmds)
+    out_file = os.path.join(out_dir, os.path.basename(chunk_fasta) + ".out")
+    return out_file if os.path.exists(out_file) else None
+
+
+def run_repeatmasker_genome_chunked(ref_seq, rm_library, cpu, sensitivity_flag,
+                                    out_gff3, chunk_size=50000000,
+                                    overlap=100000, debug=False):
+    """
+    Parallel, output-preserving replacement for a single whole-genome
+    ``RepeatMasker -pa {cpu}`` call.
+
+    RepeatMasker's ``-pa`` does not parallelise effectively with a custom
+    ``-lib`` on the RMBlast/NCBI engine (Dfam #274), and its single-threaded
+    ``ProcessRepeats`` tail is not parallelised by ``-pa`` at all. This splits
+    ``ref_seq`` into overlapping chunks, runs one single-threaded RepeatMasker
+    per chunk in a pool of ``cpu`` workers (so both the search *and* each
+    chunk's ProcessRepeats run concurrently), then maps every hit back to
+    genome coordinates and writes them to ``out_gff3``.
+
+    Output equivalence: RepeatMasker treats each sequence independently, the
+    chunk overlap exceeds any library-entry (hence any hit) length so every hit
+    is fully contained in at least one chunk, and duplicate / partial hits in
+    the overlap zones are collapsed by the downstream
+    :func:`merge_overlapping_gff3_intervals`. The GFF3 written here is sorted,
+    so the result does not depend on pool scheduling order.
+
+    :param ref_seq: genome FASTA to annotate
+    :param rm_library: RepeatMasker custom library (already length-adjusted)
+    :param cpu: number of concurrent single-threaded RepeatMasker processes
+    :param sensitivity_flag: RepeatMasker sensitivity flag ("", "-q" or "-qq")
+    :param out_gff3: path to write the (genome-coordinate) RepeatMasker GFF3
+    :param chunk_size: target chunk size in bases
+    :param overlap: right-edge overlap per interior chunk in bases
+    :param debug: if True, keep the temporary chunk workspace
+    :return: out_gff3
+    """
+    work_dir = tempfile.mkdtemp(prefix="tc_rm_chunks_")
+    chunk_files, matching_table = split_fasta_to_chunk_files(
+        ref_seq, work_dir, chunk_size=chunk_size, overlap=overlap
+    )
+    print(F"Chunked RepeatMasker: {len(chunk_files)} chunk file(s), "
+          F"{len(matching_table)} piece(s), {cpu} worker(s)")
+
+    tasks = [(c, rm_library, sensitivity_flag) for c in chunk_files]
+    pool_size = max(1, min(cpu, len(tasks)))
+    with Pool(pool_size) as pool:
+        out_files = pool.map(_repeatmasker_chunk_worker, tasks)
+
+    # O(1) token -> matching_table row lookup (avoid the O(M) linear scan in
+    # get_original_header_and_coordinates per hit; there can be millions).
+    token_row = {row[4]: row for row in matching_table}
+
+    records = []
+    for out_file in out_files:
+        if out_file is None or not os.path.exists(out_file):
+            continue
+        with open(out_file) as f:
+            for _ in range(3):  # skip the 3 RepeatMasker header lines
+                next(f, None)
+            for line in f:
+                items = line.split()
+                if len(items) < 11:  # blank / malformed line
+                    continue
+                row = token_row.get(items[4])
+                if row is None:
+                    continue
+                offset = row[2]
+                ori_header = row[0]
+                start = int(items[5]) + offset
+                end = int(items[6]) + offset
+                # mirror repeatmasker_to_gff3 strand mapping verbatim
+                strand = "+" if items[8] == "C" else "-"
+                name = items[10]
+                records.append((ori_header, start, end, strand, name))
+
+    # sort for a deterministic intermediate (final output is sorted downstream
+    # regardless, but this keeps the GFF3 reproducible run-to-run)
+    records.sort(key=lambda r: (r[0], r[1], r[2], r[3], r[4]))
+    with open(out_gff3, "w") as gff3_out:
+        gff3_out.write("##gff-version 3\n")
+        for seqid, start, end, strand, name in records:
+            gff_line = (F"{seqid}\tRepeatMasker\ttandem repeat\t{start}"
+                        F"\t{end}\t.\t{strand}\t.\tCluster_ID={name};Name={name}")
+            gff3_out.write(Gff3Feature(gff_line).print_line())
+
+    if not debug:
+        shutil.rmtree(work_dir, ignore_errors=True)
+    else:
+        print(F"Chunked RepeatMasker workspace kept: {work_dir}")
+    return out_gff3
 
 
 def write_temp_fasta_chunks(fasta_seq_size, fasta_file, chunk_size):
