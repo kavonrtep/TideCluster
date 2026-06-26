@@ -1,3 +1,30 @@
+## 1.16.0 (2026-06-26)
+- **rDNA identification.** TRCs are now flagged as ribosomal DNA, distinguishing
+  45S (18S/5.8S/25S) from 5S, by blastn similarity to a bundled reference
+  library (`data/rdna_library.fasta`). A TRC is labelled from the best
+  single-subunit reference coverage (robust to ITS/IGS dilution and ~90 %
+  cross-species identity), consensus-first with a genomic-array fallback.
+  Writes a clean `rDNA_type=45S|5S;rDNA_coverage=<frac>` into the clustering
+  GFF3 plus a `<prefix>_rdna.tsv`, and surfaces it in the report (index list +
+  per-TRC page). Default-on in `run_all`/`tarean` (`--no_rdna` to disable;
+  `--rdna_library`/`--rdna_min_coverage`/`--rdna_min_identity` to tune), plus a
+  standalone `rdna` subcommand to re-run on an existing run.
+- **Cross-TRC overlap resolution.** The clustering GFF3 is now made
+  non-overlapping across TRCs by default ("annotate each region once"): where
+  variant arrays of a satellite cluster into separate TRCs that overlap at their
+  boundaries, each contested span is assigned to the dominant TRC (largest total
+  array length). No base of the union is lost. Pass `--keep_overlaps` to retain
+  the raw overlapping regions.
+- **`tc_reannotate` parallelism.** Replaced the single whole-genome
+  `RepeatMasker -pa` (ineffective with a custom `-lib` on RMBlast; Dfam #274)
+  with a chunked, pooled run — one single-threaded RepeatMasker per genome chunk
+  in a process pool — so both the search and the single-threaded ProcessRepeats
+  tail parallelise (`--chunk_size`/`--overlap`, default 50 Mb/100 kb). Sequences
+  below `2*chunk_size` are only packed (byte-identical); larger ones split, with
+  <0.15 % masked-bp drift at the cuts.
+- Made the post-RepeatMasker `filter_intervals` sub-quadratic (per-(seqid,name)
+  sweep with prefix-max + binary search); output byte-identical.
+
 ## 1.15.2 (2026-06-12)
 - **Dominant-score ladder founder** (founder Pass 7b) for divergent satellites
   whose highest-identity peak is a long, *off-ladder* period. Pass 1 anchors the
