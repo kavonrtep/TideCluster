@@ -2205,6 +2205,89 @@ def merge_intervals(intervals):
     return merged
 
 
+def resolve_trc_overlaps(gff3_file, gff3_out_file):
+    """
+    Make a clustering GFF3 non-overlapping across TRCs ("annotate each region
+    once").
+
+    Different TRCs (different ``Name``) may cover the same genomic bp — e.g.
+    variant arrays of a satellite (such as rDNA) clustered separately that
+    interleave and overlap at their boundaries. This rewrites the GFF3 so every
+    base belongs to at most one TRC, assigning each contested span to the
+    **dominant** TRC: the one with the largest total array length over the whole
+    genome (tie-break: ``Name``). No base in the union is lost — only
+    reassigned — and per-TRC attributes (repeat_type, ssr, rDNA_type, …) are
+    carried through unchanged.
+
+    Implementation: a breakpoint sweep per seqid. Every elementary segment
+    between consecutive feature boundaries is covered by a fixed set of TRCs;
+    it goes to the dominant one. Adjacent segments kept by the same (Name,
+    strand) are then merged back into single features.
+
+    :param gff3_file: input clustering GFF3 (features carry Name=TRC_x)
+    :param gff3_out_file: output GFF3 (may equal the input — written via a temp)
+    """
+    feats = {}        # seqid -> list of (start, end, name, strand)
+    attrs = {}        # name -> attributes dict (from its first feature)
+    total = {}        # name -> total array length (dominance weight)
+    header = "##gff-version 3\n"
+    with open(gff3_file) as f:
+        for line in f:
+            if line.startswith("#"):
+                continue
+            feat = Gff3Feature(line)
+            name = feat.attributes_dict.get("Name")
+            if name is None:
+                continue
+            feats.setdefault(feat.seqid, []).append(
+                (feat.start, feat.end, name, feat.strand))
+            attrs.setdefault(name, dict(feat.attributes_dict))
+            total[name] = total.get(name, 0) + (feat.end - feat.start)
+
+    kept = set()
+    out_rows = []
+    for seqid, fl in feats.items():
+        # half-open breakpoints: each feature [s, e] -> [s, e+1)
+        points = sorted({p for s, e, _n, _st in fl for p in (s, e + 1)})
+        segments = []
+        for k in range(len(points) - 1):
+            a, b = points[k], points[k + 1]
+            covering = [(n, st) for s, e, n, st in fl if s <= a and (e + 1) >= b]
+            if not covering:
+                continue
+            # dominant TRC: largest total array length, then Name for determinism
+            win_name, win_strand = max(covering, key=lambda x: (total[x[0]], x[0]))
+            segments.append((a, b - 1, win_name, win_strand))
+        # merge adjacent segments kept by the same TRC (and strand)
+        for s, e, name, strand in segments:
+            if (out_rows and out_rows[-1][0] == seqid
+                    and out_rows[-1][3] == name and out_rows[-1][4] == strand
+                    and s == out_rows[-1][2] + 1):
+                last = out_rows[-1]
+                out_rows[-1] = (seqid, last[1], e, name, strand)
+            else:
+                out_rows.append((seqid, s, e, name, strand))
+            kept.add(name)
+
+    lost = sorted(set(total) - kept)
+    if lost:
+        print(F"resolve_trc_overlaps: {len(lost)} TRC(s) fully absorbed by "
+              F"dominant overlapping TRCs and dropped: {', '.join(lost)}")
+
+    out_rows.sort(key=lambda r: (r[0], r[1], r[2]))
+    tmp = gff3_out_file + ".resolve.tmp"
+    with open(tmp, "w") as out:
+        out.write(header)
+        for seqid, s, e, name, strand in out_rows:
+            ad = dict(attrs[name])
+            ad["Name"] = name  # keep Name as the first attribute
+            ad = {"Name": name, **ad}
+            attr_str = ";".join(F"{k}={v}" for k, v in ad.items())
+            out.write(F"{seqid}\tTideCluster\ttandem_repeat\t{s}\t{e}\t1\t"
+                      F"{strand}\t.\t{attr_str}\n")
+    os.replace(tmp, gff3_out_file)
+
+
 def merge_genomic_intervals(intervals):
     """
     :param intervals:list of (seqid, start, end) tuples

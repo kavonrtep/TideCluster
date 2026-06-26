@@ -539,7 +539,7 @@ def annotation(prefix, library, gff=None, consensus_dir=None, cpu=1):
 
 
 def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4,
-               cluster_identity=75, cluster_coverage=0.8):
+               cluster_identity=75, cluster_coverage=0.8, resolve_overlaps=True):
     """
     Run clustering on sequences defined in gff3 file and fasta file
     produce gff3 file with cluster information
@@ -706,6 +706,14 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4,
     os.rename(gff_tmp, gff3_out)
     tc.add_attribute_to_gff(gff3_out, gff_tmp, "Name", "ssr", ssrs_description_final)
     os.rename(gff_tmp, gff3_out)
+
+    # Make the clustering GFF3 non-overlapping across TRCs: variant arrays of a
+    # satellite (e.g. rDNA) can be clustered into separate TRCs that interleave
+    # and overlap at their boundaries; TideCluster's aim is to annotate each
+    # region once. Each contested span goes to the dominant TRC (largest total
+    # array length). Disabled with --keep_overlaps.
+    if resolve_overlaps:
+        tc.resolve_trc_overlaps(gff3_out, gff3_out)
 
     # save also first round of clustering for debugging
     cons_cls1, cons_cls_dimer1_ = tc.add_cluster_info_to_gff3(
@@ -1116,6 +1124,13 @@ if __name__ == "__main__":
             help=("Minimum alignment coverage over the shorter sequence for an "
                   "array-level (TRC) clustering edge. Default (%(default)s)")
             )
+    parser_clustering.add_argument(
+            "--keep_overlaps", action="store_true", default=False,
+            help=("Do not resolve overlapping TRC regions. By default the "
+                  "clustering GFF3 is made non-overlapping across TRCs (each "
+                  "contested span assigned to the TRC with the largest total "
+                  "array length).")
+            )
 
     # Annotation
     parser_annotation = subparsers.add_parser(
@@ -1310,6 +1325,13 @@ if __name__ == "__main__":
                   "array-level (TRC) clustering edge. Default (%(default)s)")
             )
     parser_run_all.add_argument(
+            "--keep_overlaps", action="store_true", default=False,
+            help=("Do not resolve overlapping TRC regions. By default the "
+                  "clustering GFF3 is made non-overlapping across TRCs (each "
+                  "contested span assigned to the TRC with the largest total "
+                  "array length).")
+            )
+    parser_run_all.add_argument(
             "--superfamily_score", type=float, default=20,
             help=("Minimum BLASTN score, (alignment_length * percent_identity - "
                   "gap_openings) / longer_consensus_length, for a superfamily edge "
@@ -1448,7 +1470,8 @@ if __name__ == "__main__":
                     cmd_args.fasta, cmd_args.prefix, cmd_args.gff, cmd_args.min_length,
                     not cmd_args.no_dust, cmd_args.cpu,
                     cluster_identity=cmd_args.cluster_identity,
-                    cluster_coverage=cmd_args.cluster_coverage
+                    cluster_coverage=cmd_args.cluster_coverage,
+                    resolve_overlaps=not cmd_args.keep_overlaps
                     )
         elif cmd_args.command == "annotation":
             annotation(
@@ -1485,7 +1508,8 @@ if __name__ == "__main__":
                     dust=not cmd_args.no_dust,
                     cpu=cmd_args.cpu,
                     cluster_identity=cmd_args.cluster_identity,
-                    cluster_coverage=cmd_args.cluster_coverage
+                    cluster_coverage=cmd_args.cluster_coverage,
+                    resolve_overlaps=not cmd_args.keep_overlaps
                     )
             if cmd_args.library:
                 annotation(

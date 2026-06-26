@@ -513,6 +513,12 @@ TideCluster.py run_all -c 40 -pr cen6_sat -f CEN6_ver_220406.fasta -l library.fa
 - `prefix__tidehunter_short.gff3` GFF3 file with tandem repeats shorter than the minimum length threshold used in the clustering step. 
 - `prefix_clustering.gff3` - GFF3 file with tandem repeats identified by `mmseqs2` and `BLASTN`. 
   Tandem repeat regions in the GFF3 file are labeled by **T**andem **R**epeat **C**luster ID (TRC1, TRC2, etc.). Each TRC is described by the `repeat_type` attribute. `repeat_type` can be either TR (Tandem Repeat) or SSR (Simple Sequence Repeat).
+  By default this GFF3 is made **non-overlapping across TRCs** (each genomic
+  region is annotated once): where variant arrays of a satellite are clustered
+  into separate TRCs that overlap at their boundaries, each contested span is
+  assigned to the dominant TRC — the one with the largest total array length.
+  No base of the union is lost (spans are reassigned, not dropped). Pass
+  `--keep_overlaps` to retain the raw, possibly overlapping regions.
 - `prefix_clustering.gff3_1.gff3` - Intermediate file with tandem repeats clustered by `mmseqs2`.
 - `prefix_consensus` - Directory with consensus sequences for each cluster as identified by TideHunter. There is one FASTA file per cluster. Each FASTA file contains all consensus sequences identified by TideHunter for a given cluster. 
 - `prefix_consensus_1` - Intermediate directory with consensus sequences for each cluster as identified by `mmseqs2`. 

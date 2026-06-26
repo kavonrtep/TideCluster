@@ -40,4 +40,7 @@ python3 "$ROOT/tests/test_chunked_repeatmasker.py"
 echo "=== unit: rDNA (45S/5S) identification ==="
 python3 "$ROOT/tests/test_rdna.py"
 
+echo "=== unit: cross-TRC overlap resolution ==="
+python3 "$ROOT/tests/test_overlap_resolution.py"
+
 echo "unit tests OK"
