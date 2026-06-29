@@ -11,7 +11,8 @@ mmseqs2_search <- function(sequences,
                            min_identity = 70,
                            awk_filter = NULL,
                            max_seqs = NULL,
-                           deterministic = FALSE
+                           deterministic = FALSE,
+                           mask = 1
 ) {
 
   # Create temporary directory for all operations
@@ -60,6 +61,7 @@ mmseqs2_search <- function(sequences,
                         "--threads", effective_threads,
                         "--max-seqs", effective_max_seqs,
                         "--min-seq-id", min_identity / 100,  # Convert percentage to fraction
+                        "--mask", mask,  # tantan low-complexity masking: 1=on (default), 0=off
                         additional_params)
 
     cat(sprintf("Running MMseqs2 easy-search (--threads %d --max-seqs %d)...\n",
@@ -197,7 +199,8 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
                                   output_directory = NULL, ncpu = 5,
                                   input_tc_dirs = NULL, prefix = NULL, tc_code = NULL,
                                   clustering_algorithm = "fast_greedy",
-                                  deterministic = FALSE, max_seqs = NULL
+                                  deterministic = FALSE, max_seqs = NULL,
+                                  lowcomplexity_mask = 1
 ) {
 
   # Input validation
@@ -276,13 +279,15 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
         df <- mmseqs2_search(th_tc_seq, threads = ncpu,
                             min_identity = min_identity,
                             awk_filter = awk_coverage_filter,
-                            max_seqs = max_seqs, deterministic = deterministic)
+                            max_seqs = max_seqs, deterministic = deterministic,
+                            mask = lowcomplexity_mask)
       } else {
         df <- mmseqs2_search(th_tc_seq, threads = ncpu,
                             mmseqs2_path = mmseqs2_path,
                             min_identity = min_identity,
                             awk_filter = awk_coverage_filter,
-                            max_seqs = max_seqs, deterministic = deterministic)
+                            max_seqs = max_seqs, deterministic = deterministic,
+                            mask = lowcomplexity_mask)
       }
     }, error = function(e) {
       stop("MMseqs2 execution failed. Please check that MMseqs2 is properly installed and accessible: ", e$message)
@@ -559,8 +564,16 @@ cluster_trc_sequences <- function(tc_seq, th_seq, mmseqs2_path = NULL,
     cat(sprintf("DEBUG: Groups after merging duplicates: %d (lost %d groups)\n", 
                 groups_after_merge, groups_before_merge - groups_after_merge))
   }
-  # Remove duplicated rows and renumber groups starting from 1
-  trc_groups <- trc_groups[!duplicated(trc_groups), ]
+  # Collapse to one row per TRC and renumber groups starting from 1.
+  # NB: keep ONLY (trc_id, group_id). The duplicate-merge block above adds a
+  # helper `group_id_original` column; if left in place it makes the
+  # now-identical (trc_id, group_id) rows look distinct, so a plain
+  # !duplicated() leaves k rows for a TRC that spanned k communities. Those
+  # leftover rows then survive apply_ssr_grouping()'s first-row-only reassign
+  # and the TRC ends up in two satellite families (Part 1 double-assignment
+  # bug). group_id_original is already consumed by the graph-sync above
+  # (group_conversion), so dropping it here is safe.
+  trc_groups <- unique(trc_groups[, c("trc_id", "group_id")])
   groups_after_dedup <- length(unique(trc_groups$group_id))
   cat(sprintf("DEBUG: Groups after removing duplicated rows: %d\n", groups_after_dedup))
   
@@ -989,13 +1002,21 @@ apply_ssr_grouping <- function(trc_groups, ssrs_groups, prefix, output_directory
     return(trc_groups)
   }
 
-  # Reassign existing rows; append rows for SSR TRCs that weren't in
-  # trc_groups at all (would happen pre-fix; should be empty post-fix).
-  existing_idx <- match(ssr_full_ids, trc_groups$trc_id)
-  has_row <- !is.na(existing_idx)
-  if (any(has_row)) {
-    trc_groups$group_id[existing_idx[has_row]] <- ssr_gids[has_row]
+  # Reassign EVERY row whose TRC is in an SSR cluster -- not just the first
+  # row per TRC. cluster_trc_sequences() now collapses trc_groups to one row
+  # per TRC, but match(ssr_full_ids, trc_groups$trc_id) would only touch the
+  # first matching row, so any surviving duplicate row would keep its stale
+  # similarity group_id and the TRC would land in two families (Part 1 bug).
+  # This mirrors the graph-sync block below (match against ssr_full_ids per
+  # row) so the data frame and the graph use identical reassignment logic.
+  row_to_ssr <- match(trc_groups$trc_id, ssr_full_ids)
+  affected   <- !is.na(row_to_ssr)
+  if (any(affected)) {
+    trc_groups$group_id[affected] <- ssr_gids[row_to_ssr[affected]]
   }
+  # Append rows for SSR TRCs that weren't in trc_groups at all (would happen
+  # pre-fix; should be empty post-fix).
+  has_row <- ssr_full_ids %in% trc_groups$trc_id
   if (any(!has_row)) {
     new_rows <- data.frame(
       trc_id   = ssr_full_ids[!has_row],
@@ -1011,7 +1032,7 @@ apply_ssr_grouping <- function(trc_groups, ssrs_groups, prefix, output_directory
       sum(!has_row)))
   }
 
-  reassigned <- sum(has_row)
+  reassigned <- sum(affected)
   ssr_families <- length(unique(ssr_gids))
   message(sprintf(
     "apply_ssr_grouping: reassigned %d TRC row(s) into %d SSR-pattern famil%s",
@@ -1333,7 +1354,8 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
                                  clustering_algorithm = "fast_greedy",
                                  min_coverage = 0.8, min_identity = 80,
                                  coverage_mode = "max",
-                                 deterministic = FALSE, max_seqs = NULL
+                                 deterministic = FALSE, max_seqs = NULL,
+                                 lowcomplexity_mask = 1
 ) {
 
   tc_clust_path <- paste0(tc_code, "_clustering.gff3")
@@ -1351,7 +1373,8 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
                                 coverage_mode = coverage_mode,
                                 input_tc_dirs = input_tc_dirs, prefix = prefix, tc_code = tc_code,
                                 clustering_algorithm = clustering_algorithm,
-                                deterministic = deterministic, max_seqs = max_seqs
+                                deterministic = deterministic, max_seqs = max_seqs,
+                                lowcomplexity_mask = lowcomplexity_mask
   )
 
   # Clean up large sequence objects after clustering
@@ -1769,7 +1792,8 @@ main <- function(opt) {
     min_identity = opt$min_identity,
     coverage_mode = opt$coverage_mode,
     deterministic = opt$deterministic,
-    max_seqs = opt$max_seqs
+    max_seqs = opt$max_seqs,
+    lowcomplexity_mask = opt$lowcomplexity_mask
   )
 
   # Format results
@@ -1837,8 +1861,17 @@ option_list <- list(
     help=paste("MMseqs2 --max-seqs prefilter cap. The MMseqs2 nucleotide default (300) drops redundant hits in a thread-dependent way on the highly redundant satellite-monomer pool, which is the dominant source of comparative non-determinism. Raise it above the per-query redundancy. Default: max(10000, number of input sequences).")),
   make_option(
     c("--deterministic"), action="store_true", default=FALSE,
-    help=paste("Force bit-for-bit reproducible output: runs the MMseqs2 search single-threaded (--threads 1) so the result file ordering is fixed too. Slower, but the m8 file and every downstream table are byte-identical across runs and machines. Without this flag the result table is still stable across thread counts and runs (via --max-seqs, deterministic dedup and sorted graph edges); only the on-disk m8 ordering may vary. [default: %default]"))
+    help=paste("Force bit-for-bit reproducible output: runs the MMseqs2 search single-threaded (--threads 1) so the result file ordering is fixed too. Slower, but the m8 file and every downstream table are byte-identical across runs and machines. Without this flag the result table is still stable across thread counts and runs (via --max-seqs, deterministic dedup and sorted graph edges); only the on-disk m8 ordering may vary. [default: %default]")),
+  make_option(
+    c("--lowcomplexity_mask"), type="integer", default=1,
+    help=paste("MMseqs2 tantan low-complexity masking in the comparative all-vs-all search: 1=on (default, current behaviour), 0=off. Turn off for AT-rich / simple-repeat satellites whose monomers are mostly low-complexity: masking strips their alignable sequence so highly similar TRCs fail the coverage cut and one biological family fragments across many comparative families. Caveat: with masking off, unrelated AT-rich / low-complexity satellites can align and over-merge, so keep this on unless you know your target satellites are simple-repeat-rich and have checked the impact. NOTE: a pre-existing mmseqs2_results.rds in the output dir is reused as-is, so to change masking re-run into a fresh output dir (or delete that file). [default: %default]"))
 )
+
+# Only parse CLI args and run the analysis when this file is executed as a
+# script (Rscript / R CMD BATCH), not when it is source()d -- e.g. unit tests
+# source it to reach the functions above without triggering a full run.
+# sys.nframe() is 0 at top level under Rscript and > 0 inside a source() call.
+if (sys.nframe() == 0L) {
 
 opt_parser <- OptionParser(option_list=option_list)
 opt <- parse_args(opt_parser)
@@ -1860,6 +1893,12 @@ if (!(opt$clustering_algorithm %in% valid_algorithms)) {
 if (!(opt$coverage_mode %in% c("max", "min"))) {
   print_help(opt_parser)
   stop("Invalid --coverage_mode. Choose 'max' or 'min'.")
+}
+
+# check low-complexity masking flag
+if (!(opt$lowcomplexity_mask %in% c(0L, 1L))) {
+  print_help(opt_parser)
+  stop("Invalid --lowcomplexity_mask. Choose 0 (off) or 1 (on).")
 }
 
 # validate leiden-specific parameters if leiden clustering is used
@@ -1898,5 +1937,7 @@ if (is.null(opt$input)) {
 save.image("debug_tc_comparative_analysis.RData")
 # Run main analysis
 main(opt)
+
+}  # end if (sys.nframe() == 0L)
 
 

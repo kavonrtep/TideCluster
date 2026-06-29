@@ -196,9 +196,10 @@ diverged continuum of variants. If in doubt, do not change them.
 | Superfamily grouping | `--superfamily_score` | 20 | minimum consensus-vs-consensus BLAST score `(length · pident − gap_openings) / longer_consensus_length`; **lower** = looser superfamilies |
 
 The comparative cross-genome grouping has its own thresholds
-(`--min_identity`, `--min_coverage`, `--coverage_mode`, and the Leiden
-resolution; see `tc_comparative_analysis.R --help`), to which the same
-"defaults are tuned, change only if you know why" guidance applies.
+(`--min_identity`, `--min_coverage`, `--coverage_mode`,
+`--lowcomplexity_mask`, and the Leiden resolution; see
+`tc_comparative_analysis.R --help`), to which the same "defaults are tuned,
+change only if you know why" guidance applies.
 
 Values outside their valid range are rejected before the run starts
 (for example a coverage fraction mistakenly given as a percent);
@@ -729,6 +730,17 @@ Rscript tc_comparative_analysis.R -i input_config.tsv -o output_directory -c 10
   *either* sequence, so a short monomer can join a longer family as a subset) or
   `min` (requires both sequences to be well covered, rejecting short-vs-long
   subset hits). See *How similarity between TRCs is evaluated* below.
+- `--lowcomplexity_mask`: MMseqs2 tantan low-complexity masking in the all-vs-all
+  search — `1` = on (default, unchanged behaviour) or `0` = off. For satellites
+  whose monomers are AT-rich / contain simple-repeat stretches, masking removes
+  most of the alignable sequence, so highly similar TRCs fail the coverage cut and
+  one biological family fragments across many comparative families. Set `0` to
+  recover those families. **Caveat:** with masking off, *unrelated* AT-rich /
+  low-complexity satellites can also align and over-merge into one family, so keep
+  the default on unless you know your target satellites are simple-repeat-rich and
+  have checked the impact. Note that an existing `mmseqs2_results.rds` in the
+  output directory is reused as-is — to change masking, run into a fresh output
+  directory (or delete that file first).
 
 ### How similarity between TRCs is evaluated
 

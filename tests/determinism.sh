@@ -19,6 +19,12 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="$ROOT/tmp/tests/determinism"
 NCPU="${NCPU:-4}"
 
+# Fast, fixture-free unit guard for the Part 1 SSR double-assignment bug
+# (apply_ssr_grouping must produce a clean partition). Runs unconditionally,
+# before the fixture-dependent determinism test below (which may SKIP).
+echo "=== comparative SSR-partition unit test ==="
+Rscript "$ROOT/tests/test_ssr_partition.R"
+
 FIXTURE="${TC_COMPARATIVE_FIXTURE:-}"
 if [ -z "$FIXTURE" ]; then
   for cand in "$ROOT/tests/data/comparative" "$ROOT/test_data/analysis_1.10.5"; do
