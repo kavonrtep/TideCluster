@@ -327,18 +327,45 @@
     var reset = dist.querySelector('.tc-idx-trc-reset');
     if (!svg || !list) return;
 
+    var SVGNS = 'http://www.w3.org/2000/svg';
+    // Highlighted arrays are drawn as CLONES in an overlay <g> appended as
+    // the last SVG child, so they always paint on top of the grey arrays
+    // (in-place rects get blended toward brown by greys painted after them).
+    // Clones are widened to a minimum pixel width and given a small vertical
+    // overhang so even sub-pixel arrays read as a bold red bar; the overlay
+    // is pointer-events:none (CSS) so hover/tooltips fall through to the
+    // originals beneath. Originals are left untouched -- clearing the
+    // selection just removes the overlay.
+    var OVERLAY_MIN_W = 3;     // px: floor on highlighted-array width
+    var OVERLAY_OVERHANG = 1.5; // px: how far the red pokes past the track
+
     function applyActive(trcId) {
       svg.setAttribute('data-active-trc', trcId || '');
-      // Toggle `.tc-idx-active` on every TRA rect so the per-rect --sf
-      // CSS variable can take effect on the matching ones only.
-      var rects = svg.querySelectorAll('rect.tc-idx-tra');
-      rects.forEach(function (r) {
-        if (trcId && r.getAttribute('data-trc') === trcId) {
-          r.classList.add('tc-idx-active');
-        } else {
-          r.classList.remove('tc-idx-active');
-        }
-      });
+
+      var old = svg.querySelector('g.tc-idx-overlay');
+      if (old) old.parentNode.removeChild(old);
+
+      if (trcId) {
+        var g = document.createElementNS(SVGNS, 'g');
+        g.setAttribute('class', 'tc-idx-overlay');
+        svg.querySelectorAll('rect.tc-idx-tra').forEach(function (r) {
+          if (r.getAttribute('data-trc') !== trcId) return;
+          var x = parseFloat(r.getAttribute('x'));
+          var y = parseFloat(r.getAttribute('y'));
+          var w = parseFloat(r.getAttribute('width'));
+          var h = parseFloat(r.getAttribute('height'));
+          if (!(w >= OVERLAY_MIN_W)) { x -= (OVERLAY_MIN_W - w) / 2; w = OVERLAY_MIN_W; }
+          var c = document.createElementNS(SVGNS, 'rect');
+          c.setAttribute('class', 'tc-idx-overlay-rect');
+          c.setAttribute('x', x.toFixed(2));
+          c.setAttribute('y', (y - OVERLAY_OVERHANG).toFixed(2));
+          c.setAttribute('width', w.toFixed(2));
+          c.setAttribute('height', (h + 2 * OVERLAY_OVERHANG).toFixed(2));
+          g.appendChild(c);
+        });
+        svg.appendChild(g);
+      }
+
       // Highlight the corresponding sidebar row.
       list.querySelectorAll('.tc-idx-trc-item').forEach(function (li) {
         li.classList.toggle('tc-idx-trc-active',

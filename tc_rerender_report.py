@@ -1533,9 +1533,9 @@ def render_index_distribution(model, ctx):
 
     Each TRA <rect> carries data-trc / data-sf and a per-rectangle CSS
     variable `--sf` set to the superfamily colour. Default rendering is
-    uniform muted grey; when the surrounding container's data-active-trc
-    matches a rectangle's data-trc the JS adds `tc-idx-active` to it and
-    CSS lifts it to its superfamily colour + outline."""
+    uniform muted grey; when a TRC is selected the JS dims the base greys
+    and draws bold red clones of that TRC's arrays in a top overlay <g>
+    (see `initIndexDistribution` / `.tc-idx-overlay-rect` in the assets)."""
     trcs = model.get("trcs") or []
     seqid_lengths = model.get("seqid_lengths") or {}
     # All arrays, tagged with their TRC id and superfamily colour. We

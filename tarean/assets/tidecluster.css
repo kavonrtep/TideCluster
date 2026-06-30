@@ -714,17 +714,26 @@ tr.tc-details-open .tc-details-control::before {
   cursor: pointer;
 }
 .tc-idx-svg rect.tc-idx-tra:hover { opacity: 0.9; }
-/* Filter active: non-selected TRAs keep the default grey so the
-   ideogram's overall density stays readable; selected TRAs switch to
-   a saturated red with a thin dark outline so they pop against the
-   greys. (The per-rect --sf variable is preserved for future use but
-   not consumed here.) */
+/* When a TRC is selected, dim the non-selected greys so the red
+   highlight reads clearly; the overall density stays legible (just
+   quieter). The selected arrays themselves are covered by the bold
+   overlay clones below, so dimming the base rects is invisible there. */
 .tc-idx-svg[data-active-trc]:not([data-active-trc=""])
-  rect.tc-idx-tra.tc-idx-active {
-  fill: #d62728;
+  rect.tc-idx-tra {
+  opacity: 0.32;
+}
+/* Highlight overlay: clones of the selected TRC's arrays, drawn last
+   (top layer) by the JS. Saturated red at full opacity with a white
+   halo so the red never touches the grey arrays -- this is what kills
+   the old "brownish" blend. pointer-events:none lets hover / tooltips
+   fall through to the original rects underneath. */
+.tc-idx-svg g.tc-idx-overlay { pointer-events: none; }
+.tc-idx-svg rect.tc-idx-overlay-rect {
+  fill: #e60023;
   opacity: 1;
-  stroke: rgba(0, 0, 0, 0.65);
-  stroke-width: 0.6;
+  stroke: #fff;
+  stroke-width: 1.2;
+  paint-order: stroke;
 }
 .tc-idx-hidden-note {
   margin-left: 8px;
