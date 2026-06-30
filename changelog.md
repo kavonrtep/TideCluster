@@ -1,3 +1,19 @@
+## 1.16.1 (2026-06-30)
+- **Comparative analysis: each TRC now maps to a single satellite family.**
+  Fixed a bug where SSR-grouped TRCs split across communities were assigned to
+  two families in `trc_satellite_families.tsv` (inflating family counts and
+  double-counting length/annotation). `apply_ssr_grouping()` now reassigns every
+  matching row, and `cluster_trc_sequences()` collapses `trc_groups` to one row
+  per TRC.
+- **New `--lowcomplexity_mask {0,1}` option for `tc_comparative_analysis.R`**
+  (default `1` = unchanged). Set `0` to disable MMseqs2 tantan low-complexity
+  masking in the all-vs-all search, so AT-rich / simple-repeat satellites whose
+  monomers are mostly low-complexity stop fragmenting across many families.
+- **Index report: clearer TRC highlight on the "TRC distribution across the
+  assembly" ideogram.** The selected TRC's arrays are now drawn as a top-layer
+  red overlay with a white halo (no more brownish blend), widened to a minimum
+  width with a slight vertical overhang, while non-selected arrays dim.
+
 ## 1.16.0 (2026-06-26)
 - **rDNA identification.** TRCs are now flagged as ribosomal DNA, distinguishing
   45S (18S/5.8S/25S) from 5S, by blastn similarity to a bundled reference
