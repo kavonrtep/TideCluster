@@ -320,6 +320,12 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
             print("TRC similarity clustering not performed due to lack of TAREAN "
                   "consensus sequences.", file=open(html_file, "w"))
 
+        # This no-TAREAN path never runs compare_trc_by_blast.R, so emit the
+        # canonical empty superfamily CSV + manifest here too (mirrors that
+        # script's make_empty_outputs) -- keeps the artefact contract uniform
+        # regardless of which path produced the run.
+        _write_empty_superfamily_outputs(prefix)
+
         _maybe_identify_rdna(prefix, fasta, args, cpu)
         _move_v1_to_legacy(prefix)
         _build_report_v2(prefix)
@@ -371,6 +377,34 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
     _maybe_identify_rdna(prefix, fasta, args, cpu)
     _move_v1_to_legacy(prefix)
     _build_report_v2(prefix)
+
+
+def _write_empty_superfamily_outputs(prefix):
+    """Write the canonical empty superfamily CSV + manifest for a run that
+    produced no superfamilies.
+
+    Mirrors tarean/compare_trc_by_blast.R:make_empty_outputs so the artefact
+    contract is uniform no matter which path ran: the CSV is always present
+    under the canonical <prefix>_trc_superfamilies.csv name with the same
+    header and zero data rows, and a small manifest declares the outputs.
+    The caller writes the accompanying HTML stub."""
+    base = os.path.basename(prefix)
+    # Header-only CSV, same quoted header + schema as write.csv() in the R side.
+    with open(F"{prefix}_trc_superfamilies.csv", "w") as f:
+        f.write('"Superfamily","TRC","fallback"\n')
+    manifest = {
+        "producer": "TideCluster/TideCluster.py",
+        "schema_version": 1,
+        "superfamilies_found": False,
+        "n_superfamilies": 0,
+        "outputs": {
+            "csv": F"{base}_trc_superfamilies.csv",
+            "html": F"{base}_trc_superfamilies.html",
+        },
+        "csv_columns": ["Superfamily", "TRC", "fallback"],
+    }
+    with open(F"{prefix}_trc_superfamilies.manifest.json", "w") as f:
+        json.dump(manifest, f, indent=2)
 
 
 def _move_v1_to_legacy(prefix):

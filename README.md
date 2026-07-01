@@ -540,7 +540,14 @@ TideCluster.py run_all -c 40 -pr cen6_sat -f CEN6_ver_220406.fasta -l library.fa
 - `prefix_tarean_report.tsv` - File with tandem repeat annotations in a tab-delimited format.
 - `prefix_kite_report.html` - HTML report with KITE analysis.
 - `prefix_trc_superfamilies.html`  HTML report with TRC superfamilies.
-- `prefix_trc_superfamilies.tsv`  File with TRC superfamilies in a tab-delimited format.
+- `prefix_trc_superfamilies.csv`  Table of TRC-to-superfamily assignments
+  (comma-separated, columns `Superfamily,TRC,fallback`). Always written under
+  this name, even when no superfamilies are found — in that case it has the
+  header only and zero data rows.
+- `prefix_trc_superfamilies.manifest.json`  Small manifest declaring the
+  superfamily artefacts (the CSV/HTML basenames, the CSV column schema, and
+  whether any superfamilies were found), so downstream tools key on a stated
+  contract rather than on guessed filenames.
 - `prefix_tarean` - Directory containing subdirectories with detailed TAREAN output for each TRC cluster.
 - `prefix_consensus_dimer_library.fasta` - FASTA file with consensus sequences for 
   each TRC cluster. This sequences can be used as a library for similarity based 

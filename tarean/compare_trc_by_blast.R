@@ -316,14 +316,50 @@ run_blast <- function(query, db, threads, evalue) {
   return(bl)
 }
 
+# Small run manifest declaring the produced artefacts, so downstream
+# consumers (e.g. CARP's superfamily-aware RM filter, and TideCluster's own
+# report) key on a stated contract rather than on guessed / conditional
+# filenames. Written in BOTH the populated and the empty case. Best-effort:
+# a failure here must never abort the superfamily step.
+write_superfamily_manifest <- function(prefix, n_superfamilies){
+  tryCatch({
+    base <- basename(prefix)
+    manifest <- list(
+      producer            = "TideCluster/tarean/compare_trc_by_blast.R",
+      schema_version      = 1L,
+      superfamilies_found = n_superfamilies > 0L,
+      n_superfamilies     = as.integer(n_superfamilies),
+      outputs = list(
+        csv  = paste0(base, "_trc_superfamilies.csv"),
+        html = paste0(base, "_trc_superfamilies.html")
+      ),
+      csv_columns = c("Superfamily", "TRC", "fallback")
+    )
+    writeLines(
+      jsonlite::toJSON(manifest, auto_unbox = TRUE, pretty = TRUE),
+      paste0(prefix, "_trc_superfamilies.manifest.json"))
+  }, error = function(e) {
+    message("compare_trc_by_blast: could not write superfamily manifest: ",
+            conditionMessage(e))
+  })
+}
+
 make_empty_outputs <- function(prefix){
   # create empty html file
   html_out <- paste(prefix, "_trc_superfamilies.html", sep = "")
   page <- openPage(html_out, title = "TRC Superfamilies", css = style)
   hwrite("No TRC superfamilies found", page = page)
-  # create empty file
-  cat("", file = paste(prefix, "_superfamilies.csv", sep = ""))
   closePage(page)
+  # Write the CANONICAL csv basename (`_trc_superfamilies.csv`, same as the
+  # populated case) with the same header but zero data rows -- so the output
+  # is always present under one name with a stable schema, and "no
+  # superfamilies" is unambiguous (0 data rows, not a 0-byte / absent /
+  # differently named file). See docs/tidecluster_superfamily_naming_request.md.
+  empty_tbl <- data.frame(Superfamily = integer(0), TRC = character(0),
+                          fallback = logical(0), stringsAsFactors = FALSE)
+  write.csv(empty_tbl, paste(prefix, "_trc_superfamilies.csv", sep = ""),
+            row.names = FALSE)
+  write_superfamily_manifest(prefix, 0L)
 }
 
 
@@ -668,6 +704,7 @@ tbl_out <- data.frame(Superfamily=rep(seq_along(cls), sapply(cls, length), strin
                       TRC=unlist(cls, use.names = FALSE), stringsAsFactors = FALSE)
 tbl_out$fallback <- tbl_out$TRC %in% fallback_attached
 write.csv(tbl_out, paste(opt$prefix, "_trc_superfamilies.csv", sep = ""), row.names = FALSE)
+write_superfamily_manifest(opt$prefix, length(cls))
 
 if (opt$debug) {
 save.image(paste(opt$prefix, "_debug.RData", sep = ""))
