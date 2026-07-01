@@ -1,3 +1,15 @@
+## 1.16.2 (2026-07-01)
+- **Stable TRC-superfamily output contract.** The per-TRC superfamily CSV is
+  now always written under the canonical `<prefix>_trc_superfamilies.csv` name
+  with the `Superfamily,TRC,fallback` header, even when no superfamilies are
+  found (header only, zero rows) — previously the empty case wrote a 0-byte,
+  unheadered `<prefix>_superfamilies.csv`, so downstream tools could not tell
+  "found none" from "missing/renamed". Both empty paths are covered
+  (`compare_trc_by_blast.R` and the no-TAREAN path in `TideCluster.py`).
+- **New `<prefix>_trc_superfamilies.manifest.json`** declaring the superfamily
+  artefacts (output basenames, CSV column schema, whether any were found), so
+  downstream consumers key on a stated contract rather than guessed filenames.
+
 ## 1.16.1 (2026-06-30)
 - **Comparative analysis: each TRC now maps to a single satellite family.**
   Fixed a bug where SSR-grouped TRCs split across communities were assigned to
