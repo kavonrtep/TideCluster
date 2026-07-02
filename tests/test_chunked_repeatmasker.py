@@ -20,6 +20,7 @@ Validates the coordinate machinery WITHOUT invoking real RepeatMasker:
 Run: python3 tests/test_chunked_repeatmasker.py
 """
 import os
+import subprocess
 import sys
 import tempfile
 
@@ -35,8 +36,9 @@ def write_fasta(path, seqs):
 
 
 # --- fake RepeatMasker -------------------------------------------------------
-# Parses the RepeatMasker argv built by _repeatmasker_chunk_worker, reads the
-# chunk FASTA, and writes a .out with one hit per sequence at local [2, 4].
+# Parses the RepeatMasker argv built by _repeatmasker_cmd, reads the chunk
+# FASTA, and writes a .out with one hit per sequence at local [2, 4]. Returns a
+# CompletedProcess (returncode 0) because the worker now inspects .returncode.
 def _fake_rm_run(cmds, *a, **k):
     out_dir = cmds[cmds.index("-dir") + 1]
     chunk_fasta = cmds[-1]
@@ -47,11 +49,45 @@ def _fake_rm_run(cmds, *a, **k):
         for tok in tokens:
             # cols: score div del ins QUERY begin end (left) strand match NAME ...
             fh.write(F"300 1.0 0.0 0.0 {tok} 2 4 (0) + REP TRCsat 1 3 (0) 1\n")
-    return None
+    return subprocess.CompletedProcess(cmds, 0)
 
 
 def _fake_rm_run_no_out(cmds, *a, **k):
-    return None  # writes nothing -> simulates a hit-less / empty chunk
+    # writes nothing but exits 0 -> a legitimately hit-less / empty chunk
+    return subprocess.CompletedProcess(cmds, 0)
+
+
+def _is_warmup(cmds):
+    return os.path.basename(cmds[-1]).startswith("_rm_warmup")
+
+
+# All real chunks fail (exit 1, no .out); the warm-up succeeds. Simulates the
+# library-build race hitting every chunk.
+def _fake_rm_fail_chunks(cmds, *a, **k):
+    if _is_warmup(cmds):
+        return _fake_rm_run(cmds)
+    return subprocess.CompletedProcess(cmds, 1)
+
+
+# Each chunk fails on its first attempt (exit 1, no .out) then succeeds on the
+# serial retry -- a marker file on disk (shared across the forked pool worker
+# and the parent's retry) tracks the first attempt. Simulates a transient race
+# that the one-shot retry clears.
+def _fake_rm_fail_once(cmds, *a, **k):
+    if _is_warmup(cmds):
+        return _fake_rm_run(cmds)
+    marker = cmds[-1] + ".attempted"
+    if not os.path.exists(marker):
+        open(marker, "w").close()
+        return subprocess.CompletedProcess(cmds, 1)
+    return _fake_rm_run(cmds)
+
+
+# The warm-up itself fails (broken RepeatMasker library setup).
+def _fake_rm_fail_warmup(cmds, *a, **k):
+    if _is_warmup(cmds):
+        return subprocess.CompletedProcess(cmds, 1)
+    return _fake_rm_run(cmds)
 
 
 def main():
@@ -148,6 +184,64 @@ def main():
         check("no .out -> empty (header-only) GFF3", data_lines == [])
     finally:
         tc.subprocess.run = orig_run
+
+    # --- D) a chunk RepeatMasker failure aborts (no silent truncation) -------
+    tc.subprocess.run = _fake_rm_fail_chunks
+    out_gff3_fail = os.path.join(d, "rm_fail.gff3")
+    raised = False
+    try:
+        tc.run_repeatmasker_genome_chunked(
+            genome, os.path.join(d, "lib.fasta"), 2, "", out_gff3_fail,
+            chunk_size=20, overlap=5,
+        )
+    except RuntimeError:
+        raised = True
+    finally:
+        tc.subprocess.run = orig_run
+    check("chunk RepeatMasker failure raises (no silent truncation)", raised)
+    check("no truncated GFF3 written on failure", not os.path.exists(out_gff3_fail))
+
+    # --- E) one-shot serial retry recovers a transient chunk failure ---------
+    tc.subprocess.run = _fake_rm_fail_once
+    out_gff3_retry = os.path.join(d, "rm_retry.gff3")
+    retry_ok = True
+    try:
+        tc.run_repeatmasker_genome_chunked(
+            genome, os.path.join(d, "lib.fasta"), 2, "", out_gff3_retry,
+            chunk_size=20, overlap=5,
+        )
+    except Exception as e:  # noqa: BLE001
+        retry_ok = False
+        print("  raised:", repr(e))
+    finally:
+        tc.subprocess.run = orig_run
+    check("retry recovers: run completes despite first-attempt failures", retry_ok)
+    if retry_ok:
+        retry_rows = set()
+        with open(out_gff3_retry) as fh:
+            for line in fh:
+                if line.startswith("#"):
+                    continue
+                f = tc.Gff3Feature(line)
+                retry_rows.add((f.seqid, f.start, f.end, f.strand,
+                                f.attributes_dict["Name"]))
+        check("retry produces the full (untruncated) hit set", retry_rows == set(expected))
+
+    # --- F) a warm-up (library build) failure aborts before the pool ---------
+    tc.subprocess.run = _fake_rm_fail_warmup
+    out_gff3_warm = os.path.join(d, "rm_warm.gff3")
+    warm_raised = False
+    try:
+        tc.run_repeatmasker_genome_chunked(
+            genome, os.path.join(d, "lib.fasta"), 2, "", out_gff3_warm,
+            chunk_size=20, overlap=5,
+        )
+    except RuntimeError:
+        warm_raised = True
+    finally:
+        tc.subprocess.run = orig_run
+    check("warm-up failure raises before the pool", warm_raised)
+    check("no GFF3 written on warm-up failure", not os.path.exists(out_gff3_warm))
 
     print("\nALL PASS" if not failures else f"\nFAILED: {failures}")
     sys.exit(1 if failures else 0)

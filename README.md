@@ -605,6 +605,13 @@ context-dependent `ProcessRepeats` can shift a few hits at the cuts (typically
 well under the project's ±0.15 % masked-bp losslessness bar). Increase
 `--chunk_size` for stricter equivalence, decrease it for more parallelism.
 
+RepeatMasker's shared library databases are built once, serially, before the
+worker pool starts, so concurrent first-use instances in a freshly-installed
+environment do not race on that one-time build (which could otherwise make some
+chunks mask nothing). If any chunk's RepeatMasker fails it is retried once and
+then the run aborts with a non-zero exit — a partial set of chunks is never
+merged into a silently truncated annotation.
+
 ### Usage:
 
 ```help

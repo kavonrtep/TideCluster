@@ -1051,6 +1051,43 @@ def split_fasta_to_chunk_files(fasta_file, out_dir, chunk_size=50000000,
     return file_paths, matching_table
 
 
+def _repeatmasker_cmd(out_dir, rm_library, sensitivity_flag, target_fasta):
+    """Build the single-threaded RepeatMasker argv shared by the chunk worker
+    and the serial library warm-up, so both use identical flags / engine."""
+    cmds = ["RepeatMasker", "-dir", out_dir, "-nolow", "-no_is", "-e", "ncbi"]
+    if sensitivity_flag:
+        cmds.append(sensitivity_flag)
+    cmds.extend(["-lib", rm_library, "-pa", "1", target_fasta])
+    return cmds
+
+
+def _repeatmasker_warmup(rm_library, sensitivity_flag, work_dir):
+    """Serially prime RepeatMasker's shared per-installation
+    ``Libraries/general`` blast DBs (``is.lib`` etc.) BEFORE the parallel pool.
+
+    On first use RepeatMasker builds those DBs via ``makeblastdb``. Several
+    pooled instances launched at once race on that one-time build; some error
+    out and mask nothing, which previously produced a silently truncated
+    result. Running one RepeatMasker serially first makes the build happen
+    exactly once, so every pooled chunk reuses it. (``-no_is`` does NOT avoid
+    this -- the general libraries are still built during setup.) Raises
+    ``RuntimeError`` on a non-zero exit so a fundamentally broken RepeatMasker
+    setup fails loudly, once, rather than at every chunk.
+    """
+    warmup_fasta = os.path.join(work_dir, "_rm_warmup.fasta")
+    with open(warmup_fasta, "w") as fh:
+        fh.write(">_rm_warmup\n" + ("ACGT" * 100) + "\n")
+    out_dir = warmup_fasta + "_rmdir"
+    os.makedirs(out_dir, exist_ok=True)
+    result = subprocess.run(
+        _repeatmasker_cmd(out_dir, rm_library, sensitivity_flag, warmup_fasta))
+    if result.returncode != 0:
+        raise RuntimeError(
+            F"RepeatMasker warm-up failed (exit {result.returncode}); could not "
+            F"build the shared Libraries/general blast DBs. Aborting before the "
+            F"chunk pool to avoid a truncated annotation.")
+
+
 def _repeatmasker_chunk_worker(task):
     """Run a single-threaded RepeatMasker on one chunk FASTA.
 
@@ -1059,22 +1096,28 @@ def _repeatmasker_chunk_worker(task):
     output directory so concurrent jobs cannot clobber each other's files.
 
     :param task: (chunk_fasta, rm_library, sensitivity_flag)
-    :return: path to the chunk's ``.out`` file, or None if RepeatMasker wrote
-             none (an empty / hit-less / all-N chunk).
+    :return: ``(status, chunk_fasta, out_file_or_None)`` where ``status`` is:
+             * ``"ok"``      -- RepeatMasker succeeded and wrote a ``.out``.
+             * ``"no_hits"`` -- succeeded (exit 0) but wrote no ``.out`` (empty
+                                / all-N / genuinely hit-less chunk); contributes
+                                nothing, as run_repeatmasker_with_renaming does.
+             * ``"failed"``  -- RepeatMasker exited non-zero (e.g. the library
+                                build race); the caller must NOT merge silently.
+             Distinguishing ``"no_hits"`` (exit 0, no .out) from ``"failed"``
+             (exit != 0) keeps the legitimate hit-less-chunk tolerance while
+             catching real errors instead of dropping them.
     """
     chunk_fasta, rm_library, sensitivity_flag = task
     out_dir = chunk_fasta + "_rmdir"
     os.makedirs(out_dir, exist_ok=True)
-    cmds = ["RepeatMasker", "-dir", out_dir, "-nolow", "-no_is", "-e", "ncbi"]
-    if sensitivity_flag:
-        cmds.append(sensitivity_flag)
-    cmds.extend(["-lib", rm_library, "-pa", "1", chunk_fasta])
-    # Tolerate the no-hit case the way run_repeatmasker_with_renaming does:
-    # RepeatMasker writes no .out for an empty / all-N / hit-less input. Do not
-    # use check=True, so such chunks return None instead of aborting the pool.
-    subprocess.run(cmds)
+    result = subprocess.run(
+        _repeatmasker_cmd(out_dir, rm_library, sensitivity_flag, chunk_fasta))
     out_file = os.path.join(out_dir, os.path.basename(chunk_fasta) + ".out")
-    return out_file if os.path.exists(out_file) else None
+    if result.returncode != 0:
+        return ("failed", chunk_fasta, None)
+    if os.path.exists(out_file):
+        return ("ok", chunk_fasta, out_file)
+    return ("no_hits", chunk_fasta, None)
 
 
 def run_repeatmasker_genome_chunked(ref_seq, rm_library, cpu, sensitivity_flag,
@@ -1099,6 +1142,13 @@ def run_repeatmasker_genome_chunked(ref_seq, rm_library, cpu, sensitivity_flag,
     :func:`merge_overlapping_gff3_intervals`. The GFF3 written here is sorted,
     so the result does not depend on pool scheduling order.
 
+    Robustness: RepeatMasker's shared ``Libraries/general`` blast DBs are built
+    once, serially, via :func:`_repeatmasker_warmup` before the pool starts, so
+    concurrent first-use instances do not race on that build. Any chunk whose
+    RepeatMasker exits non-zero is retried once and then aborts the whole run
+    (``RuntimeError``) -- a partial set is never merged into a silently
+    truncated annotation.
+
     :param ref_seq: genome FASTA to annotate
     :param rm_library: RepeatMasker custom library (already length-adjusted)
     :param cpu: number of concurrent single-threaded RepeatMasker processes
@@ -1116,18 +1166,50 @@ def run_repeatmasker_genome_chunked(ref_seq, rm_library, cpu, sensitivity_flag,
     print(F"Chunked RepeatMasker: {len(chunk_files)} chunk file(s), "
           F"{len(matching_table)} piece(s), {cpu} worker(s)")
 
+    # Build RepeatMasker's shared Libraries/general blast DBs once, serially,
+    # before fanning out the pool -- otherwise concurrent first-use instances
+    # race on that build and some mask nothing (see _repeatmasker_warmup).
+    _repeatmasker_warmup(rm_library, sensitivity_flag, work_dir)
+
     tasks = [(c, rm_library, sensitivity_flag) for c in chunk_files]
     pool_size = max(1, min(cpu, len(tasks)))
     with Pool(pool_size) as pool:
-        out_files = pool.map(_repeatmasker_chunk_worker, tasks)
+        results = list(pool.map(_repeatmasker_chunk_worker, tasks))
+
+    # Retry any chunk whose RepeatMasker exited non-zero once, serially (the
+    # shared libraries are built by now, so a transient race should clear).
+    for i, res in enumerate(results):
+        if res[0] == "failed":
+            print(F"RepeatMasker chunk failed ({os.path.basename(res[1])}); "
+                  F"retrying once serially...")
+            results[i] = _repeatmasker_chunk_worker(tasks[i])
+
+    # Never merge a partial set: if any chunk still failed, abort non-zero.
+    failed = [r[1] for r in results if r[0] == "failed"]
+    if failed:
+        if not debug:
+            shutil.rmtree(work_dir, ignore_errors=True)
+        raise RuntimeError(
+            F"Chunked RepeatMasker: {len(failed)} of {len(tasks)} chunk(s) "
+            F"failed after one retry "
+            F"({', '.join(os.path.basename(f) for f in failed)}). "
+            F"Refusing to write a truncated annotation.")
+
+    # Completeness assertion + summary: every input chunk is accounted for;
+    # hit-less chunks are legitimate but logged so a suspicious loss is visible.
+    assert len(results) == len(tasks)
+    n_hits = sum(1 for r in results if r[0] == "ok")
+    n_empty = sum(1 for r in results if r[0] == "no_hits")
+    print(F"Chunked RepeatMasker: {len(tasks)} chunk(s) completed -- "
+          F"{n_hits} with hits, {n_empty} hit-less, 0 failed")
 
     # O(1) token -> matching_table row lookup (avoid the O(M) linear scan in
     # get_original_header_and_coordinates per hit; there can be millions).
     token_row = {row[4]: row for row in matching_table}
 
     records = []
-    for out_file in out_files:
-        if out_file is None or not os.path.exists(out_file):
+    for status, _chunk, out_file in results:
+        if status != "ok":
             continue
         with open(out_file) as f:
             for _ in range(3):  # skip the 3 RepeatMasker header lines
