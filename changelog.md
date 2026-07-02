@@ -1,3 +1,13 @@
+## 1.16.3 (2026-07-02)
+- **`tc_reannotate` no longer silently truncates on a RepeatMasker library-build
+  race.** The chunked/pooled runner now builds RepeatMasker's shared
+  `Libraries/general` databases once, serially, before starting the worker pool,
+  so concurrent first-use instances in a fresh environment don't race on that
+  build (which could previously make some chunks mask nothing). Any chunk whose
+  RepeatMasker exits non-zero is retried once and then the run aborts with a
+  non-zero exit — a partial set of chunks is never merged into a truncated
+  annotation. Legitimately hit-less chunks are still tolerated.
+
 ## 1.16.2 (2026-07-01)
 - **Stable TRC-superfamily output contract.** The per-TRC superfamily CSV is
   now always written under the canonical `<prefix>_trc_superfamilies.csv` name
