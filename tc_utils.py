@@ -1036,13 +1036,37 @@ def split_fasta_to_chunk_files(fasta_file, out_dir, chunk_size=50000000,
     pieces_by_header = {}
     for row in matching_table:
         pieces_by_header.setdefault(row[0], []).append(row)
-    # 3) stream the FASTA once, writing each piece to its assigned file
-    open_handles = {p: open(p, "w") for p in file_paths}
+    # 3) stream the FASTA once, writing each piece to its assigned file.
+    # Open chunk files lazily through a bounded LRU cache so at most
+    # ``max_open_handles`` descriptors are held at once. ``file_paths`` grows
+    # with genome size (~genome_bp / chunk_size, e.g. ~1800 for a 90 Gbp genome
+    # at the default chunk_size), and opening every handle simultaneously
+    # exhausts the open-file limit ("OSError: [Errno 24] Too many open files").
+    # Pieces stream in header order and files fill roughly sequentially, so the
+    # working set of open files is small and eviction/reopen is rare. The first
+    # open of a path truncates ("w"); a reopen after eviction appends ("a").
+    max_open_handles = 256
+    open_handles = OrderedDict()
+    opened_paths = set()
+
+    def _handle_for(path):
+        fh = open_handles.get(path)
+        if fh is not None:
+            open_handles.move_to_end(path)
+            return fh
+        if len(open_handles) >= max_open_handles:
+            _evicted_path, evicted = open_handles.popitem(last=False)
+            evicted.close()
+        fh = open(path, "a" if path in opened_paths else "w")
+        opened_paths.add(path)
+        open_handles[path] = fh
+        return fh
+
     try:
         with open(fasta_file) as fh:
             for header, sequence in read_single_fasta_as_generator(fh):
                 for _orig, _i, start, end, tok in pieces_by_header.get(header, []):
-                    out_fh = open_handles[token_to_file[tok]]
+                    out_fh = _handle_for(token_to_file[tok])
                     out_fh.write(F">{tok}\n")
                     out_fh.write(sequence[start:end] + "\n")
     finally:
@@ -1524,7 +1548,8 @@ def get_seq_from_fasta(fasta_dict, seq_id, start=None, end=None):
     return fasta_dict[seq_id]
 
 
-def gff3_to_fasta(gff3_file, fasta_file, additonal_attribute=None):
+def gff3_to_fasta(gff3_file, fasta_file, additonal_attribute=None,
+                  load_sequence=True):
     """
     extract fasta sequences from gff3 file
     it is generator, returns one sequence at time and seq ID plus additional attribute
@@ -1532,10 +1557,15 @@ def gff3_to_fasta(gff3_file, fasta_file, additonal_attribute=None):
     :param additonal_attribute: yield additional attribute from gff3 file
     :param gff3_file: path to gff3 file
     :param fasta_file: path to fasta file
+    :param load_sequence: when False, do NOT read ``fasta_file`` and yield the
+        feature sequence as None. Use this when only the ID and an attribute are
+        needed: ``fasta_to_dict`` loads the whole genome into memory (~genome_bp
+        of RAM, OOM on a large assembly), which is pure waste if the sequence is
+        discarded by the caller.
     :return:
     """
 
-    fasta_dict = fasta_to_dict(fasta_file)
+    fasta_dict = fasta_to_dict(fasta_file) if load_sequence else None
     with open(gff3_file, 'r') as f1:
         for line in f1:
             if line.startswith("#"):
@@ -1543,7 +1573,7 @@ def gff3_to_fasta(gff3_file, fasta_file, additonal_attribute=None):
             gff3_feature: Gff3Feature = Gff3Feature(line)
             s = get_seq_from_fasta(
                     fasta_dict, gff3_feature.seqid, gff3_feature.start, gff3_feature.end
-                    )
+                    ) if load_sequence else None
             if "ID" not in gff3_feature.attributes_dict:
                 gff3_feature.attributes_dict["ID"] = (gff3_feature.seqid + "_" +
                                                       str(gff3_feature.start) + "_" +

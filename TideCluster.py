@@ -620,7 +620,11 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4,
     consensus_file = tempfile.NamedTemporaryFile(delete=False).name
     consensus_dimers_file = tempfile.NamedTemporaryFile(delete=False).name
     with open(consensus_file, "w") as f, open(consensus_dimers_file, "w") as f2:
-        for seq_id, seq, cons in tc.gff3_to_fasta(gff3, fasta, "consensus_sequence"):
+        # Only the consensus_sequence attribute (cons) and the ID are used here,
+        # not the genomic sequence — load_sequence=False skips loading the whole
+        # genome into RAM (fasta_to_dict), which otherwise OOMs on large genomes.
+        for seq_id, seq, cons in tc.gff3_to_fasta(
+                gff3, fasta, "consensus_sequence", load_sequence=False):
             mult = round(1 + 10000 / len(cons))
             consensus = cons * mult
             consensus_dimers = cons * 4
