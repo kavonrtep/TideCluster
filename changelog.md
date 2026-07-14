@@ -1,3 +1,16 @@
+## 1.16.4 (2026-07-14)
+- **Large-genome scalability fixes on the chunked-RepeatMasker /
+  `tc_reannotate` path.** `split_fasta_to_chunk_files` no longer opens one
+  file handle per chunk at once (the chunk count grows with genome size,
+  ~1800 for a 90 Gbp genome), which could exhaust the open-file limit
+  (`OSError: [Errno 24] Too many open files`). Chunk files are now opened
+  lazily through a bounded LRU cache (≤256 handles), reopening in append mode
+  after eviction.
+- **Clustering no longer loads the whole reference genome into RAM.**
+  `gff3_to_fasta` gained a `load_sequence=False` option; the clustering step
+  only uses the `consensus_sequence` attribute, so it now skips reading the
+  genomic sequence and avoids OOM on large assemblies.
+
 ## 1.16.3 (2026-07-02)
 - **`tc_reannotate` no longer silently truncates on a RepeatMasker library-build
   race.** The chunked/pooled runner now builds RepeatMasker's shared
