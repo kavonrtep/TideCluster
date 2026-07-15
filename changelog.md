@@ -1,3 +1,15 @@
+## 1.16.5 (2026-07-15)
+- **Fix the Singularity/Apptainer image build (`Build SIF`).** The container
+  build aborted because `bioconductor-genomeinfodbdata`'s post-link script
+  parses its data manifest with python-`yq`, which shells out to `jq` — not
+  present in the base env — so the post-link failed with
+  `yq: Error starting jq: ... Is jq installed and available on PATH?` and killed
+  `apptainer build`. `TideCluster.def` now installs `jq` into the base env before
+  the dependency install, so the post-link (and the GenomeInfoDb force-reinstall
+  guard that re-runs it) succeeds. Build-time only; runtime dependency pins are
+  unchanged. (Fixes the SIF build that failed for 1.16.4; the 1.16.4 conda
+  package and GitHub Release were unaffected.)
+
 ## 1.16.4 (2026-07-14)
 - **Large-genome scalability fixes on the chunked-RepeatMasker /
   `tc_reannotate` path.** `split_fasta_to_chunk_files` no longer opens one
