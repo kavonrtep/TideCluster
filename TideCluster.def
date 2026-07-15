@@ -91,6 +91,17 @@ EOF
     echo ". /opt/conda/etc/profile.d/conda.sh" >> /etc/profile
     echo "conda activate base" >> /etc/profile
 
+    # bioconductor-genomeinfodbdata's post-link.sh parses dataURLs.json with
+    # python-yq, which shells out to `jq`. jq is not pulled into base by the
+    # dependency set, so install it first — otherwise the post-link aborts with
+    # "yq: Error starting jq: ... 'jq'. Is jq installed and available on PATH?"
+    # and kills the whole `apptainer build`. Both the main install below and the
+    # GenomeInfoDb force-reinstall guard run that post-link, and conda does not
+    # guarantee it links jq before genomeinfodbdata within a single transaction,
+    # so install jq up front rather than relying on it being a co-dependency.
+    echo "=== Installing jq (needed by bioconductor post-link scripts) ==="
+    /opt/conda/bin/mamba install -y -n base -c conda-forge jq
+
     # Install runtime dependencies from conda-forge / bioconda only.
     # NOTE: tidecluster itself is NOT installed from a channel here —
     # it is the repo we copied into /opt/tidecluster above. This makes
