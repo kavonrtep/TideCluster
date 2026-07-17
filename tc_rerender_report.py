@@ -1608,7 +1608,7 @@ def render_index_distribution(model, ctx):
                 f'width="{w:.2f}" height="{bar_h}" '
                 f'data-trc="{esc(trc_id)}" '
                 f'style="--sf:{sf_color}" '
-                f'data-title="{title}"><title>{title}</title></rect>')
+                f'data-title="{title}" aria-label="{title}"></rect>')
     # Scale bar across the bottom.
     scale_y = len(kept) * row_h + 16
     parts.append(
@@ -1784,11 +1784,16 @@ def render_cluster_overview(model, ctx):
                  f'<br>HOR arrays: {esc(p["hor"])}'
                  f'{cls_line}{sf_line}{ann_line}')
         plain = f'{p["id"]} · {int(round(p["x"]))} bp · {p["y"]:.3g} Mbp · {p["n"]} TRA'
+        # Accessible name via aria-label, NOT an SVG <title> child: a <title>
+        # makes the browser render its own native tooltip after a short hover
+        # delay, which overlays the richer JS tooltip (data-title) with a
+        # smaller, less-detailed box. aria-label keeps the name for screen
+        # readers without producing that second tooltip.
         parts.append(
             f'<a href="{trc_prefix}{esc(p["id"])}.html">'
             f'<circle class="tc-point" cx="{cx:.1f}" cy="{cy:.1f}" r="{r:.1f}" '
-            f'fill="{fill}" data-html="1" data-title="{title}">'
-            f'<title>{esc(plain)}</title></circle></a>')
+            f'fill="{fill}" data-html="1" data-title="{title}" '
+            f'aria-label="{esc(plain)}"></circle></a>')
     parts.append('</svg>')
 
     # Legends: dot-size reference + superfamily swatches.
@@ -2428,8 +2433,8 @@ def _render_ideogram(majors, by_seqid):
                 f'<rect class="tc-tra" x="{x_start:.2f}" y="{y}" '
                 f'width="{w:.2f}" height="{bar_h}" '
                 f'fill="{_TRA_NEUTRAL_FILL}" stroke="none" '
-                f'data-title="{esc(_array_title(arr))}">'
-                f'<title>{esc(_array_title(arr))}</title></rect>'
+                f'data-title="{esc(_array_title(arr))}" '
+                f'aria-label="{esc(_array_title(arr))}"></rect>'
             )
     # Scale bar
     scale_y = len(majors) * row_h + 18
@@ -2475,8 +2480,8 @@ def _render_minor_table(minors, by_seqid, is_v012=False):
                 f'<rect class="tc-tra" x="{x_start:.2f}" y="2" '
                 f'width="{w:.2f}" height="8" '
                 f'fill="{_TRA_NEUTRAL_FILL}" stroke="none" '
-                f'data-title="{esc(_array_title(arr))}">'
-                f'<title>{esc(_array_title(arr))}</title></rect>')
+                f'data-title="{esc(_array_title(arr))}" '
+                f'aria-label="{esc(_array_title(arr))}"></rect>')
         mini.append("</svg>")
         rows.append(
             "<tr>"
