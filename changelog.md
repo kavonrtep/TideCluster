@@ -1,3 +1,14 @@
+## 1.16.6 (2026-07-18)
+- **Report charts no longer show a duplicate native tooltip.** The
+  cluster-overview bubble scatter and the genome-distribution ideograms
+  (index, per-TRC pages, and minor-contig mini charts) each rendered both the
+  detailed JS hover tooltip and a second, smaller browser-native tooltip (from
+  an SVG `<title>` element) that appeared after a short hover delay and overlaid
+  the detailed one. The redundant `<title>` is removed; the element's
+  accessible name is now carried by `aria-label` instead, so screen readers are
+  unaffected. Re-render an existing run (`tc_rerender_report.py` /
+  `tools/tc_regen.sh`) to pick this up.
+
 ## 1.16.5 (2026-07-15)
 - **Fix the Singularity/Apptainer image build (`Build SIF`).** The container
   build aborted because `bioconductor-genomeinfodbdata`'s post-link script
