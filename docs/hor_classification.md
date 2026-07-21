@@ -165,10 +165,14 @@ Report v2 is the default report since 1.9.0. Output layout:
 
 ```
 <prefix>_index.html                 # v2 landing (Summary)
-<prefix>_report/                    # v2 subpages
+<prefix>_report/                    # v2 subpages (self-contained)
 ├── tarean.html  kite.html  superfamilies.html
 ├── trc/TRC_*.html                  # per-TRC dashboards
-└── assets/  data/
+├── assets/  data/
+└── img/                            # vendored KITE/TAREAN/dotplot PNGs
+    ├── kite/  tarean/<TRC>/  dotplots/
+                                    # so <prefix>_{kite,tarean}/ + dotplots/
+                                    # scratch trees are safe to delete
 <prefix>_report_legacy/             # v1 HTML preserved here
 └── <prefix>_index.html  <prefix>_tarean_report.html  ...
 ```
