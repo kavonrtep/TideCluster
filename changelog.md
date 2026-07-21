@@ -1,3 +1,19 @@
+## 1.17.0 (2026-07-21)
+- **Self-contained HTML report.** The report v2 previously referenced its
+  images by reaching outside `<prefix>_report/` into the `<prefix>_kite/`,
+  `<prefix>_tarean/`, and `dotplots/` working trees via `../` paths, so deleting
+  those (often multi-GB) intermediate directories broke the report's images even
+  though the HTML survived. `build_report` now copies exactly the referenced
+  images into a new `<prefix>_report/img/` directory (`img/kite/…`,
+  `img/tarean/<TRC>/…`, `img/dotplots/…`) and rewrites the `<img>`/`<a>`
+  references to the vendored copies, so the report is fully portable and those
+  scratch trees are safe to delete. Only the referenced images are copied (tens
+  of MB), not the whole trees. Applies to both fresh `run_all`/`tarean` runs and
+  `tc_rerender_report.py`; re-render an existing run to vendor its images. Source
+  trees are left untouched. Non-image convenience links (the per-TRC TAREAN
+  `report.html`, `clustering.gff3`/`annotation.gff3`) still reference the run
+  directory and are unchanged.
+
 ## 1.16.6 (2026-07-18)
 - **Report charts no longer show a duplicate native tooltip.** The
   cluster-overview bubble scatter and the genome-distribution ideograms
