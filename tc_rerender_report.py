@@ -1466,15 +1466,46 @@ def _trc_link(trc_id, text=None, prefix="trc/"):
     return f'<a href="{prefix}{esc(trc_id)}.html">{esc(text or trc_id)}</a>'
 
 
-def _rel_img(src_rel, width=None, alt="", src_prefix="../"):
-    """An <img> whose src points back into the original output dir.
+def _vendor_map(src_rel):
+    """Flattened destination (relative to <prefix>_report/img/) for an
+    input-dir-relative report image. Grouped by an unambiguous marker in the
+    source path so the report is self-contained independent of source-tree depth:
+      .../<TRC>.fasta_tarean/.../<file>  -> tarean/<TRC>/<file>
+      <kite>/profile_plots/<file>        -> kite/<file>
+      dotplots/<file>                    -> dotplots/<file>
+      (anything else)                    -> misc/<file>
+    """
+    parts = str(src_rel).replace("\\", "/").split("/")
+    name = parts[-1]
+    for seg in parts:
+        if seg.endswith(".fasta_tarean"):
+            return f'tarean/{seg[:-len(".fasta_tarean")]}/{name}'
+    if "profile_plots" in parts:
+        return f"kite/{name}"
+    if parts[0] == "dotplots":
+        return f"dotplots/{name}"
+    return f"misc/{name}"
 
-    src_prefix defaults to one `../` (right for top-level pages); dashboards
-    pass `../../` since they sit one dir deeper."""
+
+def _img_url(ctx, src_rel):
+    """Href from the current page to a report image, vendored into
+    <prefix>_report/img/. Records src_rel -> flattened dest in the shared
+    collector (ctx["img_map"]) so build_report copies exactly the referenced
+    images. Returns None for an empty src_rel."""
     if not src_rel:
+        return None
+    dest = _vendor_map(src_rel)
+    ctx["img_map"][src_rel] = dest
+    return f'{ctx["img_href"]}{dest}'
+
+
+def _rel_img(ctx, src_rel, width=None, alt=""):
+    """An <img> pointing at the vendored copy of src_rel under img/."""
+    url = _img_url(ctx, src_rel)
+    if not url:
         return ""
     w = f' width="{int(width)}"' if width else ""
-    return f'<img src="{src_prefix}{esc(src_rel)}" alt="{esc(alt)}"{w}>'
+    return f'<img src="{url}" alt="{esc(alt)}"{w}>'
 
 
 def _tarean_asset_path(trc):
@@ -2019,22 +2050,22 @@ def _array_size_cell(t):
     return (f"min: {fmt_bp(mn)}<br>median: {fmt_bp(md)}<br>max: {fmt_bp(mx)}")
 
 
-def _thumb(src_rel, kind, src_prefix="../", alt=""):
-    """Fixed-size thumbnail wrapper; full PNG opens on click.
+def _thumb(ctx, src_rel, kind, alt=""):
+    """Fixed-size thumbnail wrapper; full PNG opens on click. The image is
+    vendored into img/ (see _img_url).
 
     kind is one of "graph", "logo", "profile" → maps to a CSS size class."""
-    if not src_rel:
+    url = _img_url(ctx, src_rel)
+    if not url:
         return ""
     klass = {"graph": "tc-thumb-graph",
              "logo":  "tc-thumb-logo",
              "profile": "tc-thumb-profile"}.get(kind, "tc-thumb-graph")
-    url = f"{src_prefix}{esc(src_rel)}"
     return (f'<a class="tc-thumb {klass}" href="{url}" target="_blank" '
             f'rel="noopener"><img src="{url}" alt="{esc(alt)}"></a>')
 
 
 def _render_tarean_row(t, ctx):
-    src_prefix = ctx["src_prefix"]
     up = ctx["up"]
     ta = t["tarean"] or {}
     kite = t["kite"] or {}
@@ -2054,8 +2085,8 @@ def _render_tarean_row(t, ctx):
         cons_short = esc(ta["consensus"][:80])
         if len(ta["consensus"]) > 80:
             cons_short += "…"
-    graph_thumb = _thumb(ta.get("graph_png"), "graph", src_prefix=src_prefix, alt="k-mer graph")
-    logo_thumb  = _thumb(ta.get("logo_png"),  "logo",  src_prefix=src_prefix, alt="logo")
+    graph_thumb = _thumb(ctx, ta.get("graph_png"), "graph", alt="k-mer graph")
+    logo_thumb  = _thumb(ctx, ta.get("logo_png"),  "logo",  alt="logo")
     return (
         "<tr>"
         f'<td data-order="{t["index"]}">{_trc_link(t["id"], prefix=ctx["trc_link_prefix"])}</td>'
@@ -2142,8 +2173,8 @@ def render_kite(model, out_path, run_meta, ctx):
         if not t["kite"]:
             continue
         k = t["kite"]
-        profile_thumb = _thumb(k.get("profile_top3_png"), "profile",
-                               src_prefix=ctx["src_prefix"], alt="KITE profile")
+        profile_thumb = _thumb(ctx, k.get("profile_top3_png"), "profile",
+                               alt="KITE profile")
         tarean_mon = (t["tarean"] or {}).get("monomer_length")
         kite_mon   = k.get("monomer_primary")
         if is_v012:
@@ -2260,7 +2291,6 @@ def render_superfamilies(model, out_path, run_meta, ctx):
                 f'significant consensus similarity).</p>')
         out_path.write_text(_shell(ctx, "Superfamilies", "sf", run_meta, body))
         return
-    src_prefix = ctx["src_prefix"]
     sections = []
     n_fallback_total = 0
     for sf in model["superfamilies"]:
@@ -2277,8 +2307,9 @@ def render_superfamilies(model, out_path, run_meta, ctx):
                         'dimer library)">&Dagger;</sup>')
             return link
         peers = ", ".join(_peer_link(t) for t in sf["trcs"])
-        img = (f'<div class="tc-fig"><a href="{src_prefix}{esc(sf["dotplot"])}">'
-               f'<img src="{src_prefix}{esc(sf["dotplot"])}" width="500" alt="dotplot"></a>'
+        dp_url = _img_url(ctx, sf["dotplot"])
+        img = (f'<div class="tc-fig"><a href="{dp_url}">'
+               f'<img src="{dp_url}" width="500" alt="dotplot"></a>'
                f'<div class="tc-fig-caption">pairwise dotplot of superfamily '
                f'{sf["id"]} consensus sequences</div></div>'
                if sf["dotplot"] else "")
@@ -3273,17 +3304,17 @@ def arrays_legend():
 """
 
 
-def _variants_table(variants, tarean_dir, show=20, src_prefix="../"):
+def _variants_table(ctx, variants, tarean_dir, show=20):
     """Top-N TAREAN variants table with graph + logo thumbs."""
     if not variants or not tarean_dir:
         return ""
     rows = []
     for v in variants[:show]:
-        graph = (_thumb(f'{tarean_dir}/{v["graph_link"]}', "graph",
-                        src_prefix=src_prefix, alt="k-mer graph")
+        graph = (_thumb(ctx, f'{tarean_dir}/{v["graph_link"]}', "graph",
+                        alt="k-mer graph")
                  if v.get("graph_link") else "")
-        logo  = (_thumb(f'{tarean_dir}/{v["logo_link"]}',  "logo",
-                        src_prefix=src_prefix, alt="logo")
+        logo  = (_thumb(ctx, f'{tarean_dir}/{v["logo_link"]}',  "logo",
+                        alt="logo")
                  if v.get("logo_link") else "")
         rows.append(
             "<tr>"
@@ -3301,7 +3332,7 @@ def _variants_table(variants, tarean_dir, show=20, src_prefix="../"):
     if len(variants) > show:
         more = (f'<p class="tc-callout">Showing top {show} of '
                 f'{len(variants)} variants by score. Full list in the original '
-                f'<a href="{src_prefix}{esc(tarean_dir)}/report.html">TAREAN TRC report</a>.</p>')
+                f'<a href="{ctx["src_prefix"]}{esc(tarean_dir)}/report.html">TAREAN TRC report</a>.</p>')
     return f"""
     <details>
       <summary><strong>TAREAN variants tested</strong> ({len(variants)})</summary>
@@ -3345,7 +3376,7 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
     def trc_link(tid, text=None):
         return _trc_link(tid, text, prefix="")  # sibling in same dir
     def img_src(src_rel, width=None, alt=""):
-        return _rel_img(src_rel, width=width, alt=alt, src_prefix=SRC)
+        return _rel_img(ctx, src_rel, width=width, alt=alt)
 
     # Stats card
     stats_kv = [
@@ -3575,7 +3606,7 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
         kite_section = f"""
         <h2>KITE array profile</h2>
         <div class="tc-fig">
-          <img src="{SRC}{esc(kite["profile_png"])}"
+          <img src="{_img_url(ctx, kite["profile_png"])}"
                alt="per-array monomer-size heatmap">
           <div class="tc-fig-caption">per-array k-mer-interval monomer-size
           heatmap; rows are arrays, columns are candidate monomer lengths.</div>
@@ -3586,8 +3617,8 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
     if ta.get("variants") and ta.get("tarean_dir") and not _is_ssr(trc):
         tarean_root = Path(model["paths"]["tarean_dir"] or "").as_posix()
         variants_section = _variants_table(
-            ta["variants"], f'{tarean_root}/{ta["tarean_dir"]}',
-            show=20, src_prefix=SRC)
+            ctx, ta["variants"], f'{tarean_root}/{ta["tarean_dir"]}',
+            show=20)
 
     # Superfamily context
     sf_section = ""
@@ -3595,7 +3626,7 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
         peers = ", ".join(trc_link(t) for t in trc.get("sf_peers", []))
         dotplot = ""
         if trc.get("sf_dotplot"):
-            dotplot = (f'<div class="tc-fig"><img src="{SRC}{esc(trc["sf_dotplot"])}" '
+            dotplot = (f'<div class="tc-fig"><img src="{_img_url(ctx, trc["sf_dotplot"])}" '
                        f'width="500" alt="superfamily dotplot">'
                        f'<div class="tc-fig-caption">pairwise dotplot of '
                        f'superfamily {trc["superfamily"]} members</div></div>')
@@ -3665,6 +3696,38 @@ def copy_assets(dest: Path, script_path: Path):
     if dest.exists():
         shutil.rmtree(dest)
     shutil.copytree(src, dest)
+
+
+def copy_vendored_images(input_dir, img_dir, img_map, *, quiet=False):
+    """Copy every referenced report image into <report>/img/ under its
+    flattened name (see _vendor_map), making the report self-contained.
+
+    img_map maps input-dir-relative source paths to flattened destinations
+    (relative to img_dir). Rebuilt from scratch each run. A missing source is
+    skipped with a warning so a partially-purged run still renders, and the
+    (now dangling) reference is no worse than the pre-vendoring `../` link."""
+    input_dir = Path(input_dir)
+    img_dir = Path(img_dir)
+    if img_dir.exists():
+        shutil.rmtree(img_dir)
+    n_copied = n_missing = total_bytes = 0
+    for src_rel, dest in sorted(img_map.items()):
+        src = input_dir / src_rel
+        if not src.is_file():
+            n_missing += 1
+            if not quiet:
+                print(f"  warning: report image missing, skipped: {src_rel}")
+            continue
+        out = img_dir / dest
+        out.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, out)
+        n_copied += 1
+        total_bytes += out.stat().st_size
+    if not quiet:
+        miss = f", {n_missing} missing" if n_missing else ""
+        print(f"vendored: {n_copied} image(s) "
+              f"({total_bytes / 1e6:.1f} MB) into {img_dir.name}/{miss}")
+    return {"copied": n_copied, "missing": n_missing, "bytes": total_bytes}
 
 
 # ----------------------------------------------------------------------
@@ -3747,12 +3810,19 @@ def build_report(input_dir, prefix=None, output_dir=None, *, quiet=False):
     # Three depth contexts share a schema. See each field in page_shell.
     # *_href fields are full relative hrefs from the page being rendered;
     # *_prefix fields are prepended to local refs in the page body.
+    # `img_href` is the per-page href to the vendored images dir (<report>/img/);
+    # `img_map` is one shared dict (src_rel -> flattened dest) filled while
+    # rendering, then consumed by copy_vendored_images below. All three ctx
+    # share the SAME img_map object.
+    img_map = {}
     ctx_root = {                  # <input_dir>/<prefix>_index.html
         "up":              f"{prefix}_report/",
         "root_href":       f"{prefix}_index.html",
         "legacy_href":     f"{prefix}_report_legacy/{prefix}_index.html",
         "assets_href":     f"{prefix}_report/assets/",
         "src_prefix":      "",
+        "img_href":        f"{prefix}_report/img/",
+        "img_map":         img_map,
         "trc_link_prefix": f"{prefix}_report/trc/",
     }
     ctx_top = {                   # <out_dir>/{tarean,kite,superfamilies}.html
@@ -3761,6 +3831,8 @@ def build_report(input_dir, prefix=None, output_dir=None, *, quiet=False):
         "legacy_href":     f"../{prefix}_report_legacy/{prefix}_index.html",
         "assets_href":     "assets/",
         "src_prefix":      "../",
+        "img_href":        "img/",
+        "img_map":         img_map,
         "trc_link_prefix": "trc/",
     }
     ctx_dash = {                  # <out_dir>/trc/TRC_N.html
@@ -3769,6 +3841,8 @@ def build_report(input_dir, prefix=None, output_dir=None, *, quiet=False):
         "legacy_href":     f"../../{prefix}_report_legacy/{prefix}_index.html",
         "assets_href":     "../assets/",
         "src_prefix":      "../../",
+        "img_href":        "../img/",
+        "img_map":         img_map,
         "trc_link_prefix": "",
     }
 
@@ -3780,6 +3854,11 @@ def build_report(input_dir, prefix=None, output_dir=None, *, quiet=False):
     if not quiet:
         print(f"rendered: {prefix}_index.html + tarean / kite / "
               f"superfamilies + {n_dash} TRC dashboards")
+
+    # Vendor exactly the images the pages referenced (see _img_url) so the
+    # report is self-contained and the kite/tarean/dotplots scratch trees can
+    # be deleted without breaking it.
+    copy_vendored_images(input_dir, out_dir / "img", img_map, quiet=quiet)
     return out_dir
 
 

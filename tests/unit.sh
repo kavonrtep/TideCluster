@@ -46,4 +46,7 @@ python3 "$ROOT/tests/test_rdna.py"
 echo "=== unit: cross-TRC overlap resolution ==="
 python3 "$ROOT/tests/test_overlap_resolution.py"
 
+echo "=== unit: self-contained report image vendoring ==="
+python3 "$ROOT/tests/test_vendor_images.py"
+
 echo "unit tests OK"
