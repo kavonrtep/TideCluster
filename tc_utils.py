@@ -1583,6 +1583,128 @@ def get_seq_from_fasta(fasta_dict, seq_id, start=None, end=None):
     return fasta_dict[seq_id]
 
 
+class IndexedFasta:
+    """Random-access FASTA reader with O(1) memory.
+
+    Drop-in replacement for ``fasta_to_dict(f)[seq_id][start:end]`` that never
+    loads the whole genome (or, for the common uniform-line-length case, even a
+    whole chromosome) into RAM: a single streaming pass builds a lightweight
+    ``.fai``-style index, then :meth:`get` seeks and reads only the requested
+    bytes.
+
+    The returned substring is byte-identical to the dict path because:
+
+    * sequence names are parsed exactly as ``fasta_to_dict`` does
+      (``line.split()[0].replace('>', '')``), and
+    * each sequence line contributes ``line.strip()`` (leading/trailing
+      whitespace removed, joined), reproduced here by stripping each newline
+      -separated fragment of the bytes read.
+
+    Records whose lines are NOT uniformly wrapped fall back to reading the whole
+    record (bounded by one record, still never the whole genome).
+    """
+
+    def __init__(self, fasta_file):
+        self.fasta_file = fasta_file
+        self._fh = open(fasta_file, "rb")
+        self._records = {}
+        self._build_index()
+
+    def _build_index(self):
+        fh = self._fh
+        fh.seek(0)
+        name = None
+        data_start = 0
+        length = 0
+        linebases = None
+        linewidth = None
+        uniform = True
+        pending = None  # (content_len, raw_len, leading_ws) of previous seq line
+
+        def finalize(header_pos):
+            nonlocal uniform
+            if name is None:
+                return
+            u = uniform
+            if pending is not None:
+                pc, _pr, pl = pending  # the last sequence line
+                if pl or (linebases is not None and pc > linebases):
+                    u = False
+            self._records[name] = {
+                "data_start": data_start, "data_end": header_pos,
+                "length": length, "linebases": linebases or 0,
+                "linewidth": linewidth or 0,
+                "uniform": u and linebases is not None,
+            }
+
+        pos = 0
+        while True:
+            line = fh.readline()
+            if not line:
+                break
+            start_pos = pos
+            pos += len(line)
+            if line[:1] == b">":
+                finalize(start_pos)
+                name = line.split()[0].replace(b">", b"").decode()
+                data_start = pos
+                length = 0
+                linebases = None
+                linewidth = None
+                uniform = True
+                pending = None
+            else:
+                if name is None:
+                    continue
+                stripped = line.strip()
+                lead_ws = line.rstrip() != stripped  # leading whitespace present
+                c_len = len(stripped)
+                r_len = len(line)
+                if pending is not None:  # previous line was a non-last line
+                    pc, pr, pl = pending
+                    if pl or pc != linebases or pr != linewidth:
+                        uniform = False
+                if linebases is None:
+                    linebases = c_len
+                    linewidth = r_len
+                length += c_len
+                pending = (c_len, r_len, lead_ws)
+        finalize(pos)
+
+    def close(self):
+        self._fh.close()
+
+    @staticmethod
+    def _strip_join(raw):
+        # join line.strip() of each newline-separated fragment -> matches
+        # fasta_to_dict's ''.join(line.strip() for line in ...)
+        return b"".join(part.strip() for part in raw.split(b"\n")).decode()
+
+    def _read_full(self, rec):
+        self._fh.seek(rec["data_start"])
+        return self._strip_join(self._fh.read(rec["data_end"] - rec["data_start"]))
+
+    def get(self, seq_id, start=None, end=None):
+        """Reproduce ``get_seq_from_fasta``: ``full[start:end]`` when both start
+        and end are truthy, else the whole sequence."""
+        rec = self._records[seq_id]
+        length = rec["length"]
+        if start and end:
+            b0 = max(0, min(int(start), length))
+            b1 = max(0, min(int(end), length))
+            if b1 <= b0:
+                return ""
+        else:
+            b0, b1 = 0, length
+        if not rec["uniform"]:
+            return self._read_full(rec)[b0:b1]
+        lb, lw, ds = rec["linebases"], rec["linewidth"], rec["data_start"]
+        byte0 = ds + (b0 // lb) * lw + (b0 % lb)
+        byte1 = ds + (b1 // lb) * lw + (b1 % lb)
+        self._fh.seek(byte0)
+        return self._strip_join(self._fh.read(byte1 - byte0))
+
+
 def gff3_to_fasta(gff3_file, fasta_file, additonal_attribute=None,
                   load_sequence=True):
     """
@@ -1594,30 +1716,39 @@ def gff3_to_fasta(gff3_file, fasta_file, additonal_attribute=None,
     :param fasta_file: path to fasta file
     :param load_sequence: when False, do NOT read ``fasta_file`` and yield the
         feature sequence as None. Use this when only the ID and an attribute are
-        needed: ``fasta_to_dict`` loads the whole genome into memory (~genome_bp
-        of RAM, OOM on a large assembly), which is pure waste if the sequence is
-        discarded by the caller.
+        needed, to skip building the FASTA index entirely.
+
+    When ``load_sequence`` is True the per-feature sequence is fetched by
+    random access via :class:`IndexedFasta` (seek + read only the requested
+    bytes), NOT by loading the whole genome into a dict -- the latter is
+    ~genome_bp of RAM and OOMs on a large assembly. The extracted substrings
+    are byte-identical to the former ``fasta_to_dict``/``get_seq_from_fasta``
+    path.
     :return:
     """
 
-    fasta_dict = fasta_to_dict(fasta_file) if load_sequence else None
-    with open(gff3_file, 'r') as f1:
-        for line in f1:
-            if line.startswith("#"):
-                continue
-            gff3_feature: Gff3Feature = Gff3Feature(line)
-            s = get_seq_from_fasta(
-                    fasta_dict, gff3_feature.seqid, gff3_feature.start, gff3_feature.end
-                    ) if load_sequence else None
-            if "ID" not in gff3_feature.attributes_dict:
-                gff3_feature.attributes_dict["ID"] = (gff3_feature.seqid + "_" +
-                                                      str(gff3_feature.start) + "_" +
-                                                      str(gff3_feature.end))
-            if additonal_attribute:
-                yield [gff3_feature.attributes_dict['ID'], s,
-                       gff3_feature.attributes_dict[additonal_attribute]]
-            else:
-                yield [gff3_feature.attributes_dict['ID'], s]
+    idx = IndexedFasta(fasta_file) if load_sequence else None
+    try:
+        with open(gff3_file, 'r') as f1:
+            for line in f1:
+                if line.startswith("#"):
+                    continue
+                gff3_feature: Gff3Feature = Gff3Feature(line)
+                s = idx.get(
+                        gff3_feature.seqid, gff3_feature.start, gff3_feature.end
+                        ) if load_sequence else None
+                if "ID" not in gff3_feature.attributes_dict:
+                    gff3_feature.attributes_dict["ID"] = (gff3_feature.seqid + "_" +
+                                                          str(gff3_feature.start) + "_" +
+                                                          str(gff3_feature.end))
+                if additonal_attribute:
+                    yield [gff3_feature.attributes_dict['ID'], s,
+                           gff3_feature.attributes_dict[additonal_attribute]]
+                else:
+                    yield [gff3_feature.attributes_dict['ID'], s]
+    finally:
+        if idx is not None:
+            idx.close()
 
 
 def save_fasta_dict_to_file(fasta_dict, fasta_file):
