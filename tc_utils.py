@@ -878,11 +878,17 @@ def split_fasta_to_chunks(fasta_file, chunk_size=100000000, overlap=100000):
     # read sequences from fasta files and split them to chunks according to matching table
     # open output and input files, use with statement to close files
     # fasta_dict = read_single_fasta_to_dictionary(open(fasta_file, 'r'))
+    # group matching_table rows by original header once (O(M)); the previous
+    # per-sequence ``[x for x in matching_table if x[0] == header]`` was
+    # O(sequences * M). Row order per header is preserved, so the emitted chunk
+    # order (and thus the output file) is identical.
+    rows_by_header = {}
+    for row in matching_table:
+        rows_by_header.setdefault(row[0], []).append(row)
     with open(fasta_file_split, 'w') as fh_out:
         with open(fasta_file) as fh:
             for header, sequence in read_single_fasta_as_generator(fh):
-                matching_table_part = [x for x in matching_table if x[0] == header]
-                for header2, i, start, end, new_header in matching_table_part:
+                for header2, i, start, end, new_header in rows_by_header.get(header, []):
                     fh_out.write('>' + new_header + '\n')
                     fh_out.write(sequence[start:end] + '\n')
     return fasta_file_split, matching_table
@@ -926,22 +932,48 @@ def get_new_header_and_coordinates(header, start, end, matching_table):
     return new_coords
 
 
-def get_original_header_and_coordinates(new_header, new_start, new_end, matching_table):
+def build_matching_table_token_index(matching_table):
+    """Map ``new_header`` (the chunk token, column 4) -> its matching_table row,
+    for O(1) coordinate remap.
+
+    ``setdefault`` keeps the FIRST row seen per token, so a lookup returns the
+    same row the legacy ``[x for x in matching_table if x[4] == h][0]`` scan
+    did -- output is byte-identical, only faster (the scan was per-feature and
+    there can be millions of features on a large genome).
+    """
+    index = {}
+    for row in matching_table:
+        index.setdefault(row[4], row)
+    return index
+
+
+def get_original_header_and_coordinates(new_header, new_start, new_end,
+                                        matching_table, token_index=None):
     """
     Get original header and coordinates for sequence
     :param new_header:
     :param new_start:
     :param new_end:
     :param matching_table:
+    :param token_index: optional {new_header: row} map from
+        :func:`build_matching_table_token_index`. When provided the row is
+        found by O(1) dict lookup instead of an O(len(matching_table)) linear
+        scan; both select the same row, so the result is identical.
     :return:
     original_header
     original_start
     original_end
     """
-    matching_table_part = [x for x in matching_table if x[4] == new_header]
-    real_chunk_size = matching_table_part[0][3] - matching_table_part[0][2]
-    ori_header = matching_table_part[0][0]
-    start = matching_table_part[0][2]
+    if token_index is not None:
+        row = token_index[new_header]
+        real_chunk_size = row[3] - row[2]
+        ori_header = row[0]
+        start = row[2]
+    else:
+        matching_table_part = [x for x in matching_table if x[4] == new_header]
+        real_chunk_size = matching_table_part[0][3] - matching_table_part[0][2]
+        ori_header = matching_table_part[0][0]
+        start = matching_table_part[0][2]
     ori_start = new_start + start
     ori_end = new_end + start
     return ori_header, ori_start, ori_end, real_chunk_size
@@ -1448,11 +1480,14 @@ class TideHunterFeature:
         self.sub_position = line.split()[9]
         self.consensus = line.split()[10]
 
-    def recalculate_coordinates(self, matching_table):
+    def recalculate_coordinates(self, matching_table, token_index=None):
         """recalculate coordinates in the table using matching table
+
+        ``token_index`` (from build_matching_table_token_index) makes the
+        per-feature row lookup O(1); when omitted the legacy O(N) scan is used.
         """
         ori_name, ori_start, ori_end, _ = get_original_header_and_coordinates(
-                self.seq_name, self.start, self.end, matching_table
+                self.seq_name, self.start, self.end, matching_table, token_index
                 )
         self.seq_name = ori_name
         self.start = ori_start
@@ -2438,11 +2473,14 @@ def filter_gff_remove_duplicates(gff3_file):
     gff_data = OrderedDict(
             sorted(gff_data.items(), key=lambda t: (t[1].seqid, t[1].start))
             )
+    # single linear pass over the already-sorted items. The previous
+    # ``list(gff_data.items())[i + 1]`` rebuilt the whole items list on every
+    # iteration -> O(N^2) over millions of arrays. Comparing each item to its
+    # successor in the same sorted order selects exactly the same duplicate
+    # IDs (the first of each equal-region adjacent pair), so output is identical.
     duplicated_ids = set()
-    for i, (k1, v1) in enumerate(gff_data.items()):
-        if i == len(gff_data) - 1:
-            break
-        k2, v2 = list(gff_data.items())[i + 1]
+    items = list(gff_data.items())
+    for (k1, v1), (k2, v2) in zip(items, items[1:]):
         if v1.seqid == v2.seqid and v1.start == v2.start and v1.end == v2.end:
             duplicated_ids.add(k1)  # add just one, second will be kept
     if len(duplicated_ids) > 0:
