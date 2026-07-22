@@ -9,6 +9,7 @@ import os
 import shutil
 import statistics
 import subprocess
+import sys
 import tempfile
 from collections import OrderedDict
 from itertools import cycle
@@ -1339,6 +1340,47 @@ def write_temp_fasta_chunks(fasta_seq_size, fasta_file, chunk_size):
 
 
 # TideHunter related functions:
+def _tidehunter_part_worker(task):
+    """Run a single-threaded TideHunter on one part FASTA.
+
+    Module-level (picklable) worker for the process pool in
+    :func:`run_tidehunter`. TideHunter's output is deterministic and
+    thread-count-independent (``-t 1`` is byte-identical to ``-t N``), so
+    running one ``-t 1`` worker per part and concatenating in part order gives
+    output identical to the former serial ``-t {cpu}`` loop.
+
+    :param task: (part_fasta, th_args_single_thread, part_out)
+    :return: part_out path
+    """
+    part_fasta, th_args_single, part_out = task
+    subprocess.check_call(
+        F"TideHunter -f 2 -o {part_out} {th_args_single} {part_fasta}", shell=True)
+    return part_out
+
+
+def _tidehunter_memory_budget_mb():
+    """Available memory budget (MB) for sizing the TideHunter worker pool.
+
+    Prefers the sandbox's ``AGENT_MEMORY`` (GB), else ``/proc/meminfo``
+    ``MemAvailable``; ``None`` if neither is readable. A 0.8 factor leaves
+    headroom for the Python parent, OS cache, etc.
+    """
+    env = os.environ.get("AGENT_MEMORY")
+    if env:
+        try:
+            return float(env) * 1024 * 0.8
+        except ValueError:
+            pass
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    return int(line.split()[1]) / 1024 * 0.8
+    except OSError:
+        pass
+    return None
+
+
 def run_tidehunter(fasta_file, tidehunter_arguments):
     """run tidehunter on fasta file
     require TideHunter to be in PATH
@@ -1347,6 +1389,13 @@ def run_tidehunter(fasta_file, tidehunter_arguments):
     For large files it splits fasta file into chunks and run tidehunter on each chunk
     to limit memory usage, on large files, tidehunter is consuming excessive amount of memory
 
+    On split inputs the parts are run **concurrently** in a pool of
+    single-threaded TideHunter workers rather than serially. The pool size is
+    gated by available memory: N concurrent parts cost ~N * per-part peak RSS,
+    and long-period rounds can peak at ~2 GB/part, so the first part is measured
+    and the pool sized as ``min(cpu, budget // per_part_peak)``. Output is
+    byte-identical to the former serial ``-t {cpu}`` loop (see
+    :func:`_tidehunter_part_worker`).
     """
     # verify tidehunter version
     tidehunter_version = subprocess.check_output(
@@ -1367,23 +1416,77 @@ def run_tidehunter(fasta_file, tidehunter_arguments):
         print("Number of parts:", number_of_parts)
         fasta_file_parts = split_fasta_to_parts(fasta_file, number_of_parts)
         print("Number of parts:", len(fasta_file_parts))
-        tidehunter_parts = []
-        for f in fasta_file_parts:
-            tmp_file_out = f + ".out"
-            tidehunter_cmd = (F"TideHunter -f 2 -o {tmp_file_out} {tidehunter_arguments}"
-                              F" {f}")
-            print("running TideHunter")
-            print(tidehunter_cmd)
-            subprocess.check_call(tidehunter_cmd, shell=True)
-            tidehunter_parts.append(tmp_file_out)
-        # merge results
-        print("merging TideHunter results")
         tidehunter_out = fasta_file + ".out"
-        with open(fasta_file + ".out", 'w') as fout:
-            for p in tidehunter_parts:
+        part_outs = [f + ".out" for f in fasta_file_parts]
+
+        # The caller's -t {cpu} is the core count / pool cap.
+        m = re.search(r"-t\s+(\d+)", tidehunter_arguments)
+        pool_cap = int(m.group(1)) if m else 1
+
+        # Execution mode depends on parts vs cores. A single-threaded worker pool
+        # only beats the original serial "-t {cpu} per part" loop when there are
+        # MORE parts than cores; with fewer parts, -t 1 workers leave cores idle
+        # (a real slowdown on small/medium genomes). So:
+        #   parts <= cpu -> serial, each part multi-threaded (all cores per part)
+        #   parts >  cpu -> memory-gated pool of single-threaded workers (scale)
+        # Output is byte-identical either way (TideHunter output is
+        # thread-count-independent), only the wall-clock differs.
+        if len(fasta_file_parts) <= pool_cap:
+            print(F"TideHunter: {len(fasta_file_parts)} part(s) <= {pool_cap} "
+                  F"core(s) -> serial, each part multi-threaded")
+            for f, po in zip(fasta_file_parts, part_outs):
+                cmd = F"TideHunter -f 2 -o {po} {tidehunter_arguments} {f}"
+                print("running TideHunter")
+                print(cmd)
+                subprocess.check_call(cmd, shell=True)
+        else:
+            # Force single-threaded workers; the pool provides the parallelism.
+            th_args_single = re.sub(r"-t\s+\d+", "-t 1", tidehunter_arguments)
+            if "-t " not in th_args_single:
+                th_args_single += " -t 1"
+            # Run (and measure) the first part serially to get the per-part peak
+            # RSS, then size the pool for the remaining parts from the budget.
+            first_cmd = (F"TideHunter -f 2 -o {part_outs[0]} {th_args_single} "
+                         F"{fasta_file_parts[0]}")
+            print("running TideHunter (first part, measuring peak RSS)")
+            print(first_cmd)
+            res = subprocess.run(first_cmd, shell=True, check=True,
+                                 stderr=subprocess.PIPE)
+            if res.stderr:
+                sys.stderr.buffer.write(res.stderr)
+            peak_mb = None
+            mm = re.search(rb"Peak RSS:\s*([\d.]+)\s*GB", res.stderr or b"")
+            if mm:
+                peak_mb = float(mm.group(1)) * 1024
+            budget_mb = _tidehunter_memory_budget_mb()
+            if budget_mb is None:
+                pool_size = 1
+                reason = "no memory budget (AGENT_MEMORY / MemAvailable); serial"
+            else:
+                per_part = peak_mb if peak_mb else 2048.0  # assume 2 GB if unmeasured
+                pool_size = max(1, min(pool_cap, int(budget_mb // per_part)))
+                reason = (F"per-part peak ~{per_part:.0f} MB, budget "
+                          F"~{budget_mb:.0f} MB, cap {pool_cap}")
+            print(F"TideHunter: {len(fasta_file_parts)} parts, pool_size "
+                  F"{pool_size} ({reason})")
+            rest = [(fasta_file_parts[i], th_args_single, part_outs[i])
+                    for i in range(1, len(fasta_file_parts))]
+            if rest:
+                if pool_size <= 1:
+                    for task in rest:
+                        _tidehunter_part_worker(task)
+                else:
+                    with Pool(pool_size) as pool:
+                        pool.map(_tidehunter_part_worker, rest)
+
+        # merge results in part order (byte-identical to the serial concatenation),
+        # freeing each part .out immediately after it is merged.
+        print("merging TideHunter results")
+        with open(tidehunter_out, 'w') as fout:
+            for p in part_outs:
                 with open(p, 'r') as fin:
-                    for line in fin:
-                        fout.write(line)
+                    shutil.copyfileobj(fin, fout)
+                os.remove(p)
         # remove directory with temporary files (all files are in the same directory)
         tmp_dir_name = os.path.dirname(fasta_file_parts[0])
         shutil.rmtree(tmp_dir_name)
