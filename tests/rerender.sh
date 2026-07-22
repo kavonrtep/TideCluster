@@ -85,7 +85,9 @@ def walk_refs(pages, label):
         try: src = open(p).read()
         except Exception: continue
         if not src.strip(): continue            # stub pages (e.g. v1 empty reports)
-        for r in re.findall(r'(?:src|href)="([^"]+)"', src):
+        # Quote-agnostic: the v1 hwriter HTML mixes 'single' and "double" quotes;
+        # a double-quote-only regex silently misses href='...' (a real bug class).
+        for _q, r in re.findall(r'''(?:src|href)\s*=\s*(['"])(.*?)\1''', src):
             if r.startswith(("http://","https://","data:","#","mailto:")): continue
             target = r.split("#", 1)[0]
             if not target: continue

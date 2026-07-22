@@ -29,6 +29,24 @@ echo "=== run_all on $FASTA ==="
 NCLUST=$(grep -c 'Name=TRC_' "$OUT/long_clustering.gff3" || true)
 [ "${NCLUST:-0}" -ge 1 ] || { echo "FAIL: no TRC_ clusters in long_clustering.gff3"; exit 1; }
 
+# Report link-closure: every local ref reachable from the index must resolve,
+# both as-built and after a simulated 'maximal' cleanup (kite/tarean/dotplots
+# deleted) — the self-contained-report contract downstream tools rely on.
+echo
+echo "=== report link-closure (intact) ==="
+python3 "$ROOT/tests/report_linkcheck.py" "$OUT" long
+echo "=== report link-closure (after simulated 'maximal' purge) ==="
+python3 "$ROOT/tests/report_linkcheck.py" --purge "$OUT" long
+# Optional defense-in-depth: a second, independent opinion from lychee if it is
+# installed (handles HTML corners the stdlib walker doesn't). Skipped otherwise.
+if command -v lychee >/dev/null 2>&1; then
+  echo "=== lychee --offline (defense-in-depth) ==="
+  lychee --offline --no-progress --include-fragments "$OUT/long_index.html" \
+    || { echo "FAIL: lychee reported broken links"; exit 1; }
+else
+  echo "(lychee not installed; skipping optional external link check — install to enable)"
+fi
+
 echo
 echo "=== per-TRA consensus wrapper ==="
 "$ROOT/tc_per_tra_consensus.py" -p long -c "$NCPU"
