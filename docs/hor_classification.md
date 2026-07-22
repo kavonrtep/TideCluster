@@ -169,12 +169,13 @@ Report v2 is the default report since 1.9.0. Output layout:
 ├── tarean.html  kite.html  superfamilies.html
 ├── trc/TRC_*.html                  # per-TRC dashboards
 ├── assets/  data/
-└── img/                            # vendored KITE/TAREAN/dotplot PNGs
-    ├── kite/  tarean/<TRC>/  dotplots/
+├── img/                            # vendored KITE/TAREAN/dotplot PNGs
+│   ├── kite/  tarean/<TRC>/  dotplots/
+├── tarean/<TRC>/report.html        # vendored TAREAN drill-down (+ img/, ppm CSVs)
                                     # so <prefix>_{kite,tarean}/ + dotplots/
                                     # scratch trees are safe to delete
-<prefix>_report_legacy/             # v1 HTML preserved here
-└── <prefix>_index.html  <prefix>_tarean_report.html  ...
+<prefix>_report_legacy/             # v1 HTML preserved here (also repointed at
+└── <prefix>_index.html  ...        # the vendored assets, so it survives too)
 ```
 
 The "Legacy report ↗" link at the top-right of the nav bar on every

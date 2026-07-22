@@ -107,8 +107,90 @@ def test_copy_vendored_images():
     print("  copy_vendored_images: flatten + rebuild + missing-tolerant OK")
 
 
+def test_copy_tarean_drilldowns():
+    tmp = Path(tempfile.mkdtemp(prefix="tc_dd_test_"))
+    input_dir = tmp / "run"
+    tdir = input_dir / "tc_tarean" / "TRC_1.fasta_tarean"
+    (tdir / "img").mkdir(parents=True)
+    (tdir / "report.html").write_bytes(b"<html>report</html>")
+    (tdir / "img" / "graph_7mer_1.png").write_bytes(b"G")
+    (tdir / "ppm_7mer_1.csv").write_bytes(b"ppm")
+    # Heavy intermediates that must NOT be copied.
+    (tdir / "TRC_1.fasta").write_bytes(b"X" * 1000)
+    (tdir / "TRC_1.fasta_7.kmers").write_bytes(b"Y" * 1000)
+    # A TAREAN TRC with no report.html must be skipped, not crash.
+    (input_dir / "tc_tarean" / "TRC_2.fasta_tarean").mkdir(parents=True)
+
+    model = {
+        "paths": {"tarean_dir": "tc_tarean"},
+        "trcs": [
+            {"id": "TRC_1", "tarean": {"has_report_html": True,
+                                       "tarean_dir": "TRC_1.fasta_tarean"}},
+            {"id": "TRC_2", "tarean": {"has_report_html": False,
+                                       "tarean_dir": "TRC_2.fasta_tarean"}},
+        ],
+    }
+    out_dir = tmp / "run" / "tc_report"
+    stats = r.copy_tarean_drilldowns(input_dir, out_dir, model, quiet=True)
+    assert stats["copied"] == 1, stats
+    dd = out_dir / "tarean" / "TRC_1"
+    assert (dd / "report.html").read_bytes() == b"<html>report</html>"
+    assert (dd / "img" / "graph_7mer_1.png").read_bytes() == b"G"
+    assert (dd / "ppm_7mer_1.csv").read_bytes() == b"ppm"
+    # Heavy files left behind.
+    assert not (dd / "TRC_1.fasta").exists()
+    assert not (dd / "TRC_1.fasta_7.kmers").exists()
+    # The report.html-less TRC produced no drill-down dir.
+    assert not (out_dir / "tarean" / "TRC_2").exists()
+    print("  copy_tarean_drilldowns: light-only copy + skip-missing OK")
+
+
+def test_vendor_legacy_report():
+    tmp = Path(tempfile.mkdtemp(prefix="tc_legacy_test_"))
+    input_dir = tmp / "run"
+    legacy = input_dir / "tc_report_legacy"
+    legacy.mkdir(parents=True)
+    (legacy / "tc_index.html").write_text(
+        '<a href="tc_kite_report.html"><strong>Report</strong></a>'
+        '<a href="tc_tarean_report.html">TAREAN</a>')
+    # Mirror the real v1 hwriter output: mixed quotes, and _move_v1_to_legacy
+    # only prepended ../ to DOUBLE-quoted refs, so single-quoted ones (the
+    # per-TRC report.html drill-down anchors) arrive WITHOUT ../.
+    (legacy / "tc_tarean_report.html").write_text(
+        '<img src="../tc_tarean/TRC_1.fasta_tarean/img/graph_7mer_1.png">'   # double, ../
+        "<a href='tc_tarean/TRC_1.fasta_tarean/report.html'>t1</a>"          # single, no ../
+        '<a href="../tc_tarean/TRC_2.fasta_tarean/report.html">t2</a>'       # double, ../
+        '<img src="../dotplots/TRCS_1_2.png">'
+        '<a href="https://example.org/x.png">ext</a>')
+
+    img_map = {}
+    stats = r._vendor_legacy_report(input_dir, "tc", img_map, quiet=True)
+    assert stats["rewritten"] == 2, stats
+    tr = (legacy / "tc_tarean_report.html").read_text()
+    # Image refs -> shared vendored img/, and added to img_map for copying.
+    assert 'src="../tc_report/img/tarean/TRC_1/graph_7mer_1.png"' in tr
+    assert 'src="../tc_report/img/dotplots/TRCS_1_2.png"' in tr
+    assert img_map["tc_tarean/TRC_1.fasta_tarean/img/graph_7mer_1.png"] == \
+        "tarean/TRC_1/graph_7mer_1.png"
+    assert img_map["dotplots/TRCS_1_2.png"] == "dotplots/TRCS_1_2.png"
+    # Per-TRC report.html -> vendored drill-down, BOTH the single-quoted/no-../
+    # anchor (the bug) and the double-quoted/../ one.
+    assert "href='../tc_report/tarean/TRC_1/report.html'" in tr
+    assert 'href="../tc_report/tarean/TRC_2/report.html"' in tr
+    assert "tc_tarean/" not in tr.replace("tc_report", "")  # no raw-tree ref left
+    # External URL untouched.
+    assert 'href="https://example.org/x.png"' in tr
+    # Dangling sibling link unwrapped (label kept); valid sibling link intact.
+    idx = (legacy / "tc_index.html").read_text()
+    assert 'href="tc_kite_report.html"' not in idx and "<strong>Report</strong>" in idx
+    assert 'href="tc_tarean_report.html"' in idx
+    print("  _vendor_legacy_report: repoint imgs/report + drop dangling link OK")
+
+
 if __name__ == "__main__":
     test_vendor_map()
     test_img_url_registers_and_builds_href()
     test_copy_vendored_images()
+    test_copy_tarean_drilldowns()
+    test_vendor_legacy_report()
     print("test_vendor_images: PASSED")

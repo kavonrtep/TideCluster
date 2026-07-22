@@ -1410,6 +1410,10 @@ def build_model(input_dir: Path, prefix: str):
         if has_tarean:
             tarean_block = dict(tarean)
             tarean_block["variants"] = load_per_trc_variants(paths, trc_id)
+            # Does this TRC have a full TAREAN report.html to vendor for the
+            # drill-down? (copy_tarean_drilldowns / the per-TRC page anchors.)
+            _tdir = paths["tarean_dir"] / f"{trc_id}.fasta_tarean"
+            tarean_block["has_report_html"] = (_tdir / "report.html").is_file()
 
         trcs.append({
             "id": trc_id,
@@ -1464,6 +1468,12 @@ def build_model(input_dir: Path, prefix: str):
 def _trc_link(trc_id, text=None, prefix="trc/"):
     """Link to a TRC dashboard. Default prefix matches top-level pages."""
     return f'<a href="{prefix}{esc(trc_id)}.html">{esc(text or trc_id)}</a>'
+
+
+# Per-TRC TAREAN report.html + its light assets are vendored under
+# <prefix>_report/<_DRILLDOWN_SUBDIR>/<TRC>/ so the drill-down survives deletion
+# of the heavy <prefix>_tarean/ tree (see copy_tarean_drilldowns).
+_DRILLDOWN_SUBDIR = "tarean"
 
 
 def _vendor_map(src_rel):
@@ -3304,8 +3314,9 @@ def arrays_legend():
 """
 
 
-def _variants_table(ctx, variants, tarean_dir, show=20):
-    """Top-N TAREAN variants table with graph + logo thumbs."""
+def _variants_table(ctx, variants, tarean_dir, show=20, report_href=None):
+    """Top-N TAREAN variants table with graph + logo thumbs. `report_href` is the
+    (vendored) full-TAREAN-report link shown when the list is truncated."""
     if not variants or not tarean_dir:
         return ""
     rows = []
@@ -3330,9 +3341,11 @@ def _variants_table(ctx, variants, tarean_dir, show=20):
         )
     more = ""
     if len(variants) > show:
+        link = (f' Full list in the original '
+                f'<a href="{esc(report_href)}">TAREAN TRC report</a>.'
+                if report_href else "")
         more = (f'<p class="tc-callout">Showing top {show} of '
-                f'{len(variants)} variants by score. Full list in the original '
-                f'<a href="{ctx["src_prefix"]}{esc(tarean_dir)}/report.html">TAREAN TRC report</a>.</p>')
+                f'{len(variants)} variants by score.{link}</p>')
     return f"""
     <details>
       <summary><strong>TAREAN variants tested</strong> ({len(variants)})</summary>
@@ -3521,6 +3534,11 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
     # Consensus + graph/logo
     consensus_block = ""
     ta = trc.get("tarean") or {}
+    # Vendored drill-down to the full TAREAN report.html (copy_tarean_drilldowns
+    # mirrors it into <report>/<_DRILLDOWN_SUBDIR>/<TRC>/). None when the TRC has
+    # no report.html, so no dead anchor is emitted.
+    tarean_report_href = (f'{ctx["up"]}{_DRILLDOWN_SUBDIR}/{esc(trc["id"])}/report.html'
+                          if ta.get("has_report_html") else None)
     if ta.get("consensus"):
         cons = ta["consensus"]
         pre_id = f"cons-{trc['id']}"
@@ -3618,7 +3636,7 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
         tarean_root = Path(model["paths"]["tarean_dir"] or "").as_posix()
         variants_section = _variants_table(
             ctx, ta["variants"], f'{tarean_root}/{ta["tarean_dir"]}',
-            show=20)
+            show=20, report_href=tarean_report_href)
 
     # Superfamily context
     sf_section = ""
@@ -3638,11 +3656,9 @@ def render_trc_dashboard(trc, model, out_dir, ordered_ids, idx, run_meta, ctx):
 
     # Parity links
     paths = model["paths"]
-    tarean_href = (f'{SRC}{paths["tarean_dir"]}/{trc["id"]}.fasta_tarean/report.html'
-                   if paths.get("tarean_dir") and ta else None)
     parity_bits = []
-    if tarean_href:
-        parity_bits.append(f'<a href="{esc(tarean_href)}">original TAREAN TRC page</a>')
+    if tarean_report_href:
+        parity_bits.append(f'<a href="{tarean_report_href}">original TAREAN TRC page</a>')
     if paths.get("clustering_gff3"):
         parity_bits.append(f'<a href="{SRC}{esc(paths["clustering_gff3"])}">clustering.gff3</a>')
     if paths.get("annotation_gff3"):
@@ -3728,6 +3744,108 @@ def copy_vendored_images(input_dir, img_dir, img_map, *, quiet=False):
         print(f"vendored: {n_copied} image(s) "
               f"({total_bytes / 1e6:.1f} MB) into {img_dir.name}/{miss}")
     return {"copied": n_copied, "missing": n_missing, "bytes": total_bytes}
+
+
+def copy_tarean_drilldowns(input_dir, out_dir, model, *, quiet=False):
+    """Vendor each per-TRC TAREAN report.html + its light assets into
+    <report>/<_DRILLDOWN_SUBDIR>/<TRC>/, so the 'original TAREAN TRC page'
+    drill-down survives deletion of the heavy <prefix>_tarean/ tree.
+
+    Only the deliverable parts are copied — report.html, its img/ dir, and the
+    ppm_*.csv it links; the heavy .kmers/.fasta (>95% of the source dir) stay put
+    for the caller to purge. report.html references those with self-relative
+    paths, so a verbatim copy is self-contained. Rebuilt from scratch each run."""
+    input_dir = Path(input_dir)
+    dest_root = Path(out_dir) / _DRILLDOWN_SUBDIR
+    if dest_root.exists():
+        shutil.rmtree(dest_root)
+    tarean_tree = model["paths"].get("tarean_dir")
+    if not tarean_tree:
+        return {"copied": 0}
+    tarean_tree = input_dir / tarean_tree
+    n_copied = 0
+    for t in model["trcs"]:
+        ta = t.get("tarean") or {}
+        if not ta.get("has_report_html"):
+            continue
+        srcdir = tarean_tree / (ta.get("tarean_dir") or f'{t["id"]}.fasta_tarean')
+        rep = srcdir / "report.html"
+        if not rep.is_file():
+            continue
+        dst = dest_root / t["id"]
+        dst.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(rep, dst / "report.html")
+        if (srcdir / "img").is_dir():
+            shutil.copytree(srcdir / "img", dst / "img", dirs_exist_ok=True)
+        for csv in srcdir.glob("*.csv"):
+            shutil.copy2(csv, dst / csv.name)
+        n_copied += 1
+    if not quiet:
+        print(f"vendored: {n_copied} TAREAN drill-down report(s) into "
+              f"{_DRILLDOWN_SUBDIR}/")
+    return {"copied": n_copied}
+
+
+def _vendor_legacy_report(input_dir, prefix, img_map, *, quiet=False):
+    """Repoint the deprecated legacy v1 report (<prefix>_report_legacy/*.html) at
+    the vendored assets under <prefix>_report/, so it too survives a downstream
+    'maximal' cleanup that deletes the <prefix>_{tarean,kite}/ + dotplots/ trees.
+
+    _move_v1_to_legacy left the legacy pages referencing the data trees. Rewrite
+    every such image ref to the shared <report>/img/ (adding it to img_map so
+    copy_vendored_images copies it) and every per-TRC report.html ref to the
+    vendored drill-down under <report>/<_DRILLDOWN_SUBDIR>/. Idempotent: rewritten
+    refs no longer match. External URLs and intra-legacy links are left alone.
+
+    Matching is quote-agnostic (the v1 hwriter HTML mixes '…' and "…") and
+    prefix-agnostic (an optional leading ../): _move_v1_to_legacy only prepended
+    ../ to double-quoted refs, so single-quoted ones — e.g. the per-TRC
+    `href='<prefix>_tarean/TRC_*.fasta_tarean/report.html'` drill-down anchors —
+    arrive without it. Every legacy page sits directly in <prefix>_report_legacy/,
+    so the vendored assets are always exactly one ../ away regardless."""
+    legacy_dir = Path(input_dir) / f"{prefix}_report_legacy"
+    if not legacy_dir.is_dir():
+        return {"rewritten": 0}
+    pfx = re.escape(prefix)
+    img_href = f"../{prefix}_report/img/"
+    dd_href  = f"../{prefix}_report/{_DRILLDOWN_SUBDIR}/"
+    attr = r'((?:src|href)\s*=\s*)'          # attr= , keeps original spacing
+    # [../](<prefix>_tarean|<prefix>_kite|dotplots)/….png  (an image into a tree)
+    png_re = re.compile(
+        rf'''{attr}(['"])(?:\.\./)?((?:{pfx}_tarean|{pfx}_kite|dotplots)/[^'"]+?\.png)\2''')
+    # [../]<prefix>_tarean/<TRC>.fasta_tarean/report.html  (a per-TRC drill-down)
+    rep_re = re.compile(
+        rf'''{attr}(['"])(?:\.\./)?{pfx}_tarean/(\w+)\.fasta_tarean/report\.html\2''')
+    # <a href="<sibling>.html">…</a> to a same-dir page — the v1 index links a
+    # <prefix>_kite_report.html this pipeline never emits, a pre-existing dangling
+    # link. Unwrap the anchor (keep its label) when the target is absent, so the
+    # legacy tree carries no broken links either.
+    dead_re = re.compile(r'''<a\s+href\s*=\s*(['"])([^'"/]+\.html)\1[^>]*>(.*?)</a>''',
+                         re.DOTALL)
+
+    def _png(m):
+        src_rel = m.group(3)
+        dest = _vendor_map(src_rel)
+        img_map[src_rel] = dest
+        return f'{m.group(1)}{m.group(2)}{img_href}{dest}{m.group(2)}'
+
+    def _rep(m):
+        return f'{m.group(1)}{m.group(2)}{dd_href}{m.group(3)}/report.html{m.group(2)}'
+
+    def _dead(m):
+        return m.group(0) if (legacy_dir / m.group(2)).is_file() else m.group(3)
+
+    n = 0
+    for html_path in sorted(legacy_dir.glob("*.html")):
+        text = html_path.read_text()
+        new = dead_re.sub(_dead, rep_re.sub(_rep, png_re.sub(_png, text)))
+        if new != text:
+            html_path.write_text(new)
+            n += 1
+    if not quiet and n:
+        print(f"vendored: repointed {n} legacy report page(s) at the shared "
+              f"img/ + {_DRILLDOWN_SUBDIR}/")
+    return {"rewritten": n}
 
 
 # ----------------------------------------------------------------------
@@ -3855,6 +3973,12 @@ def build_report(input_dir, prefix=None, output_dir=None, *, quiet=False):
         print(f"rendered: {prefix}_index.html + tarean / kite / "
               f"superfamilies + {n_dash} TRC dashboards")
 
+    # Vendor the per-TRC TAREAN drill-down (report.html + light assets) and
+    # repoint the deprecated legacy report at the shared vendored assets. The
+    # legacy rewrite adds any images it references to img_map, so it must run
+    # before copy_vendored_images.
+    copy_tarean_drilldowns(input_dir, out_dir, model, quiet=quiet)
+    _vendor_legacy_report(input_dir, prefix, img_map, quiet=quiet)
     # Vendor exactly the images the pages referenced (see _img_url) so the
     # report is self-contained and the kite/tarean/dotplots scratch trees can
     # be deleted without breaking it.
