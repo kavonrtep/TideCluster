@@ -1,3 +1,36 @@
+## 1.18.0 (2026-07-22)
+- **Large-genome performance & scalability (output-identical).** Internal
+  changes that let `run_all` finish on very large assemblies (e.g. multi-Gbp
+  genomes that previously ran out of memory or effectively hung). Verified
+  byte-identical to 1.17.0 on the deterministic outputs, per change and
+  end-to-end on an *Arabidopsis thaliana* `run_all --long`. No behavior,
+  CLI, or output change.
+  - **TAREAN / rDNA no longer load the whole genome into RAM.** Per-array
+    sequence extraction (`gff3_to_fasta`, used by TAREAN and the rDNA
+    genomic fallback) now uses a random-access `IndexedFasta` reader
+    (seek + read only the requested bytes) instead of reading the entire
+    FASTA into a dict — the former was ~genome-size RAM and OOM'd on large
+    assemblies.
+  - **TideHunter coordinate remap is O(1) per feature.** The chunk→genome
+    coordinate lookup uses a token→row index instead of scanning the whole
+    matching table for every detected array (previously O(features × chunks)).
+  - **Duplicate-array filtering is linear.** `filter_gff_remove_duplicates`
+    does a single pass over the sorted features instead of rebuilding the
+    items list every iteration (was O(N²)).
+  - **`tidehunter --long` streams rounds to disk** instead of holding every
+    feature of all three rounds in memory at once.
+  - **Parallel per-part TideHunter.** On split (large) inputs the parts run
+    concurrently in a memory-gated pool of single-threaded workers when there
+    are more parts than cores; with fewer parts than cores the original
+    all-cores-per-part path is kept. TideHunter output is thread-count-
+    independent, so results are byte-identical.
+- **Self-contained TAREAN drill-down in the HTML report** (report v2). The
+  per-TRC TAREAN `report.html` and the legacy report tree are vendored into
+  `<prefix>_report/` and re-pointed, so a maximally purged run (intermediate
+  directories deleted) keeps all report links working. Adds a parser-based
+  report link-closure test and fixes a quoting blind spot in the re-render
+  helper.
+
 ## 1.17.0 (2026-07-21)
 - **Self-contained HTML report.** The report v2 previously referenced its
   images by reaching outside `<prefix>_report/` into the `<prefix>_kite/`,
