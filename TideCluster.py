@@ -117,7 +117,9 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
             continue
         tarean_out = F"{tarean_dir}/{v_basename}_tarean"
         cmd = F"{script_path}/tarean/tarean.R -i {v} -s 0 -n {1} -o {tarean_out}"
-        cmd_list.append(cmd)
+        # carry the TRC's total array length so jobs can be dispatched
+        # longest-first (LPT) below
+        cmd_list.append((total_length, cmd))
     # run cmd tarean in parallel using multiprocessing module
     if len(omitted_clusters) > 0:
         with open(F"{tarean_dir}/omitted_clusters.txt", "w") as f:
@@ -332,10 +334,20 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
         return
 
     print("running TAREAN")
+    # Dispatch longest-job-first (LPT). TAREAN cost scales steeply with array
+    # size and TRC total lengths span ~1000x, so one large TRC can dominate the
+    # whole stage; in fasta_dict order that straggler may also start last,
+    # stranding the pool on a single core at the end. Sorting by total array
+    # length descending starts the biggest jobs first so the pool drains
+    # cleanly. Ordering only affects scheduling and the progress counter --
+    # each job writes its own independent output dir, so results are unchanged.
+    # (-length, cmd) is a deterministic total order (cmd tie-breaks equal sizes).
+    cmd_list.sort(key=lambda x: (-x[0], x[1]))
+    dispatch_cmds = [cmd for _length, cmd in cmd_list]
     with Pool(cpu) as p:
-        total_jobs = len(cmd_list)
+        total_jobs = len(dispatch_cmds)
         completed_jobs = 0
-        for _ in p.imap(tc.run_cmd, cmd_list):
+        for _ in p.imap(tc.run_cmd, dispatch_cmds):
             completed_jobs += 1
             print(F"completed {completed_jobs} of {total_jobs}")
 
