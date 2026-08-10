@@ -21,6 +21,39 @@ from version import __version__
 assert sys.version_info >= (3, 6), "Python 3.6 or newer is required"
 
 
+def _tarean_max_threads(cpu):
+    """Cap the per-job TAREAN thread count by a memory budget.
+
+    A TAREAN job's internal ``mclapply`` forks scale with the TRC size, so on a
+    memory-constrained host giving a large TRC many threads can exhaust RAM.
+    Cap threads at ``budget / per_thread``, where the budget comes from
+    ``AGENT_MEMORY`` (GB, sandbox) or ``/proc/meminfo`` ``MemAvailable`` (0.8x
+    for headroom); if neither is readable, fall back to ``cpu`` (no cap).
+    ``per_thread`` is a deliberately conservative constant -- this is a safety
+    cap against runaway forks, not a precise controller.
+    """
+    per_thread_mb = 4000.0
+    budget_mb = None
+    env = os.environ.get("AGENT_MEMORY")
+    if env:
+        try:
+            budget_mb = float(env) * 1024 * 0.8
+        except ValueError:
+            budget_mb = None
+    if budget_mb is None:
+        try:
+            with open("/proc/meminfo") as fh:
+                for line in fh:
+                    if line.startswith("MemAvailable:"):
+                        budget_mb = int(line.split()[1]) / 1024 * 0.8
+                        break
+        except OSError:
+            budget_mb = None
+    if budget_mb is None:
+        return cpu
+    return max(1, min(cpu, int(budget_mb / per_thread_mb)))
+
+
 def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
            version=__version__):
     """
@@ -116,10 +149,11 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
             print(F"{k} is SSR, skipping")
             continue
         tarean_out = F"{tarean_dir}/{v_basename}_tarean"
-        cmd = F"{script_path}/tarean/tarean.R -i {v} -s 0 -n {1} -o {tarean_out}"
-        # carry the TRC's total array length so jobs can be dispatched
-        # longest-first (LPT) below
-        cmd_list.append((total_length, cmd))
+        # Store (total array length, input fasta, output dir); the per-job -n
+        # thread count and dispatch order are decided below so large TRCs can be
+        # given more cores. tarean.R output is thread-count-independent, so this
+        # changes only wall time, not results.
+        cmd_list.append((total_length, v, tarean_out))
     # run cmd tarean in parallel using multiprocessing module
     if len(omitted_clusters) > 0:
         with open(F"{tarean_dir}/omitted_clusters.txt", "w") as f:
@@ -334,22 +368,69 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
         return
 
     print("running TAREAN")
-    # Dispatch longest-job-first (LPT). TAREAN cost scales steeply with array
-    # size and TRC total lengths span ~1000x, so one large TRC can dominate the
-    # whole stage; in fasta_dict order that straggler may also start last,
-    # stranding the pool on a single core at the end. Sorting by total array
-    # length descending starts the biggest jobs first so the pool drains
-    # cleanly. Ordering only affects scheduling and the progress counter --
-    # each job writes its own independent output dir, so results are unchanged.
-    # (-length, cmd) is a deterministic total order (cmd tie-breaks equal sizes).
-    cmd_list.sort(key=lambda x: (-x[0], x[1]))
-    dispatch_cmds = [cmd for _length, cmd in cmd_list]
-    with Pool(cpu) as p:
-        total_jobs = len(dispatch_cmds)
-        completed_jobs = 0
-        for _ in p.imap(tc.run_cmd, dispatch_cmds):
-            completed_jobs += 1
-            print(F"completed {completed_jobs} of {total_jobs}")
+
+    def _tarean_cmd(input_fasta, out_dir, threads):
+        return (F"{script_path}/tarean/tarean.R -i {input_fasta} -s 0 "
+                F"-n {threads} -o {out_dir}")
+
+    # TAREAN jobs are independent (each writes its own output dir) and tarean.R
+    # output is thread-count-independent (verified: -n1 and -nK give identical
+    # consensus / summary), so per-job thread counts and dispatch order can be
+    # chosen freely to minimise wall time without changing results. TAREAN cost
+    # scales steeply with array size and TRC lengths span ~1000x, so one large
+    # TRC can otherwise dominate the whole stage on a single core. Sort
+    # longest-first (LPT); (-len, in, out) is a deterministic total order.
+    jobs = sorted(cmd_list, key=lambda x: (-x[0], x[1], x[2]))
+    total_jobs = len(jobs)
+    max_threads = _tarean_max_threads(cpu)
+    completed = [0]
+
+    def _progress(_res):
+        completed[0] += 1
+        print(F"completed {completed[0]} of {total_jobs}")
+
+    W = sum(length for length, _i, _o in jobs)
+    if total_jobs <= cpu:
+        # Fewer jobs than cores: a -n1 pool would leave cores idle. Give every
+        # job an equal share of the cores and run them all at once.
+        threads = max(1, min(max_threads, cpu // total_jobs))
+        print(F"TAREAN: {total_jobs} job(s) <= {cpu} core(s) -> all concurrent, "
+              F"-n {threads} each")
+        cmds = [_tarean_cmd(i, o, threads) for _l, i, o in jobs]
+        with Pool(min(cpu, total_jobs)) as p:
+            for _res in p.imap(tc.run_cmd, cmds):
+                _progress(_res)
+    else:
+        # Saturated pool. The bulk pools efficiently at -n1, but an extreme
+        # outlier TRC would run ~alone at the tail on one core (the reported
+        # 55h straggler). Pull out the leading jobs that are each larger than
+        # the whole remaining pool's per-core load (len > sum(smaller)/cpu):
+        # everything else finishes before such a job, so it is on the critical
+        # path and worth multi-threading. Run the -n1 pool first (all cores on
+        # the bulk), then the stragglers multi-threaded (all cores each) -- both
+        # phases keep every core busy.
+        k = 0
+        suffix = W
+        for length, _i, _o in jobs:
+            rest_below = suffix - length
+            if rest_below > 0 and length > rest_below / cpu:
+                k += 1
+                suffix -= length
+            else:
+                break
+        stragglers, bulk = jobs[:k], jobs[k:]
+        if stragglers:
+            print(F"TAREAN: {total_jobs} jobs -> {len(bulk)} pooled at -n1, then "
+                  F"{len(stragglers)} straggler(s) at -n {max_threads}")
+        else:
+            print(F"TAREAN: {total_jobs} jobs pooled at -n1 (no straggler outlier)")
+        bulk_cmds = [_tarean_cmd(i, o, 1) for _l, i, o in bulk]
+        with Pool(cpu) as p:
+            for _res in p.imap(tc.run_cmd, bulk_cmds):
+                _progress(_res)
+        for _l, i, o in stragglers:
+            tc.run_cmd(_tarean_cmd(i, o, max_threads))
+            _progress(None)
 
     print("TAREAN finished")
     # get SSR info for tarean report from gff3 file
