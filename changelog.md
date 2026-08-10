@@ -1,3 +1,29 @@
+## 1.19.0 (2026-08-10)
+- **Parallelism fixes for very large genomes (output-identical).** Three
+  internal changes that keep more cores busy in stages that previously
+  bottlenecked on serial or single-threaded work. Verified byte-identical to
+  1.18.0 on the deterministic outputs (per change and end-to-end on an
+  *Arabidopsis thaliana* `run_all --long`). No behavior, CLI, or output change.
+  - **`tc_reannotate` chunked RepeatMasker: parse and remap hits in the
+    workers, not the parent.** Each chunk worker now parses its own
+    RepeatMasker `.out`, maps hits back to genome coordinates, and writes a
+    sorted fragment; the parent streams a k-way merge of the fragments. The
+    former serial parent pass (re-read every chunk, build a `Gff3Feature`
+    object per hit, accumulate all hits, sort) was the dominant cost on a large
+    genome. Parent memory now scales with the number of chunks rather than the
+    number of hits.
+  - **TAREAN jobs dispatched longest-first (LPT).** TAREAN cost scales steeply
+    with array size and TRC sizes span ~1000×, so dispatching in arbitrary
+    order let a large TRC start late and strand the pool; sorting by total
+    array length descending starts the biggest jobs first.
+  - **TAREAN gives large TRCs multiple threads.** Jobs were always run at
+    `-n 1`, so a single huge TRC ran alone on one core at the tail while the
+    rest of the pool idled. When there are fewer jobs than cores, every job now
+    gets an equal share of the cores; when the pool is saturated, straggler
+    outlier TRCs are run multi-threaded after the bulk pool drains. The per-job
+    thread count is memory-gated. tarean.R output is thread-count-independent,
+    so results are unchanged.
+
 ## 1.18.0 (2026-07-22)
 - **Large-genome performance & scalability (output-identical).** Internal
   changes that let `run_all` finish on very large assemblies (e.g. multi-Gbp
