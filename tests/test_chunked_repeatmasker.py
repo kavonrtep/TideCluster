@@ -106,7 +106,7 @@ def main():
     # --- A) splitter ---------------------------------------------------------
     out_dir = os.path.join(d, "chunks")
     os.makedirs(out_dir, exist_ok=True)
-    file_paths, mt = tc.split_fasta_to_chunk_files(
+    file_paths, mt, token_to_file = tc.split_fasta_to_chunk_files(
         genome, out_dir, chunk_size=20, overlap=5
     )
     expected_mt = [

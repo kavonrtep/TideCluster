@@ -58,7 +58,7 @@ def run_constrained(limit):
     out_dir = os.path.join(tmpdir, "chunks")
     os.makedirs(out_dir)
     # chunk_size=100 -> ~500 pieces -> ~500 chunk files, well above `limit`.
-    file_paths, matching_table = tc.split_fasta_to_chunk_files(
+    file_paths, matching_table, token_to_file = tc.split_fasta_to_chunk_files(
         genome, out_dir, chunk_size=100, overlap=10
     )
 

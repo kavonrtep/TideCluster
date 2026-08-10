@@ -4,6 +4,7 @@ import collections
 import csv
 import glob
 import gzip
+import heapq
 import itertools
 import os
 import shutil
@@ -1033,8 +1034,11 @@ def split_fasta_to_chunk_files(fasta_file, out_dir, chunk_size=50000000,
     :param out_dir: directory to write chunk FASTA files into
     :param chunk_size: target piece / file size in bases
     :param overlap: bases of right-edge overlap added to each interior piece
-    :return: (list_of_chunk_fasta_paths, matching_table) where matching_table
-             rows are [orig_header, piece_index, start, end, token]
+    :return: (list_of_chunk_fasta_paths, matching_table, token_to_file) where
+             matching_table rows are [orig_header, piece_index, start, end,
+             token] and token_to_file maps each token to the chunk FASTA path it
+             was packed into (lets the caller build a per-chunk token->row map
+             so each RepeatMasker worker can remap its own hits).
     """
     fasta_dict = read_fasta_sequence_size(fasta_file)
     min_chunk_size = chunk_size * 2
@@ -1105,7 +1109,7 @@ def split_fasta_to_chunk_files(fasta_file, out_dir, chunk_size=50000000,
     finally:
         for fh in open_handles.values():
             fh.close()
-    return file_paths, matching_table
+    return file_paths, matching_table, token_to_file
 
 
 def _repeatmasker_cmd(out_dir, rm_library, sensitivity_flag, target_fasta):
@@ -1146,15 +1150,31 @@ def _repeatmasker_warmup(rm_library, sensitivity_flag, work_dir):
 
 
 def _repeatmasker_chunk_worker(task):
-    """Run a single-threaded RepeatMasker on one chunk FASTA.
+    """Run a single-threaded RepeatMasker on one chunk FASTA, then parse and
+    genome-remap its hits in the worker.
 
     Module-level (picklable) worker for the process pool used by
     :func:`run_repeatmasker_genome_chunked`. Each chunk is masked in its own
     output directory so concurrent jobs cannot clobber each other's files.
 
-    :param task: (chunk_fasta, rm_library, sensitivity_flag)
-    :return: ``(status, chunk_fasta, out_file_or_None)`` where ``status`` is:
-             * ``"ok"``      -- RepeatMasker succeeded and wrote a ``.out``.
+    The parse + coordinate remap that used to run serially in the parent (read
+    every chunk ``.out``, look each piece token up in the matching table, add
+    the chunk offset) is done here instead, so it runs concurrently across the
+    pool. Each worker writes its hits, sorted by ``(seqid, start, end, strand,
+    name)``, to a fragment file (5-field TSV); the parent streams a k-way merge
+    of these already-sorted fragments. Output is byte-identical to the former
+    "accumulate all hits in the parent, sort, write" path -- the parent sort
+    was a total order over the same 5-tuple, so a merge of per-chunk sorted
+    fragments reproduces it exactly.
+
+    :param task: (chunk_fasta, rm_library, sensitivity_flag, token_map) where
+        token_map is ``{token: (ori_header, offset)}`` for just this chunk's
+        pieces.
+    :return: ``(status, chunk_fasta, fragment_or_None)`` where ``status`` is:
+             * ``"ok"``      -- RepeatMasker succeeded; ``fragment`` is the path
+                                to this chunk's sorted TSV of remapped hits
+                                (may be an empty file if the .out had no usable
+                                hit lines).
              * ``"no_hits"`` -- succeeded (exit 0) but wrote no ``.out`` (empty
                                 / all-N / genuinely hit-less chunk); contributes
                                 nothing, as run_repeatmasker_with_renaming does.
@@ -1164,7 +1184,7 @@ def _repeatmasker_chunk_worker(task):
              (exit != 0) keeps the legitimate hit-less-chunk tolerance while
              catching real errors instead of dropping them.
     """
-    chunk_fasta, rm_library, sensitivity_flag = task
+    chunk_fasta, rm_library, sensitivity_flag, token_map = task
     out_dir = chunk_fasta + "_rmdir"
     os.makedirs(out_dir, exist_ok=True)
     result = subprocess.run(
@@ -1172,9 +1192,34 @@ def _repeatmasker_chunk_worker(task):
     out_file = os.path.join(out_dir, os.path.basename(chunk_fasta) + ".out")
     if result.returncode != 0:
         return ("failed", chunk_fasta, None)
-    if os.path.exists(out_file):
-        return ("ok", chunk_fasta, out_file)
-    return ("no_hits", chunk_fasta, None)
+    if not os.path.exists(out_file):
+        return ("no_hits", chunk_fasta, None)
+
+    # Parse + remap this chunk's hits (moved out of the serial parent pass).
+    records = []
+    with open(out_file) as f:
+        for _ in range(3):  # skip the 3 RepeatMasker header lines
+            next(f, None)
+        for line in f:
+            items = line.split()
+            if len(items) < 11:  # blank / malformed line
+                continue
+            row = token_map.get(items[4])
+            if row is None:
+                continue
+            ori_header, offset = row
+            start = int(items[5]) + offset
+            end = int(items[6]) + offset
+            # mirror repeatmasker_to_gff3 strand mapping verbatim
+            strand = "+" if items[8] == "C" else "-"
+            name = items[10]
+            records.append((ori_header, start, end, strand, name))
+    records.sort(key=lambda r: (r[0], r[1], r[2], r[3], r[4]))
+    fragment = chunk_fasta + ".frag"
+    with open(fragment, "w") as fo:
+        for seqid, start, end, strand, name in records:
+            fo.write(F"{seqid}\t{start}\t{end}\t{strand}\t{name}\n")
+    return ("ok", chunk_fasta, fragment)
 
 
 def run_repeatmasker_genome_chunked(ref_seq, rm_library, cpu, sensitivity_flag,
@@ -1217,7 +1262,7 @@ def run_repeatmasker_genome_chunked(ref_seq, rm_library, cpu, sensitivity_flag,
     :return: out_gff3
     """
     work_dir = tempfile.mkdtemp(prefix="tc_rm_chunks_")
-    chunk_files, matching_table = split_fasta_to_chunk_files(
+    chunk_files, matching_table, token_to_file = split_fasta_to_chunk_files(
         ref_seq, work_dir, chunk_size=chunk_size, overlap=overlap
     )
     print(F"Chunked RepeatMasker: {len(chunk_files)} chunk file(s), "
@@ -1228,7 +1273,15 @@ def run_repeatmasker_genome_chunked(ref_seq, rm_library, cpu, sensitivity_flag,
     # race on that build and some mask nothing (see _repeatmasker_warmup).
     _repeatmasker_warmup(rm_library, sensitivity_flag, work_dir)
 
-    tasks = [(c, rm_library, sensitivity_flag) for c in chunk_files]
+    # Per-chunk token -> (ori_header, offset) map, so each worker remaps only
+    # its own hits (bounded memory per worker; no whole-table token_row in the
+    # parent, no giant records list). Row is [orig_header, piece_i, start, ...].
+    rows_by_chunk = {}
+    for row in matching_table:
+        rows_by_chunk.setdefault(token_to_file[row[4]], {})[row[4]] = (
+            row[0], row[2])
+    tasks = [(c, rm_library, sensitivity_flag, rows_by_chunk.get(c, {}))
+             for c in chunk_files]
     pool_size = max(1, min(cpu, len(tasks)))
     with Pool(pool_size) as pool:
         results = list(pool.map(_repeatmasker_chunk_worker, tasks))
@@ -1260,42 +1313,33 @@ def run_repeatmasker_genome_chunked(ref_seq, rm_library, cpu, sensitivity_flag,
     print(F"Chunked RepeatMasker: {len(tasks)} chunk(s) completed -- "
           F"{n_hits} with hits, {n_empty} hit-less, 0 failed")
 
-    # O(1) token -> matching_table row lookup (avoid the O(M) linear scan in
-    # get_original_header_and_coordinates per hit; there can be millions).
-    token_row = {row[4]: row for row in matching_table}
+    # Each "ok" worker wrote a fragment of its hits, already sorted by
+    # (seqid, start, end, strand, name). Stream a k-way merge of those sorted
+    # fragments and write the final GFF3 directly. This reproduces the former
+    # "gather all hits in the parent, sort by the same 5-tuple, write" output
+    # byte-for-byte (the merge re-imposes the identical total order, so the
+    # result is independent of pool scheduling) while keeping parent memory
+    # bounded to O(#fragments) instead of O(#hits), and moving the per-hit parse
+    # into the pool. The line is formatted directly rather than via
+    # Gff3Feature(...).print_line(): for the fixed Cluster_ID=..;Name=.. order
+    # the two are byte-identical, and this avoids constructing and re-parsing an
+    # object per hit (tens of millions on a large genome).
+    fragments = [r[2] for r in results if r[0] == "ok"]
 
-    records = []
-    for status, _chunk, out_file in results:
-        if status != "ok":
-            continue
-        with open(out_file) as f:
-            for _ in range(3):  # skip the 3 RepeatMasker header lines
-                next(f, None)
-            for line in f:
-                items = line.split()
-                if len(items) < 11:  # blank / malformed line
-                    continue
-                row = token_row.get(items[4])
-                if row is None:
-                    continue
-                offset = row[2]
-                ori_header = row[0]
-                start = int(items[5]) + offset
-                end = int(items[6]) + offset
-                # mirror repeatmasker_to_gff3 strand mapping verbatim
-                strand = "+" if items[8] == "C" else "-"
-                name = items[10]
-                records.append((ori_header, start, end, strand, name))
+    def _fragment_records(path):
+        with open(path) as fh:
+            for line in fh:
+                c = line.rstrip("\n").split("\t")
+                yield (c[0], int(c[1]), int(c[2]), c[3], c[4])
 
-    # sort for a deterministic intermediate (final output is sorted downstream
-    # regardless, but this keeps the GFF3 reproducible run-to-run)
-    records.sort(key=lambda r: (r[0], r[1], r[2], r[3], r[4]))
     with open(out_gff3, "w") as gff3_out:
         gff3_out.write("##gff-version 3\n")
-        for seqid, start, end, strand, name in records:
-            gff_line = (F"{seqid}\tRepeatMasker\ttandem repeat\t{start}"
-                        F"\t{end}\t.\t{strand}\t.\tCluster_ID={name};Name={name}")
-            gff3_out.write(Gff3Feature(gff_line).print_line())
+        merged = heapq.merge(*(_fragment_records(p) for p in fragments),
+                             key=lambda r: (r[0], r[1], r[2], r[3], r[4]))
+        for seqid, start, end, strand, name in merged:
+            gff3_out.write(
+                F"{seqid}\tRepeatMasker\ttandem repeat\t{start}\t{end}\t.\t"
+                F"{strand}\t.\tCluster_ID={name};Name={name}\n")
 
     if not debug:
         shutil.rmtree(work_dir, ignore_errors=True)
