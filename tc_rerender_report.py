@@ -1269,9 +1269,15 @@ def load_superfamilies(paths, input_dir):
         members = sorted(groups[sf_id], key=_trc_sort_key)
         dotplot = None
         if dotdir and len(members) > 1:
-            indices = sorted(int(x.replace("TRC_", "")) for x in members)
-            fname = "TRCS_" + "_".join(str(i) for i in indices) + ".png"
-            candidate = dotdir / fname
+            # compare_trc_by_blast.R names dotplots by superfamily rank since
+            # the NAME_MAX fix (issue #7); output directories written before it
+            # carry the old "TRCS_<all member ids>.png" name, so fall back to
+            # that so existing runs still re-render.
+            candidate = dotdir / f"superfamily_{sf_id:03d}.png"
+            if not candidate.exists():
+                indices = sorted(int(x.replace("TRC_", "")) for x in members)
+                candidate = dotdir / ("TRCS_" + "_".join(str(i) for i in indices)
+                                      + ".png")
             if candidate.exists():
                 dotplot = str(candidate.relative_to(input_dir))
         fb_members = [t for t in members if t in fallback_set]
@@ -1458,6 +1464,13 @@ def build_model(input_dir: Path, prefix: str):
         "seqid_lengths": seqid_lengths,
         "trcs":          trcs,
         "superfamilies": superfams,
+        # An ABSENT csv and an EMPTY one mean opposite things: the R step
+        # always writes the canonical csv (header-only when it found nothing),
+        # so a missing file means the superfamily step failed or never ran.
+        # Without this flag the report states "no superfamilies were
+        # identified" for both -- a positive, wrong claim about a failed run
+        # (issue #7).
+        "superfamilies_csv_present": bool(paths["superfamilies_csv"]),
     }
 
 
@@ -1954,8 +1967,11 @@ def render_index(model, out_path, run_meta, ctx):
             f'<a href="{up}tarean.html">{n_tarean}</a>'),
         ("total length",           fmt_bp(stats.get("total_tr_length"))),
         ("superfamilies",
-            f'<a href="{up}superfamilies.html">{len(model["superfamilies"])}</a>'
-            f' ({n_sf_peers} TRCs grouped)'),
+            (f'<a href="{up}superfamilies.html">{len(model["superfamilies"])}</a>'
+             f' ({n_sf_peers} TRCs grouped)')
+            if model.get("superfamilies_csv_present", True) else
+            (f'<a href="{up}superfamilies.html">not available</a>'
+             f' (analysis did not complete)')),
     ]
     if rdna_trcs:
         n_45s = sum(1 for t in rdna_trcs if t.get("rdna_type") == "45S")
@@ -2296,11 +2312,20 @@ def render_kite(model, out_path, run_meta, ctx):
 def render_superfamilies(model, out_path, run_meta, ctx):
     out_path = Path(out_path)
     if not model["superfamilies"]:
+        if model.get("superfamilies_csv_present", True):
+            note = ('<p class="tc-callout">No TRC superfamilies were identified '
+                    '(either insufficient TRCs reached the clustering step or none '
+                    'shared significant consensus similarity).</p>')
+        else:
+            note = ('<p class="tc-callout"><strong>Superfamily analysis did not '
+                    'complete.</strong> No <code>*_trc_superfamilies.csv</code> was '
+                    'found, so this is a missing result, not a negative one — the '
+                    'genome may well contain superfamilies. Check the run log for a '
+                    'failure in <code>compare_trc_by_blast.R</code> and re-run the '
+                    'TAREAN step.</p>')
         body = (f'<h1>TRC Superfamilies</h1>'
                 f'<section class="tc-prose">{load_section("superfamilies")}</section>'
-                f'<p class="tc-callout">No TRC superfamilies were identified '
-                f'(either insufficient TRCs reached the clustering step or none shared '
-                f'significant consensus similarity).</p>')
+                f'{note}')
         out_path.write_text(_shell(ctx, "Superfamilies", "sf", run_meta, body))
         return
     sections = []

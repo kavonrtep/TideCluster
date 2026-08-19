@@ -2996,6 +2996,12 @@ def save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer):
 def run_cmd(cmd):
     """
     runs shell command and returns status
+
+    Returns ``[cmd, 'ok' | 'error']``. Callers whose outputs are invalidated by
+    a failure must inspect the status -- see ``TideCluster._run_required``; a
+    dropped 'error' is how a dead superfamily step still exited 0 (issue #7).
+    Failures go to stderr, so they survive a caller that pipes stdout.
+
     :param cmd:
     :return: list
     """
@@ -3004,10 +3010,15 @@ def run_cmd(cmd):
         result = subprocess.run(cmd, shell=True, stderr=subprocess.PIPE)
         # if command fails, print error message and return error
         if result.returncode != 0:
-            print(result.stderr.decode('utf-8'))
+            print(F"ERROR: command failed (exit {result.returncode}): {cmd}",
+                  file=sys.stderr)
+            sys.stderr.write(result.stderr.decode('utf-8'))
+            sys.stderr.flush()
             return [cmd, 'error']
     except subprocess.CalledProcessError as e:
-        print(e.stderr.decode('utf-8'))
+        print(F"ERROR: command failed: {cmd}", file=sys.stderr)
+        sys.stderr.write(e.stderr.decode('utf-8'))
+        sys.stderr.flush()
         return [cmd, 'error']
     return [cmd, 'ok']
 
@@ -3298,9 +3309,14 @@ def extend_long_period_rescore(kite_dir, multi_fa, max_period, ext_max_period,
                 fout.write("\t".join(row) + "\n")
 
     out_prefix = F"{kite_dir}/_rescored_longext"
-    run_cmd(F"kitehor rescore --peaks {sub_peaks} --out {out_prefix}"
-            F" --max-period {ext_max_period} --top-n {top_n}"
-            F" --threads {threads} {sub_fa}")
+    # Without this check a failure here surfaces as a FileNotFoundError on the
+    # .peaks.tsv read below, which says nothing about what actually broke.
+    if run_cmd(F"kitehor rescore --peaks {sub_peaks} --out {out_prefix}"
+               F" --max-period {ext_max_period} --top-n {top_n}"
+               F" --threads {threads} {sub_fa}")[1] == 'error':
+        raise RuntimeError(
+            F"kitehor rescore (long-period re-search, --max-period "
+            F"{ext_max_period}) failed; see the error above")
 
     ext_rows = collections.defaultdict(list)
     with open(F"{out_prefix}.peaks.tsv", newline="") as fh:

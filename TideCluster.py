@@ -33,6 +33,37 @@ MAX_MEMORY_HELP = (
 )
 
 
+def _run_required(cmd, what):
+    """Run a pipeline step whose failure invalidates the run's outputs.
+
+    ``tc.run_cmd`` returns ``[cmd, 'error']`` and prints the child's stderr, but
+    every call site used to discard that status, so a dead step left the
+    pipeline running to a report that quietly denied its own missing results --
+    a killed ``compare_trc_by_blast.R`` produced a report stating "no TRC
+    superfamilies were identified" for a genome with 75 of them, and ``run_all``
+    still exited 0 (issue #7). Aborting is the safe default: a non-zero exit is
+    recoverable, a confidently wrong report is not.
+    """
+    if tc.run_cmd(cmd)[1] == 'error':
+        raise RuntimeError(
+            F"{what} failed; its outputs are missing or incomplete. See the "
+            F"error above. Command: {cmd}")
+
+
+def _run_optional(cmd, what):
+    """Run a step whose failure degrades the report but does not invalidate it.
+
+    Used for purely presentational artefacts (e.g. profile plots): say so
+    loudly, then carry on. The counterpart of :func:`_run_required`; the point
+    of having both is that every ``run_cmd`` result is now looked at.
+    """
+    if tc.run_cmd(cmd)[1] == 'error':
+        print(F"WARNING: {what} failed; the run continues without it "
+              F"(report will be missing these outputs).", file=sys.stderr)
+        return False
+    return True
+
+
 def _tarean_max_threads(cpu, max_memory=None):
     """Cap the per-job TAREAN thread count by a memory budget.
 
@@ -188,19 +219,19 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
         rescore_max_period = int(getattr(args, "kite_rescore_max_period", 10000))
         rescore_top_n      = int(getattr(args, "kite_rescore_top_n",      20))
         print(F"Running kitehor kite-periodicity on {n_kite_records} array(s).")
-        tc.run_cmd(F"kitehor kite-periodicity {multi_fa}"
-                   F" --out {kite_dir}/kitehor.kite.tsv"
-                   F" --out-peaks {kite_dir}/kitehor.kite.peaks.tsv"
-                   F" --periodogram {kite_dir}/kitehor.periodogram"
-                   F" --threads {cpu}")
+        _run_required(F"kitehor kite-periodicity {multi_fa}"
+                      F" --out {kite_dir}/kitehor.kite.tsv"
+                      F" --out-peaks {kite_dir}/kitehor.kite.peaks.tsv"
+                      F" --periodogram {kite_dir}/kitehor.periodogram"
+                      F" --threads {cpu}", "kitehor kite-periodicity")
         # rule-classify is cheap and produces the per-array verdicts that
         # `tandem-validate` (kitehor >= 0.13.0's unified subrepeat detector,
         # spec v5) consumes. Run it first, then fan rescore || ssr-scan ||
         # tandem-validate out concurrently. rayon inside each binary still
         # uses --threads; rescore is the O(period²) bottleneck so it keeps
         # the lion's share of the CPU budget, the other two are quick.
-        tc.run_cmd(F"kitehor rule-classify {kite_dir}/kitehor.kite.peaks.tsv"
-                   F" --out {kite_dir}/kitehor")
+        _run_required(F"kitehor rule-classify {kite_dir}/kitehor.kite.peaks.tsv"
+                      F" --out {kite_dir}/kitehor", "kitehor rule-classify")
         rescore_threads = max(1, cpu - 2)
         side_threads    = max(1, cpu // 2)
         rescore_cmd = (
@@ -265,10 +296,11 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
             out_csv=F"{kite_dir}/monomer_size_top3_estimats.csv",
             trc_repeat_type=trc_repeat_type)
         print("Rendering per-TRC profile heatmaps.")
-        tc.run_cmd(F"{script_path}/tarean/kite_heatmaps.R"
-                   F" --periodogram {kite_dir}/kitehor.periodogram"
-                   F" --top3-csv {kite_dir}/monomer_size_top3_estimats.csv"
-                   F" --out-dir {kite_dir}/profile_plots")
+        _run_optional(F"{script_path}/tarean/kite_heatmaps.R"
+                      F" --periodogram {kite_dir}/kitehor.periodogram"
+                      F" --top3-csv {kite_dir}/monomer_size_top3_estimats.csv"
+                      F" --out-dir {kite_dir}/profile_plots",
+                      "KITE profile heatmaps (kite_heatmaps.R)")
     if os.path.exists(multi_fa):
         os.remove(multi_fa)
 
@@ -403,9 +435,16 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
         print(F"TAREAN: memory budget ~{budget_mb:.0f} MB from {budget_src} -> "
               F"at most -n {max_threads} per job (cap {cpu})")
     completed = [0]
+    failed_jobs = []
 
     def _progress(_res):
         completed[0] += 1
+        # run_cmd returns [cmd, 'ok'|'error']; a per-TRC failure costs that
+        # TRC its consensus but leaves the rest of the run meaningful, so it
+        # is collected and reported rather than aborting mid-stage. What it
+        # must not do is pass unnoticed (issue #7).
+        if isinstance(_res, (list, tuple)) and len(_res) == 2 and _res[1] == 'error':
+            failed_jobs.append(_res[0])
         print(F"completed {completed[0]} of {total_jobs}")
 
     W = sum(length for length, _i, _o in jobs)
@@ -448,9 +487,17 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
             for _res in p.imap(tc.run_cmd, bulk_cmds):
                 _progress(_res)
         for _l, i, o in stragglers:
-            tc.run_cmd(_tarean_cmd(i, o, max_threads))
-            _progress(None)
+            _progress(tc.run_cmd(_tarean_cmd(i, o, max_threads)))
 
+    if failed_jobs:
+        print(F"WARNING: {len(failed_jobs)} of {total_jobs} TAREAN job(s) "
+              F"failed; those TRCs have no consensus and are absent from the "
+              F"report. Failed commands:", file=sys.stderr)
+        for c in failed_jobs:
+            print(F"  {c}", file=sys.stderr)
+        if len(failed_jobs) == total_jobs:
+            raise RuntimeError(
+                F"all {total_jobs} TAREAN jobs failed; nothing to report on")
     print("TAREAN finished")
     # get SSR info for tarean report from gff3 file
 
@@ -463,7 +510,9 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
     cmd = (F"{script_path}/tarean/tarean_report.R -i {tarean_dir} -o"
            F" {prefix}_tarean_report -g {gff}")
     print("Making final tarean report.")
-    tc.run_cmd(cmd)
+    # tarean_report.R builds the consensus dimer library that the superfamily
+    # step below consumes, so its failure cascades.
+    _run_required(cmd, "tarean_report.R")
 
     # Compare TRC by blast   - it require consensus dimers library generated by tarean_report.R.
     # --consensus_dir + --annotation_tsv enable the below-TAREAN-threshold
@@ -484,7 +533,7 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
         F" --consensus_dir {consensus_dir_arg}"
         F" --annotation_tsv {annotation_tsv_arg}"
         F" --score_threshold {superfamily_score}")
-    tc.run_cmd(cmd)
+    _run_required(cmd, "compare_trc_by_blast.R (superfamily analysis)")
 
     _maybe_identify_rdna(prefix, fasta, args, cpu)
     _move_v1_to_legacy(prefix)

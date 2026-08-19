@@ -52,4 +52,7 @@ python3 "$ROOT/tests/test_vendor_images.py"
 echo "=== unit: memory budget resolution (scheduler / cgroup / --max_memory) ==="
 python3 "$ROOT/tests/test_memory_budget.py"
 
+echo "=== unit: superfamily dotplot naming + failure propagation (issue #7) ==="
+python3 "$ROOT/tests/test_superfamily_outputs.py"
+
 echo "unit tests OK"

@@ -344,6 +344,23 @@ write_superfamily_manifest <- function(prefix, n_superfamilies){
   })
 }
 
+# Dotplot filenames are indexed by superfamily rank, NOT by the member TRC
+# ids. The old "TRCS_<every member id joined by _>.png" scheme grew without
+# bound: at ~61 three-digit members it passed NAME_MAX (255 bytes on ext4/xfs),
+# png() could not open the device, and the whole script died at i = 1 -- before
+# closePage(), the CSV and the manifest -- taking every superfamily output with
+# it while run_all still exited 0 (issue #7). Superfamilies are ordered by
+# decreasing member count, so the largest one is always the first iteration and
+# the loss is total, never partial. The member list is printed in the HTML
+# section and carried in the CSV, so nothing is lost by dropping it here.
+superfamily_dotplot_filename <- function(i) {
+  fname <- sprintf("superfamily_%03d.png", i)
+  # Belt and braces: a future naming change must not silently reintroduce a
+  # name that png() cannot open.
+  stopifnot(nchar(fname) <= 255)
+  fname
+}
+
 make_empty_outputs <- function(prefix){
   # create empty html file
   html_out <- paste(prefix, "_trc_superfamilies.html", sep = "")
@@ -666,18 +683,32 @@ for (i in seq_along(cls)) {
   min_size <- 500
   size <- max(size, min_size)
 
-  # Generate the image
-  img_filename <- paste0(group_name, ".png")
+  # Generate the image. A failure here must not take the run's real outputs
+  # with it: the CSV, the manifest and closePage() are all written AFTER this
+  # loop, so an uncaught error in the first (largest) superfamily used to
+  # discard every superfamily result while run_all still exited 0 (issue #7).
+  # A missing dotplot is a missing picture; a missing CSV is a missing result.
+  img_filename <- superfamily_dotplot_filename(i)
   img_filepath <- file.path(img_dir, img_filename)
-  png(img_filepath, width = size, height = size, pointsize = 36)
-  par(mar = c(5, 5, 5, 5))
-  # some sequenes are too short - if sequence is bellow 70 - multiplay
-  L <- nchar(fasta_repr_cls[[i]])
-  M <- round(140/L)
-  M <- ifelse(M < 1, 1, M)
-  fasta_extended <- DNAStringSet(mapply(function(x, y) paste(rep(x, y),collapse = ""), fasta_repr_cls[[i]], M))
-  create_dotplot(fasta_extended)
-  dev.off()
+  img_ok <- TRUE
+  tryCatch({
+    png(img_filepath, width = size, height = size, pointsize = 36)
+    par(mar = c(5, 5, 5, 5))
+    # some sequenes are too short - if sequence is bellow 70 - multiplay
+    L <- nchar(fasta_repr_cls[[i]])
+    M <- round(140/L)
+    M <- ifelse(M < 1, 1, M)
+    fasta_extended <- DNAStringSet(mapply(function(x, y) paste(rep(x, y),collapse = ""), fasta_repr_cls[[i]], M))
+    create_dotplot(fasta_extended)
+  }, error = function(e) {
+    img_ok <<- FALSE
+    message("WARNING: compare_trc_by_blast: dotplot for superfamily ", i,
+            " failed (", conditionMessage(e), "); continuing without it.")
+  })
+  # png() may or may not have opened a device before failing; close whatever
+  # is open so the next iteration starts clean.
+  while (dev.cur() > 1) dev.off()
+  img_ok <- img_ok && file.exists(img_filepath)
 
   # Prepare the TRC list for the section header
   trc_list <- paste("TRC_", strsplit(group_name, "_")[[1]][-1], sep = "", collapse = ", ")
@@ -689,8 +720,13 @@ for (i in seq_along(cls)) {
   hwrite(paste0('<h2 id="', anchor_name, '">', superfamily_name, '</h2>'), page = page)
   hwrite("TRCs in superfamily: ", page = page)
   hwrite(paste("<p> ",trc_list,"</p>") , page = page)
-  img_src <- file.path(basename(img_dir), img_filename)
-  hwriteImage(img_src, page = page, br = TRUE, width=500, link=img_src)
+  if (img_ok) {
+    img_src <- file.path(basename(img_dir), img_filename)
+    hwriteImage(img_src, page = page, br = TRUE, width=500, link=img_src)
+  } else {
+    hwrite("<p><em>dotplot unavailable for this superfamily</em></p>",
+           page = page)
+  }
   hwrite('<p><a href="#top">Top</a></p>', page = page)
   hwrite("<hr>", page = page)
 }
