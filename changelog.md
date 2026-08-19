@@ -1,3 +1,35 @@
+## 1.20.0 (2026-08-19)
+- **`--max_memory <GB>` and a memory budget that reflects the job's limit, not
+  the host's (issue #6).** Under a batch scheduler or in a container the memory
+  gates on the TideHunter worker pool and the TAREAN thread count silently did
+  nothing, because both resolved their budget from `/proc/meminfo`
+  `MemAvailable` — which the kernel does not namespace, so inside a cgroup it
+  reports the whole node. A 128 GB PBS job measured a 9.7 GB per-part peak,
+  believed it had a 1.6 TB budget, ran 32 parts concurrently and was OOM-killed
+  in round 3 of `--long`, several hours in, with nothing warning beforehand.
+  - **New `--max_memory` (alias `--max-memory`) on `tidehunter`, `tarean` and
+    `run_all`.** The value is recorded in `<prefix>_cmd_args.json` and shown in
+    the report's run settings, so a run's memory assumption is part of its
+    provenance.
+  - **One resolution chain, first hit wins:** `--max_memory` → `AGENT_MEMORY` →
+    scheduler environment (`PBS_RESC_MEM` bytes, `SLURM_MEM_PER_NODE` MB,
+    `SLURM_MEM_PER_CPU` × `SLURM_CPUS_ON_NODE`, `LSB_MAX_MEM_RUSAGE` KB) →
+    cgroup v2 `memory.max` / v1 `memory.limit_in_bytes` → `MemAvailable`. The
+    two duplicated fallback chains in `tc_utils` and `TideCluster.py` collapse
+    into a single `tc_utils.memory_budget_mb()`. The scheduler variables are
+    what cross the Singularity/Apptainer boundary: the cgroup namespace remaps
+    the `/sys/fs/cgroup` paths and the memory controller may not be delegated
+    into the container at all, so a cgroup read alone does not cover container
+    runs.
+  - **The winning source is logged** next to the pool size and the TAREAN thread
+    cap (`budget ~104858 MB from PBS_RESC_MEM`), and a one-line warning is
+    emitted when the budget falls through to `MemAvailable` while a scheduler
+    job id is set.
+  - Behaviour on a plain host with no scheduler, container or `AGENT_MEMORY` is
+    unchanged (all new sources miss; `MemAvailable` × 0.8 as before). Where a
+    source does hit, the pool gets smaller — a scheduling change only, since
+    TideHunter and TAREAN output are thread-count-independent.
+
 ## 1.19.0 (2026-08-10)
 - **Parallelism fixes for very large genomes (output-identical).** Three
   internal changes that keep more cores busy in stages that previously
