@@ -1402,30 +1402,198 @@ def _tidehunter_part_worker(task):
     return part_out
 
 
-def _tidehunter_memory_budget_mb():
-    """Available memory budget (MB) for sizing the TideHunter worker pool.
+# ---------------------------------------------------------------------------
+# Memory budget resolution (shared by the TideHunter pool and TAREAN threads)
+# ---------------------------------------------------------------------------
 
-    Prefers the sandbox's ``AGENT_MEMORY`` (GB), else ``/proc/meminfo``
-    ``MemAvailable``; ``None`` if neither is readable. A 0.8 factor leaves
-    headroom for the Python parent, OS cache, etc.
+# Fraction of the resolved limit actually handed out: leaves headroom for the
+# Python parent, the OS page cache and per-process slop.
+MEMORY_HEADROOM = 0.8
+
+# Scheduler-provided limits, in precedence order, with the unit a bare
+# (suffix-less) value carries. These survive into Singularity/Apptainer
+# containers for free, because the host environment is passed through by
+# default -- unlike /sys/fs/cgroup, whose paths are remapped by the cgroup
+# namespace and whose memory controller may not be delegated at all.
+_SCHEDULER_MEM_VARS = (
+    ("PBS_RESC_MEM", "b"),        # PBS/Torque: bytes
+    ("SLURM_MEM_PER_NODE", "m"),  # Slurm: MB
+    ("LSB_MAX_MEM_RUSAGE", "k"),  # LSF: KB
+)
+
+# Presence of any of these means "we are running under a batch scheduler", so a
+# host-wide MemAvailable budget is almost certainly wrong.
+_SCHEDULER_JOB_VARS = ("PBS_JOBID", "SLURM_JOB_ID", "SLURM_JOBID", "LSB_JOBID")
+
+_MEM_UNIT_MB = {
+    "b": 1.0 / 1024 / 1024,
+    "k": 1.0 / 1024, "kb": 1.0 / 1024,
+    "m": 1.0, "mb": 1.0,
+    "g": 1024.0, "gb": 1024.0,
+    "t": 1024.0 * 1024, "tb": 1024.0 * 1024,
+}
+
+# Guard against v1's "unlimited" sentinel (a huge number, historically
+# PAGE_COUNTER_MAX * PAGE_SIZE); v2 spells it "max", which simply fails to parse.
+_CGROUP_UNLIMITED = 1 << 62
+
+_warned_host_budget = False
+
+
+def _parse_mem_to_mb(raw, default_unit):
+    """Parse a scheduler memory string to MB, or ``None`` if unparseable.
+
+    Accepts a bare number -- interpreted in ``default_unit``, which differs per
+    variable (PBS bytes, Slurm MB, LSF KB) -- or a number with an explicit
+    ``k/m/g/t[b]`` suffix, which some sites do set. Getting the unit wrong by
+    1024x re-creates the very bug this resolution chain exists to fix, so each
+    variable's unit is declared next to it in ``_SCHEDULER_MEM_VARS``.
     """
-    env = os.environ.get("AGENT_MEMORY")
-    if env:
-        try:
-            return float(env) * 1024 * 0.8
-        except ValueError:
-            pass
+    if raw is None:
+        return None
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([kmgt]?b?)", raw.strip().lower())
+    if not m:
+        return None
+    factor = _MEM_UNIT_MB.get(m.group(2) or default_unit)
+    if factor is None:
+        return None
+    return float(m.group(1)) * factor
+
+
+def _cgroup_limit_mb(sysfs_root="/sys/fs/cgroup",
+                     proc_cgroup="/proc/self/cgroup"):
+    """Effective cgroup memory limit in MB, or ``None`` if there is none.
+
+    The effective limit is the minimum over the whole cgroup chain, so every
+    resolvable candidate is read and the smallest finite value wins. Candidates
+    are the namespaced root (which inside a container *is* the container's own
+    cgroup, and is often the only path that resolves), then the path from
+    ``/proc/self/cgroup`` and each of its ancestors -- a limit is frequently set
+    on a parent slice rather than on the leaf.
+    """
+    rel_v2, rel_v1 = "", ""
     try:
-        with open("/proc/meminfo") as f:
-            for line in f:
-                if line.startswith("MemAvailable:"):
-                    return int(line.split()[1]) / 1024 * 0.8
+        with open(proc_cgroup) as fh:
+            for line in fh:
+                parts = line.strip().split(":", 2)
+                if len(parts) != 3:
+                    continue
+                if parts[0] == "0" and not rel_v2:          # v2 unified
+                    rel_v2 = parts[2]
+                elif "memory" in parts[1].split(",") and not rel_v1:  # v1
+                    rel_v1 = parts[2]
     except OSError:
         pass
-    return None
+
+    def _chain(base, rel):
+        paths, p = [base], rel
+        while p and p != "/":
+            paths.append(base + p)
+            p = os.path.dirname(p)
+        return paths
+
+    limits = []
+    for path in _chain(sysfs_root, rel_v2):
+        try:
+            with open(os.path.join(path, "memory.max")) as fh:
+                value = fh.read().strip()
+        except OSError:
+            continue
+        if value.isdigit():
+            limits.append(int(value) / 1024 / 1024)
+
+    for path in _chain(os.path.join(sysfs_root, "memory"), rel_v1):
+        try:
+            with open(os.path.join(path, "memory.limit_in_bytes")) as fh:
+                value = int(fh.read().strip())
+        except (OSError, ValueError):
+            continue
+        if 0 < value < _CGROUP_UNLIMITED:
+            limits.append(value / 1024 / 1024)
+
+    return min(limits) if limits else None
 
 
-def run_tidehunter(fasta_file, tidehunter_arguments):
+def memory_budget_mb(explicit_gb=None, environ=None, sysfs_root="/sys/fs/cgroup",
+                     proc_cgroup="/proc/self/cgroup", meminfo="/proc/meminfo"):
+    """Memory budget (MB) for sizing worker pools, plus the source it came from.
+
+    Returns ``(budget_mb, source)``; ``(None, "none")`` if nothing is readable.
+    The budget already has :data:`MEMORY_HEADROOM` applied. Resolution order,
+    first hit wins:
+
+    1. ``--max_memory`` (GB) -- explicit, and recorded in ``*_cmd_args.json``
+    2. ``AGENT_MEMORY`` (GB) -- sandbox override, pre-existing behaviour
+    3. scheduler environment: ``PBS_RESC_MEM`` (bytes),
+       ``SLURM_MEM_PER_NODE`` (MB), ``SLURM_MEM_PER_CPU`` x
+       ``SLURM_CPUS_ON_NODE`` (MB), ``LSB_MAX_MEM_RUSAGE`` (KB)
+    4. cgroup v2 ``memory.max`` / v1 ``memory.limit_in_bytes``
+    5. ``/proc/meminfo`` ``MemAvailable``
+
+    Sources 3 and 4 exist because ``MemAvailable`` is **not namespaced**: inside
+    a cgroup it reports the *host's* free memory, so under a batch scheduler or
+    in a container the pool-sizing gates silently see a budget many times the
+    real limit and the job gets OOM-killed (issue #6). The keyword paths are
+    test hooks -- they let a fake /sys/fs/cgroup tree stand in for the real one.
+    """
+    env = os.environ if environ is None else environ
+
+    if explicit_gb:
+        return float(explicit_gb) * 1024 * MEMORY_HEADROOM, "--max_memory"
+
+    agent = _parse_mem_to_mb(env.get("AGENT_MEMORY"), "g")
+    if agent:
+        return agent * MEMORY_HEADROOM, "AGENT_MEMORY"
+
+    for var, unit in _SCHEDULER_MEM_VARS:
+        mb = _parse_mem_to_mb(env.get(var), unit)
+        if mb:
+            return mb * MEMORY_HEADROOM, var
+    per_cpu = _parse_mem_to_mb(env.get("SLURM_MEM_PER_CPU"), "m")
+    ncpu = (env.get("SLURM_CPUS_ON_NODE") or "").strip()
+    if per_cpu and ncpu.isdigit() and int(ncpu) > 0:
+        return per_cpu * int(ncpu) * MEMORY_HEADROOM, "SLURM_MEM_PER_CPU"
+
+    cgroup_mb = _cgroup_limit_mb(sysfs_root=sysfs_root, proc_cgroup=proc_cgroup)
+    if cgroup_mb:
+        return cgroup_mb * MEMORY_HEADROOM, "cgroup"
+
+    try:
+        with open(meminfo) as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return (int(line.split()[1]) / 1024 * MEMORY_HEADROOM,
+                            "MemAvailable")
+    except (OSError, ValueError, IndexError):
+        pass
+    return None, "none"
+
+
+def warn_if_host_memory_budget(source, environ=None):
+    """Warn once if a host-wide budget is being used under a batch scheduler.
+
+    ``MemAvailable`` under PBS/Slurm/LSF means the memory gates are sizing pools
+    against the node's free memory instead of the job's limit -- the failure
+    mode is an OOM kill hours into the run, with nothing said beforehand. One
+    line up front turns that into a 30-second diagnosis.
+    """
+    global _warned_host_budget
+    env = os.environ if environ is None else environ
+    if source != "MemAvailable" or _warned_host_budget:
+        return False
+    jobs = [v for v in _SCHEDULER_JOB_VARS if env.get(v)]
+    if not jobs:
+        return False
+    _warned_host_budget = True
+    print(F"WARNING: memory budget came from /proc/meminfo MemAvailable, but "
+          F"{jobs[0]} is set: MemAvailable is not cgroup-aware, so this is "
+          F"probably the whole node's memory, not this job's limit. Pass "
+          F"--max_memory <GB> to size worker pools against the real limit.",
+          file=sys.stderr)
+    return True
+
+
+def run_tidehunter(fasta_file, tidehunter_arguments, max_memory=None):
     """run tidehunter on fasta file
     require TideHunter to be in PATH
     version of TideHunter must be 1.4.3
@@ -1440,6 +1608,13 @@ def run_tidehunter(fasta_file, tidehunter_arguments):
     and the pool sized as ``min(cpu, budget // per_part_peak)``. Output is
     byte-identical to the former serial ``-t {cpu}`` loop (see
     :func:`_tidehunter_part_worker`).
+
+    ``max_memory`` (GB, from ``--max_memory``) is the top of the budget
+    resolution chain in :func:`memory_budget_mb`; without it the budget comes
+    from the scheduler environment, the cgroup limit, or -- last resort --
+    host-wide ``MemAvailable``. The resolved source is printed alongside the
+    pool size, because a budget that is silently the *node's* rather than the
+    *job's* is what makes this gate a no-op (issue #6).
     """
     # verify tidehunter version
     tidehunter_version = subprocess.check_output(
@@ -1502,15 +1677,18 @@ def run_tidehunter(fasta_file, tidehunter_arguments):
             mm = re.search(rb"Peak RSS:\s*([\d.]+)\s*GB", res.stderr or b"")
             if mm:
                 peak_mb = float(mm.group(1)) * 1024
-            budget_mb = _tidehunter_memory_budget_mb()
+            budget_mb, budget_src = memory_budget_mb(max_memory)
+            warn_if_host_memory_budget(budget_src)
             if budget_mb is None:
                 pool_size = 1
-                reason = "no memory budget (AGENT_MEMORY / MemAvailable); serial"
+                reason = ("no memory budget (--max_memory / scheduler env / "
+                          "cgroup / MemAvailable); serial")
             else:
                 per_part = peak_mb if peak_mb else 2048.0  # assume 2 GB if unmeasured
                 pool_size = max(1, min(pool_cap, int(budget_mb // per_part)))
                 reason = (F"per-part peak ~{per_part:.0f} MB, budget "
-                          F"~{budget_mb:.0f} MB, cap {pool_cap}")
+                          F"~{budget_mb:.0f} MB from {budget_src}, "
+                          F"cap {pool_cap}")
             print(F"TideHunter: {len(fasta_file_parts)} parts, pool_size "
                   F"{pool_size} ({reason})")
             rest = [(fasta_file_parts[i], th_args_single, part_outs[i])

@@ -1879,9 +1879,11 @@ def render_index(model, out_path, run_meta, ctx):
     settings = model.get("settings", {}) or {}
     stats    = model.get("stats", {}) or {}
     rows_settings = []
+    # max_memory only appears when the user passed it (unset args are not
+    # persisted), so its absence here means the budget was inferred.
     for k in ("command", "fasta", "original_fasta", "prefix", "min_length",
-              "min_total_length", "cpu", "no_dust", "tidehunter_arguments", "long",
-              "library"):
+              "min_total_length", "cpu", "max_memory", "no_dust",
+              "tidehunter_arguments", "long", "library"):
         if k in settings:
             rows_settings.append(
                 f'<dt>{esc(k)}</dt><dd>{esc(settings[k])}</dd>')

@@ -21,41 +21,44 @@ from version import __version__
 assert sys.version_info >= (3, 6), "Python 3.6 or newer is required"
 
 
-def _tarean_max_threads(cpu):
+# --max_memory is offered by every subcommand that sizes a worker pool
+# (tidehunter, tarean, run_all); the resolution chain behind it lives in
+# tc_utils.memory_budget_mb.
+MAX_MEMORY_HELP = (
+    "Memory limit for this run, in GB. Used to size the TideHunter worker pool "
+    "and cap TAREAN threads. Set this on a cluster or in a container: without "
+    "it the budget falls back to the scheduler environment (PBS_RESC_MEM, "
+    "SLURM_MEM_PER_NODE, ...), then the cgroup limit, then /proc/meminfo "
+    "MemAvailable -- which reports the whole node's memory, not the job's limit."
+)
+
+
+def _tarean_max_threads(cpu, max_memory=None):
     """Cap the per-job TAREAN thread count by a memory budget.
 
     A TAREAN job's internal ``mclapply`` forks scale with the TRC size, so on a
     memory-constrained host giving a large TRC many threads can exhaust RAM.
-    Cap threads at ``budget / per_thread``, where the budget comes from
-    ``AGENT_MEMORY`` (GB, sandbox) or ``/proc/meminfo`` ``MemAvailable`` (0.8x
-    for headroom); if neither is readable, fall back to ``cpu`` (no cap).
-    ``per_thread`` is a deliberately conservative constant -- this is a safety
-    cap against runaway forks, not a precise controller.
+    Cap threads at ``budget / per_thread``, where the budget and its origin come
+    from :func:`tc_utils.memory_budget_mb` (``--max_memory``, then the scheduler
+    environment, then the cgroup limit, then host ``MemAvailable``); if nothing
+    is readable, fall back to ``cpu`` (no cap). ``per_thread`` is a deliberately
+    conservative constant -- this is a safety cap against runaway forks, not a
+    precise controller.
+
+    Returns ``(max_threads, budget_mb, source)`` so the caller can report which
+    source won: a cap computed from a host-wide ``MemAvailable`` under a batch
+    scheduler is not a cap at all (issue #6).
     """
     per_thread_mb = 4000.0
-    budget_mb = None
-    env = os.environ.get("AGENT_MEMORY")
-    if env:
-        try:
-            budget_mb = float(env) * 1024 * 0.8
-        except ValueError:
-            budget_mb = None
+    budget_mb, source = tc.memory_budget_mb(max_memory)
+    tc.warn_if_host_memory_budget(source)
     if budget_mb is None:
-        try:
-            with open("/proc/meminfo") as fh:
-                for line in fh:
-                    if line.startswith("MemAvailable:"):
-                        budget_mb = int(line.split()[1]) / 1024 * 0.8
-                        break
-        except OSError:
-            budget_mb = None
-    if budget_mb is None:
-        return cpu
-    return max(1, min(cpu, int(budget_mb / per_thread_mb)))
+        return cpu, None, source
+    return max(1, min(cpu, int(budget_mb / per_thread_mb))), budget_mb, source
 
 
 def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
-           version=__version__):
+           version=__version__, max_memory=None):
     """
     Run tarean on genomic sequences specified in gff3 file
     from gff record extract sequence end analyse it with tarean algorithm
@@ -65,6 +68,7 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
     :param fasta: reference fasta
     :param cpu: number of cpu cores to use
     :param min_total_length: minimal total length of sequences to run tarean
+    :param max_memory: memory limit in GB (--max_memory); caps per-job threads
     :return:
     """
     script_path = os.path.dirname(os.path.realpath(__file__))
@@ -295,6 +299,14 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
     # library) are normally back-filled from <prefix>_cmd_args.json above; fall
     # back to 'n/a' so a standalone run without that side-car still prints the
     # block instead of raising AttributeError.
+    # Record the run's memory assumption alongside the CPU count: an unset
+    # --max_memory means the budget was inferred (scheduler env / cgroup /
+    # host MemAvailable), which is exactly the case that can silently be the
+    # node's memory rather than the job's (issue #6).
+    _mm = getattr(args, 'max_memory', None)
+    mem_limit_str = (F"{_mm:g} GB (--max_memory)" if _mm else
+                     "auto (scheduler env / cgroup / MemAvailable)")
+
     settings = (F"Input file                 : {input_fasta}\n"
                 F"Prefix                     : {args.prefix}\n"
                 F"Minimum TRC total length   : {args.min_total_length}\n"
@@ -303,6 +315,7 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
                 F"TideHunter mode            : {th_mode_str}\n"
                 F"TideHunter arguments       : {th_args_str}\n"
                 F"CPU                        : {args.cpu}\n"
+                F"Memory limit               : {mem_limit_str}\n"
                 F"Library                    : {getattr(args, 'library', 'n/a')}\n"
                 F"TideCluster version        : {version}\n")
 
@@ -382,7 +395,13 @@ def tarean(prefix, gff, fasta=None, cpu=4, min_total_length=50000, args=None,
     # longest-first (LPT); (-len, in, out) is a deterministic total order.
     jobs = sorted(cmd_list, key=lambda x: (-x[0], x[1], x[2]))
     total_jobs = len(jobs)
-    max_threads = _tarean_max_threads(cpu)
+    max_threads, budget_mb, budget_src = _tarean_max_threads(cpu, max_memory)
+    if budget_mb is None:
+        print(F"TAREAN: no memory budget ({budget_src}); threads capped by "
+              F"-c {cpu} only")
+    else:
+        print(F"TAREAN: memory budget ~{budget_mb:.0f} MB from {budget_src} -> "
+              F"at most -n {max_threads} per job (cap {cpu})")
     completed = [0]
 
     def _progress(_res):
@@ -871,13 +890,14 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4,
     os.remove(consensus_fasta_representative)
 
 
-def tidehunter(fasta, tidehunter_arguments, prefix, cpu=4):
+def tidehunter(fasta, tidehunter_arguments, prefix, cpu=4, max_memory=None):
     """
     run tidehunter on fasta file
     :param fasta: file with sequences
     :param tidehunter_arguments: tidehunter arguments
     :param prefix: prefix - base name for input and output files
     :param cpu: number of cpu cores to use
+    :param max_memory: memory limit in GB (--max_memory); sizes the worker pool
     :return:
 
     """
@@ -897,7 +917,7 @@ def tidehunter(fasta, tidehunter_arguments, prefix, cpu=4):
             fasta, chunk_size, overlap
             )
     results = tc.run_tidehunter(
-            fasta_file_chunked, tidehunter_arguments
+            fasta_file_chunked, tidehunter_arguments, max_memory=max_memory
             )
     # O(1) chunk-token -> row index so per-feature coordinate remap is a dict
     # lookup, not a linear scan of the (up to ~genome_bp/chunk_size) table.
@@ -991,7 +1011,8 @@ def concat_gff3_files(gff3_files, out_path):
 
 
 def run_tidehunter_round(fasta_input, tidehunter_args, chunk_size, overlap,
-                         round_num, prefix, cpu, keep_rounds=False):
+                         round_num, prefix, cpu, keep_rounds=False,
+                         max_memory=None):
     """
     Run a single round of TideHunter analysis.
 
@@ -1003,6 +1024,7 @@ def run_tidehunter_round(fasta_input, tidehunter_args, chunk_size, overlap,
     :param prefix: output prefix for debugging files
     :param cpu: number of CPUs
     :param keep_rounds: if True, save permanent copy of round results
+    :param max_memory: memory limit in GB (--max_memory); sizes the worker pool
     :return: tuple of (gff3_features_list, temp_gff3_file_path, matching_table)
     """
     # Add CPU threads if not specified
@@ -1013,7 +1035,8 @@ def run_tidehunter_round(fasta_input, tidehunter_args, chunk_size, overlap,
     fasta_file_chunked, matching_table = tc.split_fasta_to_chunks(
         fasta_input, chunk_size, overlap
     )
-    results = tc.run_tidehunter(fasta_file_chunked, tidehunter_args)
+    results = tc.run_tidehunter(fasta_file_chunked, tidehunter_args,
+                                max_memory=max_memory)
 
     # Parse results into GFF3
     gff3_list = parse_tidehunter_results_to_gff3(results, matching_table, round_num)
@@ -1037,7 +1060,7 @@ def run_tidehunter_round(fasta_input, tidehunter_args, chunk_size, overlap,
     return gff3_list, temp_gff3_file, matching_table
 
 
-def tidehunter_long(fasta, prefix, cpu=4, keep_rounds=False):
+def tidehunter_long(fasta, prefix, cpu=4, keep_rounds=False, max_memory=None):
     """
     Run TideHunter in three rounds with increasing monomer size ranges.
     Results from each round are used to mask the sequence for the next round.
@@ -1052,6 +1075,10 @@ def tidehunter_long(fasta, prefix, cpu=4, keep_rounds=False):
     :param prefix: prefix - base name for input and output files
     :param cpu: number of cpu cores to use
     :param keep_rounds: if True, keep intermediate GFF3 files from each round for debugging
+    :param max_memory: memory limit in GB (--max_memory); sizes the worker pool.
+        Per-part peak RSS grows ~3x from round 1 to round 3, so a pool size that
+        is safe early is fatal late -- the gate re-measures per round, but only
+        protects the run if the budget is the job's and not the host's.
     :return: None
     """
     print("Starting TideHunter long analysis with 3 rounds")
@@ -1092,7 +1119,7 @@ def tidehunter_long(fasta, prefix, cpu=4, keep_rounds=False):
         # Run the round
         gff3_list, temp_gff3_file, matching_table = run_tidehunter_round(
             current_fasta, tidehunter_args, chunk_size, overlap,
-            round_num, prefix, cpu, keep_rounds
+            round_num, prefix, cpu, keep_rounds, max_memory=max_memory
         )
 
         temp_gff3_files.append(temp_gff3_file)
@@ -1191,6 +1218,15 @@ def validate_threshold_args(args):
                 F"--superfamily_score={ss} exceeds the practical maximum (~100) "
                 "and will likely prevent all superfamily grouping")
 
+    mm = getattr(args, "max_memory", None)
+    if mm is not None:
+        if mm <= 0:
+            errors.append(F"--max_memory must be > 0 GB; got {mm}")
+        elif mm < 4:
+            warnings.append(
+                F"--max_memory={mm} GB is below one TideHunter part's typical "
+                "peak; pools will run serially")
+
     for w in warnings:
         print(F"WARNING: {w}", file=sys.stderr)
     if errors:
@@ -1239,6 +1275,11 @@ if __name__ == "__main__":
     parser_tidehunter.add_argument(
             "--keep_rounds", action="store_true", required=False, default=False,
             help="Keep intermediate GFF3 files from each round for debugging (only with --long)"
+            )
+    parser_tidehunter.add_argument(
+            "--max_memory", "--max-memory", type=float, default=None,
+            metavar="GB",
+            help=MAX_MEMORY_HELP
             )
     # Clustering
     parser_clustering = subparsers.add_parser(
@@ -1360,6 +1401,11 @@ if __name__ == "__main__":
                   "Default (%(default)s)")
             )
     parser_tarean.add_argument(
+            "--max_memory", "--max-memory", type=float, default=None,
+            metavar="GB",
+            help=MAX_MEMORY_HELP
+            )
+    parser_tarean.add_argument(
             "--kite_rescore_max_period", type=int, default=10000,
             help=("kitehor `rescore --max-period` cap (bp). Peaks above this stay "
                   "NA in rescore output; TideCluster falls back to the top-scored "
@@ -1449,6 +1495,12 @@ if __name__ == "__main__":
     parser_run_all.add_argument(
             "--keep_rounds", action="store_true", required=False, default=False,
             help="Keep intermediate GFF3 files from each round for debugging (only with --long)"
+            )
+
+    parser_run_all.add_argument(
+            "--max_memory", "--max-memory", type=float, default=None,
+            metavar="GB",
+            help=MAX_MEMORY_HELP
             )
 
     parser_run_all.add_argument(
@@ -1620,12 +1672,13 @@ if __name__ == "__main__":
                 keep_rounds = getattr(cmd_args, 'keep_rounds', False)
                 tidehunter_long(
                         cmd_args.fasta, cmd_args.prefix,
-                        cmd_args.cpu, keep_rounds=keep_rounds
+                        cmd_args.cpu, keep_rounds=keep_rounds,
+                        max_memory=cmd_args.max_memory
                         )
             else:
                 tidehunter(
                         cmd_args.fasta, cmd_args.tidehunter_arguments, cmd_args.prefix,
-                        cmd_args.cpu
+                        cmd_args.cpu, max_memory=cmd_args.max_memory
                         )
         elif cmd_args.command == "clustering":
             clustering(
@@ -1649,7 +1702,8 @@ if __name__ == "__main__":
                     cpu=cmd_args.cpu,
                     min_total_length=cmd_args.min_total_length,
                     args=cmd_args,
-                    version=__version__
+                    version=__version__,
+                    max_memory=cmd_args.max_memory
                     )
         elif cmd_args.command == "run_all":
             # Check if --long flag is set for run_all
@@ -1657,12 +1711,13 @@ if __name__ == "__main__":
                 keep_rounds = getattr(cmd_args, 'keep_rounds', False)
                 tidehunter_long(
                         cmd_args.fasta, cmd_args.prefix,
-                        cmd_args.cpu, keep_rounds=keep_rounds
+                        cmd_args.cpu, keep_rounds=keep_rounds,
+                        max_memory=cmd_args.max_memory
                         )
             else:
                 tidehunter(
                         cmd_args.fasta, cmd_args.tidehunter_arguments, cmd_args.prefix,
-                        cmd_args.cpu
+                        cmd_args.cpu, max_memory=cmd_args.max_memory
                         )
             clustering(
                     cmd_args.fasta, cmd_args.prefix,
@@ -1685,7 +1740,8 @@ if __name__ == "__main__":
                     cpu=cmd_args.cpu,
                     min_total_length=cmd_args.min_total_length,
                     args=cmd_args,
-                    version=__version__
+                    version=__version__,
+                    max_memory=cmd_args.max_memory
                     )
         elif cmd_args.command == "rdna":
             _maybe_identify_rdna(cmd_args.prefix, cmd_args.fasta, cmd_args,

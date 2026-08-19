@@ -368,6 +368,8 @@ options:
   --long                Run TideHunter in three rounds with increasing monomer sizes (40-25000 nt)
   --keep_rounds         Keep intermediate GFF3 files from each round for debugging (only with --long)
   -c CPU, --cpu CPU     Number of CPUs to use
+  --max_memory GB, --max-memory GB
+                        Memory limit for this run, in GB (see "Memory limits on clusters and in containers")
 ```
 
 ## Clustering step
@@ -426,6 +428,8 @@ options:
   -c CPU, --cpu CPU     Number of CPUs to use
   -M MIN_TOTAL_LENGTH, --min_total_length MIN_TOTAL_LENGTH
                         Minimum combined length of tandem repeat arrays within a single cluster, required for inclusion in TAREAN analysis. Default (50000)
+  --max_memory GB, --max-memory GB
+                        Memory limit for this run, in GB (see "Memory limits on clusters and in containers")
 
 ```
 
@@ -488,7 +492,58 @@ options:
   -c CPU, --cpu CPU     Number of CPUs to use
   -M MIN_TOTAL_LENGTH, --min_total_length MIN_TOTAL_LENGTH
                         Minimum combined length of tandem repeat arrays within a single cluster, required for inclusion in TAREAN analysis. Default (50000)
+  --max_memory GB, --max-memory GB
+                        Memory limit for this run, in GB (see "Memory limits on clusters and in containers")
 ```
+
+## Memory limits on clusters and in containers
+
+TideCluster sizes two things against a **memory budget**: the pool of
+concurrent TideHunter workers used on split (large) inputs, and the number of
+threads given to each TAREAN job. On a cluster or in a container, declare the
+limit explicitly:
+
+```bash
+# a 128 GB PBS job
+TideCluster.py run_all -c 32 --max_memory 128 --long -f genome.fasta -pr prefix
+```
+
+`--max_memory` is accepted by `tidehunter`, `tarean` and `run_all`, is recorded
+in `<prefix>_cmd_args.json` (so a run's memory assumption is part of its
+provenance), and is the first entry in this resolution chain — the first hit
+wins:
+
+| # | source | unit | covers |
+|---|--------|------|--------|
+| 1 | `--max_memory` | GB | explicit |
+| 2 | `AGENT_MEMORY` | GB | sandbox override |
+| 3 | `PBS_RESC_MEM` | bytes | PBS / Torque, **including inside a container** |
+|   | `SLURM_MEM_PER_NODE` | MB | Slurm |
+|   | `SLURM_MEM_PER_CPU` x `SLURM_CPUS_ON_NODE` | MB | Slurm |
+|   | `LSB_MAX_MEM_RUSAGE` | KB | LSF |
+| 4 | cgroup v2 `memory.max` / v1 `memory.limit_in_bytes` | bytes | bare metal, `docker --memory` |
+| 5 | `/proc/meminfo` `MemAvailable` (x0.8) | KB | last resort |
+
+Whichever source wins is printed next to the pool size, so a run's log says
+what it sized itself against:
+
+```
+TideHunter: 86 parts, pool_size 10 (per-part peak ~9736 MB, budget ~104858 MB from PBS_RESC_MEM, cap 32)
+TAREAN: memory budget ~104858 MB from PBS_RESC_MEM -> at most -n 26 per job (cap 32)
+```
+
+**Why the explicit option matters.** `MemAvailable` is not namespaced by the
+Linux kernel: read from inside a cgroup it reports the *host's* free memory. A
+128 GB job on a 2 TB node therefore sees a ~1.6 TB budget, runs far too many
+TideHunter parts concurrently, and is OOM-killed — typically hours in, during
+round 3 of `--long`, where per-part peak RSS is ~3x round 1. Reading the cgroup
+limit (source 4) covers bare-metal and Docker runs, but not Singularity /
+Apptainer: the cgroup namespace remaps the `/sys/fs/cgroup` paths and the memory
+controller may not be delegated into the container at all. The scheduler
+variables (source 3) *do* cross that boundary, because the host environment is
+passed into the container by default. If TideCluster falls all the way through
+to `MemAvailable` while a scheduler job id is set, it says so on stderr and
+suggests `--max_memory`.
 
 ## Example for full pipeline
 

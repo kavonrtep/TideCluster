@@ -49,4 +49,7 @@ python3 "$ROOT/tests/test_overlap_resolution.py"
 echo "=== unit: self-contained report image vendoring ==="
 python3 "$ROOT/tests/test_vendor_images.py"
 
+echo "=== unit: memory budget resolution (scheduler / cgroup / --max_memory) ==="
+python3 "$ROOT/tests/test_memory_budget.py"
+
 echo "unit tests OK"
