@@ -1,3 +1,36 @@
+## 1.20.1 (2026-08-19)
+- **Superfamily outputs are no longer lost to an over-long dotplot filename
+  (issue #7).** `compare_trc_by_blast.R` named each dotplot after every member
+  TRC id joined together, so a superfamily of roughly 61 or more three-digit
+  members produced a filename past `NAME_MAX` (255 bytes). `png()` could not
+  open the device and the script died on the *first* loop iteration —
+  superfamilies are ordered by decreasing member count, so the largest is always
+  first and the loss was total, never partial. Everything written after the loop
+  went with it: the superfamily CSV, the manifest, and the closing of the HTML
+  page. The report then found no CSV and stated "No TRC superfamilies were
+  identified" for a run that had computed 75 of them, while `run_all` still
+  exited 0.
+  - Dotplots are now named by superfamily rank (`superfamily_001.png`), through
+    a helper that asserts the name stays within `NAME_MAX`. The member list is
+    unchanged in the HTML section and the CSV, so no information is lost.
+  - Output directories written by earlier versions still re-render: the report
+    looks for the new name and falls back to the old `TRCS_*` one.
+  - Dotplot generation is wrapped so that a failed image cannot discard the
+    CSV and manifest; the section renders with a note in place of the picture.
+- **Failed pipeline steps are no longer silently discarded.** No `run_cmd` call
+  site inspected the status it returned, so a dead step left the run going to a
+  report that denied its own missing results. Steps whose failure invalidates
+  the outputs (`kitehor kite-periodicity`, `kitehor rule-classify`,
+  `tarean_report.R`, `compare_trc_by_blast.R`) now abort with a non-zero exit;
+  the presentational `kite_heatmaps.R` warns and continues; failed per-TRC
+  TAREAN jobs are listed on stderr, and a run where every TAREAN job failed
+  aborts. Command failures are reported on stderr with an explicit prefix.
+- **The report distinguishes a failed superfamily analysis from a genuine
+  negative.** The superfamily CSV is always written (header-only when nothing
+  was found), so an absent CSV means the step failed. The report now says
+  "Superfamily analysis did not complete" rather than claiming no superfamilies
+  exist.
+
 ## 1.20.0 (2026-08-19)
 - **`--max_memory <GB>` and a memory budget that reflects the job's limit, not
   the host's (issue #6).** Under a batch scheduler or in a container the memory
