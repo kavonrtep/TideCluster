@@ -1,3 +1,27 @@
+## 1.20.2 (2026-08-21)
+- **Comparative analysis now honours `tidecluster_prefix` for every input.**
+  `tc_comparative_analysis.R` resolved four of its six per-run inputs from the
+  input table's `tidecluster_prefix` column but hardcoded a `tc_` prefix for the
+  two consensus FASTAs, so any run made with a different `-pr` aborted at
+  `readDNAStringSet`. Both paths now use the row's prefix like the others, and
+  samples may mix prefixes in one input table. Output for the historic all-`tc`
+  case is byte-identical.
+- **The comparative-analysis input contract is documented.** The README now lists
+  all six files read from each TideCluster run — required vs optional, which
+  pipeline step writes each, what the analysis uses it for — plus the per-file
+  behaviour when one is missing, which is not uniform (the consensus FASTAs abort
+  the run; a missing clustering GFF3 only warns and leaves that sample's
+  `_length` columns meaningless; the annotation and SSRS tables degrade to empty
+  columns). It also documents the `sample_code` constraints.
+  - Note in particular that `{prefix}_consensus/consensus_sequences_all.fasta` is
+    written by the **annotation** step, so **every run used as comparative input
+    must be made with `run_all -l <library>`**. A `run_all` without a library
+    produces a directory that looks complete and aborts the comparative analysis
+    on contact. This was previously undocumented.
+- Adds `docs/output_cleanup_spec.md` (specification for an optional `--cleanup`
+  flag; not implemented) and `docs/carp_cleanup_alignment_request.md` (the
+  corresponding request to CARP, adopted upstream in CARP `e9e8494`).
+
 ## 1.20.1 (2026-08-19)
 - **Superfamily outputs are no longer lost to an over-long dotplot filename
   (issue #7).** `compare_trc_by_blast.R` named each dotplot after every member
