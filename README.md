@@ -758,26 +758,60 @@ The script performs several key functions:
 
 ### Input Requirements
 
-The script requires a tab-delimited input configuration file with the following columns:
+The script takes a tab-delimited configuration file listing the TideCluster runs to
+compare, one row per sample, with three required columns:
 
-- `input_dir`: Path to the TideCluster output directory containing TRC data
-- `sample_code`: Unique identifier for each sample (used as column prefixes in output)
-- `tidecluster_prefix`: Prefix used for TideCluster output files (typically "tc")
+- `input_dir` — path to a TideCluster output directory, i.e. the directory a
+  `run_all` (or `clustering` + `tarean`) wrote its files into.
+- `sample_code` — short identifier for the sample. It becomes the column prefix in
+  every output table (`<sample_code>_length`, `<sample_code>_annot`, …) and the
+  sequence-name prefix in the shared search pool, so it must be **unique across
+  rows** and must not contain a colon (`:` separates the sample code from the TRC
+  id internally).
+- `tidecluster_prefix` — the `-pr/--prefix` value that TideCluster was run with,
+  i.e. the leading part of the file names inside `input_dir`. Every input path is
+  resolved with it, so samples may use different prefixes.
 
 **Example input file:**
 ```tsv
-input_dir	                         sample_code	tidecluster_prefix
-/path/to/sample1/tidecluster_output	 Sample1	    tc
-/path/to/sample2/tidecluster_output	 Sample2	    tc
-/path/to/sample3/tidecluster_output	 Sample3	    tc
+input_dir	sample_code	tidecluster_prefix
+/path/to/sample1/tidecluster_output	Sample1	tc
+/path/to/sample2/tidecluster_output	Sample2	tc
+/path/to/sample3/tidecluster_output	Sample3	pea
 ```
 
-Each input directory should contain the standard TideCluster output files:
-- `{prefix}_consensus_dimer_library.fasta`: Consensus sequences for clustering
-- `{prefix}_consensus/consensus_sequences_all.fasta`: All consensus sequences
-- `{prefix}_clustering.gff3`: TRC clustering results
-- `{prefix}_annotation.tsv`: Annotation data (optional)
-- `{prefix}_tarean/SSRS_summary.csv`: SSR data (optional)
+#### Files read from each TideCluster run
+
+These are the only files the comparative analysis reads. All paths are relative to
+that row's `input_dir`, and `{prefix}` is that row's `tidecluster_prefix`. Nothing
+is written back into the TideCluster run directories.
+
+| File | Required | Produced by | Used for |
+|---|---|---|---|
+| `{prefix}_consensus_dimer_library.fasta` | **yes** | TAREAN step | The TAREAN consensus dimer of each TRC, used as-is — the first of the two sequence pools in the all-vs-all MMseqs2 search. Contains only TRCs at or above `-M/--min_total_length`. |
+| `{prefix}_consensus/consensus_sequences_all.fasta` | **yes** | **annotation step** | Every per-TRC TideHunter dimer consensus (the concatenation of `{prefix}_consensus/TRC_*_dimers.fasta`), multiplied ×2 before the search. This is what lets TRCs *below* the TAREAN threshold still join a satellite family. |
+| `{prefix}_clustering.gff3` | **yes** | clustering step | Total array length per TRC (the `<sample_code>_length` columns), and the coverage cross-check that every TRC of every sample appears in the output. |
+| `{prefix}_annotation.gff3` | falls back to `{prefix}_clustering.gff3` | annotation step | Source for the per-sample `gff3/<sample_code>_tc_annotated.gff3` export, which adds the satellite-family assignment to each region. |
+| `{prefix}_annotation.tsv` | optional | annotation step | Similarity-based annotation per TRC → the `_annot` / `_prevalent_annot` columns and the annotation statistics report. |
+| `{prefix}_tarean/SSRS_summary.csv` | optional | TAREAN step | Marks which TRCs are SSRs, so they are grouped by motif rather than by sequence similarity. |
+
+**Every input run therefore needs the full pipeline — clustering, annotation and
+TAREAN — i.e. `run_all` *with* a `-l/--library`.** The annotation step is not
+optional here despite only two of the six files being annotation *reports*:
+`consensus_sequences_all.fasta` is assembled by that step, and without it the
+comparative analysis cannot start. A `run_all` without `-l` produces a directory
+that looks complete but is missing that one file.
+
+**What happens when a file is missing** — the behaviour differs per file, so check
+the log rather than assuming a clean failure:
+
+- either consensus FASTA: the run **aborts** with an R error naming the missing path.
+- `{prefix}_clustering.gff3`: a warning; that sample's TRC lengths are empty and its
+  `_length` columns are meaningless — the analysis otherwise continues.
+- `{prefix}_annotation.gff3` *and* `{prefix}_clustering.gff3` both missing: a warning
+  and that sample gets **no** `gff3/` export.
+- `{prefix}_annotation.tsv` / `SSRS_summary.csv`: a message; the corresponding columns
+  stay empty and no SSR grouping is done.
 
 ### Usage
 

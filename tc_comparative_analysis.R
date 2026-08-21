@@ -809,12 +809,16 @@ make_multimer <- function(seq_set, k = 2){
   return(seq_set_multy)
 }
 # read and concatenate all input files from input_tc_dirs
-get_seq_files <- function(input_dirs, prefix){
-  # TODO - handle tc_ prefixes
-  tarean_consensus_path <- "tc_consensus_dimer_library.fasta"  # take first TRC
-  consensus_groups_path <- "tc_consensus/consensus_sequences_all.fasta"
-  fasta_tc <- paste0(input_dirs, "/", tarean_consensus_path)
-  fasta_th <- paste0(input_dirs, "/", consensus_groups_path)
+get_seq_files <- function(input_dirs, prefix, tc_code = "tc"){
+  # Both file names are built from the run's own `tidecluster_prefix`
+  # (the tc_code column of the input table), exactly like every other path in
+  # this script. They used to be hardcoded to "tc_", so a run whose prefix was
+  # anything else failed here at readDNAStringSet -- while the clustering GFF3,
+  # annotation TSV and SSRS table were all resolved with the real prefix.
+  tarean_consensus_path <- paste0(tc_code, "_consensus_dimer_library.fasta")
+  consensus_groups_path <- paste0(tc_code, "_consensus/consensus_sequences_all.fasta")
+  fasta_tc <- file.path(input_dirs, tarean_consensus_path)
+  fasta_th <- file.path(input_dirs, consensus_groups_path)
   s_tc <- sapply(fasta_tc, readDNAStringSet)
   s_th <- sapply(fasta_th, readDNAStringSet)
   
@@ -1364,7 +1368,7 @@ process_trc_analysis <- function(input_tc_dirs, prefix,tc_code = "tc",
 
   # Get sequences and perform clustering
   message("Loading sequences...")
-  all_seq <- get_seq_files(input_tc_dirs, prefix)
+  all_seq <- get_seq_files(input_tc_dirs, prefix, tc_code)
 
   message("Clustering sequences...")
   grps <- cluster_trc_sequences(all_seq$tc, all_seq$th, mmseqs2_path = mmseqs2_path,
