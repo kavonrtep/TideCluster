@@ -819,6 +819,28 @@ get_seq_files <- function(input_dirs, prefix, tc_code = "tc"){
   consensus_groups_path <- paste0(tc_code, "_consensus/consensus_sequences_all.fasta")
   fasta_tc <- file.path(input_dirs, tarean_consensus_path)
   fasta_th <- file.path(input_dirs, consensus_groups_path)
+
+  # consensus_sequences_all.fasta is written by the clustering step from
+  # TideCluster 1.21.1 on. Runs made by earlier versions have it only if the
+  # ANNOTATION step ran, i.e. only if TideCluster was given -l/--library --
+  # so an otherwise complete archived run could not be compared at all. Its
+  # content is just the per-TRC TRC_*_dimers.fasta concatenated, and those come
+  # from clustering, so rebuild the pool here rather than refuse the run.
+  for (i in seq_along(fasta_th)) {
+    if (!file.exists(fasta_th[i])) {
+      parts <- Sys.glob(file.path(dirname(fasta_th[i]), "TRC_*_dimers.fasta"))
+      if (length(parts) == 0) next            # nothing to rebuild from
+      # natural TRC order (TRC_2 before TRC_10), matching the writer
+      idx <- suppressWarnings(as.numeric(sub(".*TRC_(\\d+)_dimers\\.fasta$", "\\1", parts)))
+      parts <- parts[order(idx, parts)]
+      message("consensus_sequences_all.fasta not found in ",
+              dirname(fasta_th[i]), "; rebuilding the pool from ",
+              length(parts), " per-TRC dimer file(s)")
+      rebuilt <- tempfile(pattern = "consensus_sequences_all_", fileext = ".fasta")
+      writeXStringSet(do.call(c, lapply(parts, readDNAStringSet)), rebuilt)
+      fasta_th[i] <- rebuilt
+    }
+  }
   s_tc <- sapply(fasta_tc, readDNAStringSet)
   s_th <- sapply(fasta_th, readDNAStringSet)
   
@@ -915,6 +937,21 @@ cluster_ssrs_sequences <- function(data_list, min_percentage = 10) {
 
   # Get all sample names
   sample_names <- names(data_list)
+
+  # No sample contains an SSR TRC. Everything below assigns scalars into
+  # result_df, which would have zero rows -- `[[<-.data.frame` then fails with
+  # "replacement has 1 row, data has 0" and takes the whole run down. Return
+  # the correctly shaped empty frame instead; downstream code treats it as
+  # "no SSR groups", which is what it is.
+  if (length(all_patterns) == 0) {
+    empty_df <- data.frame(cluster_index = integer(0), stringsAsFactors = FALSE)
+    for (sample_name in sample_names) {
+      empty_df[[paste0(sample_name, "_trc_id")]] <- character(0)
+      empty_df[[paste0(sample_name, "_ssrs_type")]] <- character(0)
+    }
+    empty_df[["major_pattern"]] <- character(0)
+    return(empty_df)
+  }
 
   # Create result dataframe
   result_df <- data.frame(

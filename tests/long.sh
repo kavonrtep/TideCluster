@@ -26,6 +26,12 @@ echo "=== run_all on $FASTA ==="
 [ -s "$OUT/long_clustering.gff3" ] || { echo "FAIL: no clustering.gff3"; exit 1; }
 [ -s "$OUT/long_index.html" ]      || { echo "FAIL: no index.html"; exit 1; }
 
+# The comparative-analysis pool is written by CLUSTERING, so it must be here
+# even though this run has no -l/--library (it used to be an annotation-step
+# artefact, which left library-free runs uncomparable).
+[ -s "$OUT/long_consensus/consensus_sequences_all.fasta" ] \
+  || { echo "FAIL: long_consensus/consensus_sequences_all.fasta missing on a library-free run"; exit 1; }
+
 NCLUST=$(grep -c 'Name=TRC_' "$OUT/long_clustering.gff3" || true)
 [ "${NCLUST:-0}" -ge 1 ] || { echo "FAIL: no TRC_ clusters in long_clustering.gff3"; exit 1; }
 

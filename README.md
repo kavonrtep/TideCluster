@@ -583,6 +583,7 @@ consensus depend on.
 | `prefix_tidehunter_short.gff3` | Tandem repeats shorter than the clustering minimum length. | kept |
 | `prefix_clustering.gff3_1.gff3` | Intermediate: clusters from `mmseqs2`, before BLASTN. | **removed** |
 | `prefix_consensus/` | One FASTA per TRC with all TideHunter consensus sequences (`TRC_x.fasta`), plus their dimers (`TRC_x_dimers.fasta`). | kept |
+| `prefix_consensus/consensus_sequences_all.fasta` | All the per-TRC dimers concatenated, in TRC order. Consumed by the annotation step and required by the comparative analysis. | kept |
 | `prefix_clustering_split_files/` | One GFF3 per TRC. | kept |
 | `prefix_seqid_lengths.tsv` | Length of every input sequence (used by the report's ideograms). | kept |
 | `prefix_cmd_args.json` | Every argument the run was given — the run's provenance. | kept |
@@ -595,7 +596,6 @@ consensus depend on.
 | `prefix_annotation.tsv` | Annotation summarised per TRC. | kept |
 | `prefix_annotation_split_files/` | One annotated GFF3 per TRC. | kept |
 | `prefix_tidehunter_short_annotation.gff3` | Annotations of the short regions excluded from clustering. | kept |
-| `prefix_consensus/consensus_sequences_all.fasta` | All per-TRC dimer consensus sequences concatenated. Required by the comparative analysis. | kept |
 | `prefix_consensus/*_renamed.fasta*` | RepeatMasker working files (`.cat`, `.masked`, `.tbl`). | **removed** |
 
 ### TAREAN / KITE step
@@ -829,23 +829,31 @@ is written back into the TideCluster run directories.
 | File | Required | Produced by | Used for |
 |---|---|---|---|
 | `{prefix}_consensus_dimer_library.fasta` | **yes** | TAREAN step | The TAREAN consensus dimer of each TRC, used as-is — the first of the two sequence pools in the all-vs-all MMseqs2 search. Contains only TRCs at or above `-M/--min_total_length`. |
-| `{prefix}_consensus/consensus_sequences_all.fasta` | **yes** | **annotation step** | Every per-TRC TideHunter dimer consensus (the concatenation of `{prefix}_consensus/TRC_*_dimers.fasta`), multiplied ×2 before the search. This is what lets TRCs *below* the TAREAN threshold still join a satellite family. |
+| `{prefix}_consensus/consensus_sequences_all.fasta` | **yes** | clustering step | Every per-TRC TideHunter dimer consensus (the concatenation of `{prefix}_consensus/TRC_*_dimers.fasta`), multiplied ×2 before the search. This is what lets TRCs *below* the TAREAN threshold still join a satellite family. |
 | `{prefix}_clustering.gff3` | **yes** | clustering step | Total array length per TRC (the `<sample_code>_length` columns), and the coverage cross-check that every TRC of every sample appears in the output. |
 | `{prefix}_annotation.gff3` | falls back to `{prefix}_clustering.gff3` | annotation step | Source for the per-sample `gff3/<sample_code>_tc_annotated.gff3` export, which adds the satellite-family assignment to each region. |
 | `{prefix}_annotation.tsv` | optional | annotation step | Similarity-based annotation per TRC → the `_annot` / `_prevalent_annot` columns and the annotation statistics report. |
 | `{prefix}_tarean/SSRS_summary.csv` | optional | TAREAN step | Marks which TRCs are SSRs, so they are grouped by motif rather than by sequence similarity. |
 
-**Every input run therefore needs the full pipeline — clustering, annotation and
-TAREAN — i.e. `run_all` *with* a `-l/--library`.** The annotation step is not
-optional here despite only two of the six files being annotation *reports*:
-`consensus_sequences_all.fasta` is assembled by that step, and without it the
-comparative analysis cannot start. A `run_all` without `-l` produces a directory
-that looks complete but is missing that one file.
+**Every input run needs to have reached the clustering and TAREAN steps.** The
+annotation step is optional: without a `-l/--library` you simply lose the two
+annotation files, so the `_annot` columns stay empty and the rest of the analysis
+is unaffected.
+
+> **Runs made before TideCluster 1.21.1** assembled
+> `consensus_sequences_all.fasta` during the *annotation* step, so one made
+> without a library does not have it. The comparative analysis rebuilds the pool
+> from that run's `{prefix}_consensus/TRC_*_dimers.fasta` and says so in the log,
+> which means such archived runs can be compared without re-running them.
 
 **What happens when a file is missing** — the behaviour differs per file, so check
 the log rather than assuming a clean failure:
 
-- either consensus FASTA: the run **aborts** with an R error naming the missing path.
+- `{prefix}_consensus_dimer_library.fasta`: the run **aborts** with an R error
+  naming the missing path.
+- `{prefix}_consensus/consensus_sequences_all.fasta`: rebuilt from that run's
+  `TRC_*_dimers.fasta` (a log line says so). If those are missing too, the run
+  **aborts**.
 - `{prefix}_clustering.gff3`: a warning; that sample's TRC lengths are empty and its
   `_length` columns are meaningless — the analysis otherwise continues.
 - `{prefix}_annotation.gff3` *and* `{prefix}_clustering.gff3` both missing: a warning

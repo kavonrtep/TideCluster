@@ -26,6 +26,7 @@ NCPU="${NCPU:-4}"
 # before the fixture-dependent determinism test below (which may SKIP).
 echo "=== comparative SSR-partition unit test ==="
 Rscript "$ROOT/tests/test_ssr_partition.R"
+Rscript "$ROOT/tests/test_ssr_empty.R"
 
 FIXTURE="${TC_COMPARATIVE_FIXTURE:-}"
 if [ -z "$FIXTURE" ]; then

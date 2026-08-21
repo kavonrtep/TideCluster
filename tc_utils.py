@@ -3111,6 +3111,45 @@ def cleanup_run_directory(prefix, dry_run=False):
     return removed, freed
 
 
+def write_consensus_sequences_all(consensus_dir, force=False):
+    """Concatenate ``<consensus_dir>/TRC_*_dimers.fasta`` into
+    ``consensus_sequences_all.fasta``; return its path, or ``None`` if there is
+    nothing to concatenate.
+
+    Written by the CLUSTERING step, which is what produces the per-TRC dimer
+    files. It used to be assembled inside ``annotation()`` because its first
+    consumer was RepeatMasker, which meant a run made without ``-l/--library``
+    silently lacked it -- and it is a required input of
+    ``tc_comparative_analysis.R``, so such a run could not be compared against
+    any other. Building it where its inputs are produced makes every run
+    comparative-ready.
+
+    Parts are concatenated in **natural TRC order** (TRC_2 before TRC_10) rather
+    than ``glob`` order, which is filesystem-dependent and made the file's byte
+    content vary between machines for identical input.
+
+    ``force=False`` leaves an existing file alone, so re-running ``annotation``
+    over an older output directory does not rewrite what is already there.
+    """
+    out_path = os.path.join(consensus_dir, "consensus_sequences_all.fasta")
+    if os.path.exists(out_path) and not force:
+        return out_path
+
+    def _trc_order(path):
+        m = re.search(r"TRC_(\d+)_dimers\.fasta$", os.path.basename(path))
+        return (int(m.group(1)) if m else 10 ** 9, path)
+
+    parts = sorted(glob.glob(os.path.join(consensus_dir, "TRC_*_dimers.fasta")),
+                   key=_trc_order)
+    if not parts:
+        return None
+    with open(out_path, "w") as fout:
+        for part in parts:
+            with open(part) as fin:
+                shutil.copyfileobj(fin, fout)
+    return out_path
+
+
 def run_cmd(cmd):
     """
     runs shell command and returns status

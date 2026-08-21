@@ -58,4 +58,7 @@ python3 "$ROOT/tests/test_superfamily_outputs.py"
 echo "=== unit: --cleanup purge set + the four guarantees ==="
 python3 "$ROOT/tests/test_cleanup.py"
 
+echo "=== unit: consensus_sequences_all pool (written by clustering) ==="
+python3 "$ROOT/tests/test_consensus_pool.py"
+
 echo "unit tests OK"

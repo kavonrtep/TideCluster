@@ -728,13 +728,9 @@ def annotation(prefix, library, gff=None, consensus_dir=None, cpu=1):
     if len(consensus_files) > 0:
         print(F"Annotating based on consensus sequences in {consensus_dir}")
         # conncatenate all consensus sequences to one file
-        consensus_files_concat = consensus_dir + "/consensus_sequences_all.fasta"
-        if not os.path.exists(consensus_files_concat):
-            with open(consensus_files_concat, "w") as f:
-                for consensus_file in consensus_files:
-                    with open(consensus_file, "r") as f_in:
-                        for line in f_in:
-                            f.write(line)
+        # Normally already written by clustering(); this covers `annotation`
+        # run standalone over an output directory from an older version.
+        consensus_files_concat = tc.write_consensus_sequences_all(consensus_dir)
         seq_lengths = tc.read_fasta_sequence_size(consensus_files_concat)
         
         # run RepeatMasker with automatic sequence name renaming
@@ -958,6 +954,12 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4,
     consensus_dir = prefix + "_consensus"
     tc.save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer )   # this is used
     # for comparative analysis later
+    # The concatenated pool is a clustering artefact -- it is exactly these
+    # dimer files joined. It used to be built inside annotation() (its first
+    # consumer was RepeatMasker), which left runs made without -l/--library
+    # unable to feed tc_comparative_analysis.R at all. force=True because the
+    # dimer files were just (re)written above.
+    tc.write_consensus_sequences_all(consensus_dir, force=True)
 
     # consensus_dir = prefix + "_consensus_1"  # this was just for debugging
     # tc.save_consensus_files(consensus_dir, cons_cls1, cons_cls_dimer1_)
