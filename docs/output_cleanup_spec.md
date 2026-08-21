@@ -84,14 +84,16 @@ The 204 MB residual, largest first:
 | `<prefix>_tarean/*/{report.html,img/,*.csv}` | 56 MB | G3 (re-render re-vendors from here) and G1 for the pre-vendored copies |
 | `<prefix>_tidehunter*.gff3` | 18 MB | G4 (`_tidehunter.gff3`); the `_short*` variants are documented outputs |
 | `<prefix>_consensus/consensus_sequences_all.fasta`, `TRC_*_dimers.fasta` | 6 MB | G2 |
-| `<prefix>_kite/kitehor.*.tsv`, `monomer_size_*.csv`, `profile_plots/` | 7 MB | G3; the small kitehor TSVs also keep `tc_utils.build_monomer_size_csv` re-runnable (`tools/tc_regen.sh`) |
+| `<prefix>_kite/kitehor.*.tsv`, `monomer_size_*.csv`, `profile_plots/` | 7 MB | G3; the small kitehor TSVs also keep `tc_utils.build_monomer_size_csv` re-runnable (`tools/tc_regen.sh`). **`monomer_size_top3_estimats.csv` is additionally read by CARP** (`make_repeat_report.R:646`, `make_summary_plots.R:192`) to label families with their monomer length — it must not be dropped from the keep set later. |
 | top-level GFF3/TSV/CSV/JSON side-cars | small | G1–G4 |
 
 Two notes worth recording:
 
 - **`<prefix>_tarean/fasta/` is 39 % of the residual and is kept for G4 alone.**
-  Dropping G4 would take the run to ~116 MB (≈90 % freed). G4 was chosen
-  deliberately; this is the lever if that is ever revisited.
+  Dropping G4 would take the run to ~116 MB (≈90 % freed) at this scale. Settled:
+  CARP measured the same trade on a 94 Gbp run and it is 0.61 GB of 44.59 GB
+  (1.4 %) there — the lever shrinks as the genome grows, because the residual is
+  dominated by array FASTAs only at small scale. G4 stays in the contract.
 - **Per-TRC TAREAN PNGs exist twice** — in `<prefix>_tarean/*/img/` (~31 MB here)
   and vendored into `<prefix>_report/img/` since 1.17.0. Both are kept: the
   vendored copies serve G1, the originals serve G3, since a re-render re-vendors
@@ -160,6 +162,30 @@ side-car file, which would be at odds with the goal of fewer files.
 Cheap, and it answers "why is this directory smaller than that one?" months
 later. Proposed: yes.
 
+## Relationship to CARP (settled 2026-08-21)
+
+CARP adopted this purge set in `e9e8494` as its own glob list (route (a) of the
+companion FR), and **intends to keep maintaining it CARP-side even once
+`--cleanup` ships** — their cleanup is one config key covering DANTE, DANTE_LTR,
+DANTE_TIR, RepeatMasker and mmseqs scratch in the same pass, and carving the
+TideCluster part out into a per-tool flag would make that contract harder to
+explain, not easier.
+
+Two consequences for this spec:
+
+- **No double-purge risk.** CARP will not pass `--cleanup`, so the "please avoid
+  applying both" warning in the FR is moot.
+- **Two independent definitions of "TideCluster scratch" now exist and can
+  drift.** Our tests should therefore assert the *capability contract* (G1–G4),
+  not a file list: a layout change then fails loudly on both sides rather than
+  silently widening one purge set. CARP's own test asserts the same property from
+  their side ("maximal deleted a TideCluster capability file: …").
+
+Their measurement at genome scale, for calibration: on a 94 Gbp assembly the same
+set frees **90.2 %** of the three trees (40.23 GB of 44.59 GB), with
+`monomers.RData` + `ggmin.RData` alone accounting for 62 % — versus 82.3 % and
+14.6 % on the *Solanum* run used here. The trade improves with assembly size.
+
 ## Testing
 
 `tests/unit.sh` gets one fixture-driven test that builds a miniature run
@@ -178,7 +204,9 @@ directory, applies the purge set, and asserts each guarantee:
 
 Plus a purge-set test proper: that the patterns match what they should on a
 realistic tree and, specifically, that **`<prefix>_tarean/fasta/` is not matched**
-by P4 — the one glob that could plausibly eat a kept path.
+by P4 — the one glob that could plausibly eat a kept path. CARP hit exactly this
+trap while implementing the same set (the natural `*_tarean/*/TRC_*.fasta` matches
+both copies) and guards it with a test; ours must too.
 
 `tests/long.sh` gains a `run_all --cleanup` variant asserting the same four
 guarantees end to end on a real (if small) run.

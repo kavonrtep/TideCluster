@@ -4,6 +4,98 @@
 **TideCluster version this is written against:** 1.20.1
 **Related:** `docs/V6_carp_113_cleanup.md` (the 1.1.3 / 1.1.4 cleanup validation and FR-1/FR-2/FR-3)
 
+## Outcome — ADOPTED (CARP `e9e8494`, 2026-08-21)
+
+CARP took route **(a)**: `maximal` now deletes the disposable files *inside*
+`TideCluster_{tarean,kite,consensus}/` instead of the three trees. Their
+measurements on a live 94 Gbp run (*drVisAlbu1.1*, 5,096 sequences) came out
+better than ours at tomato scale:
+
+| | this document (*Solanum*, 1.2 GB run) | CARP (*drVisAlbu1.1*, 94 Gbp) |
+|---|---|---|
+| freed | 82.3 % of the run | **90.2 %** of the three trees (40.23 GB of 44.59 GB, 3,567 items) |
+| dominant item | `kitehor.periodogram` (38.7 %) | `monomers.RData` + `ggmin.RData` (**62 %** of the trees, 27.8 GB) |
+
+The direction is consistent with what we measure: `monomers.RData` already
+outweighs `ggmin.RData` 4:1 on the *Solanum* run (135 MB vs 32 MB); at genome
+scale the ratio is ~9:1 and the pair dominates everything else. The bigger the
+assembly, the better this trade — which is the opposite of what one might fear.
+
+**They independently hit the glob trap we flagged.** `TideCluster_tarean/*/TRC_*.fasta`
+matches both the disposable per-TRC copy and the `fasta/` original that the whole
+change exists to preserve; they anchor on `*_tarean/TRC_*.fasta` and assert it in
+a test. Our P4 is anchored the same way and our static validation confirms it —
+see `docs/output_cleanup_spec.md`.
+
+### Their answers to the open questions
+
+**Q2 — yes, one CARP dependency lives inside the trees.** `make_repeat_report.R:646`
+and `make_summary_plots.R:192` read
+`TideCluster_kite/monomer_size_top3_estimats.csv` to label tandem families with
+their monomer length (`TRC_7 (172 bp)`). Under the old tree-level purge this
+degraded silently — cleanup runs after the report, so a single run looked fine,
+but re-rendering from an archived run dropped every `(bp)` label. The file is in
+our keep set already (G3/G4 both need it); it is now recorded there as a CARP
+dependency too, so it cannot be dropped later by accident.
+
+**Q3 — no.** Dropping `tarean/fasta/` as well would add 0.61 GB of 44.59 GB
+(1.4 %) on their run. Not worth losing per-array consensus for. That settles the
+"biggest remaining lever" note in the spec: the lever is real at tomato scale
+(39 % of the residual) but negligible at genome scale, so per-TRA consensus stays
+in the contract.
+
+**(a) vs (b) — they will keep doing it CARP-side even after `--cleanup` ships.**
+Their reasoning is sound: CARP's cleanup is one post-run step the user controls
+through one config key, covering DANTE / DANTE_LTR / DANTE_TIR / RepeatMasker /
+mmseqs scratch in the same pass, and splitting the TideCluster part into a flag on
+one tool would make the contract harder to explain. The mitigation for "a list of
+paths CARP does not own" is that the globs are narrow, individually justified, and
+covered by a test that fails loudly if our layout moves.
+
+*Consequence for us:* two independent definitions of "TideCluster scratch" will
+exist and can drift apart. Our test should therefore assert the capability
+contract rather than a file list, so a layout change fails on both sides. It also
+settles the "please avoid applying both" warning below — CARP will not pass
+`--cleanup`, so there is no double-purge risk.
+
+### Their correction on argument 1 (comparative analysis) — valid, and now stale
+
+They are right that argument 1 did not apply to CARP, for two reasons:
+
+**a) Three of the six comparative inputs are never written on a CARP run.**
+`TideCluster_annotation.gff3`, `TideCluster_annotation.tsv` and
+`TideCluster_consensus/consensus_sequences_all.fasta` all come from the annotation
+step, which `run_all` runs only `if cmd_args.library:`. CARP passes `-l` only when
+the optional `tandem_repeat_library` config key is set. Confirmed on our side —
+this is the same finding that made us document "comparative analysis needs
+`run_all` **with** a library" in the README.
+
+**b) `get_seq_files()` hardcoded a `tc_` prefix**, so the two `readDNAStringSet`
+calls failed on any `TideCluster_*`-named directory regardless of cleanup. Correct
+for 1.20.1.
+
+**(b) is fixed** — commit `354af1f`, unreleased at the time of their reply. Both
+consensus FASTA paths now resolve from the row's `tidecluster_prefix` like the
+other four. Verified against a CARP-shaped fixture (`input_dir =
+TideCluster/run-000170`, `tidecluster_prefix = TideCluster`): 1.20.1 dies with
+`cannot open file .../run-000170/tc_consensus_dimer_library.fasta`; with the fix
+the run completes and writes both samples' `gff3/` exports. Every other `tc_`
+literal left in the script is a default argument value that the real call path
+always overrides.
+
+So after that release, comparative analysis **will** run on CARP output — provided
+CARP was configured with `tandem_repeat_library`, which remains their (a).
+
+One small clarification for anyone reading their reply later: the ignored variable
+was `prefix`, which carries the input table's `sample_code`, while lines 1361-1363
+build their paths from `tc_code` (the `tidecluster_prefix` column). The diagnosis
+is right — the paths ignored the TideCluster prefix — but the two columns are
+different things, and `sample_code` is not what those paths should have used.
+
+---
+
+*Original request follows.*
+
 ## Summary
 
 CARP's `cleanup_intermediates: maximal` deletes the TideCluster scratch trees
