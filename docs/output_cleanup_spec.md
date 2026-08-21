@@ -214,13 +214,16 @@ both copies) and guards it with a test; ours must too.
 `tests/long.sh` gains a `run_all --cleanup` variant asserting the same four
 guarantees end to end on a real (if small) run.
 
-**Fixture note.** The bundled `long`/`short` fixtures produce no TAREAN output
-(`n_trcs_above_threshold: 0`), so they cannot exercise most of the purge set. The
-G2/G3/G4 checks need a directory with real per-TRC TAREAN dirs; a two-sample
-comparative fixture derived from `test_data/Solanum_lycopersicum` was built
-during this analysis and works (see the determinism run in commit `354af1f`).
-Whether to commit it under `tests/data/` is an open question — it also makes
-`tests.sh determinism` non-skipping, which it has been since issue #4.
+**Fixture note.** The bundled `long`/`short` fixtures produce no TAREAN output at
+the default `-M` (`n_trcs_above_threshold: 0`), so the end-to-end gate passes
+`-M 1000`, and `-l <library>` as well because `consensus_sequences_all.fasta` and
+the RepeatMasker leftovers only exist on an annotated run.
+
+*Resolved:* a trimmed two-sample comparative fixture is committed under
+`tests/data/comparative` (576 KB), so `tests.sh determinism` runs instead of
+skipping. Its README is explicit that it guards the determinism machinery but
+does **not** reproduce issue #4's original non-determinism — the source dataset
+is low-connectivity, so the prefilter has almost no cross-TRC edges to drop.
 
 ## Documentation to update alongside
 

@@ -9,7 +9,9 @@
 # Needs a multi-sample comparative input (each sample a TideCluster
 # output dir with tc_clustering.gff3). Resolution order:
 #   1. $TC_COMPARATIVE_FIXTURE (env override)
-#   2. tests/data/comparative   (committed fixture, if added)
+#   2. tests/data/comparative   (committed fixture -- see its README for what
+#      it does and does NOT prove; notably it does not reproduce issue #4's
+#      original non-determinism, only guards the machinery that fixed it)
 #   3. test_data/analysis_1.10.5 (bundled local data, untracked)
 # If none is present the test SKIPs (exit 0) so CI without the fixture
 # does not fail.

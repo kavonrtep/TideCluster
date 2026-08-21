@@ -1,0 +1,637 @@
+##gff-version 3
+chr1	TideCluster	tandem_repeat	1	359451	1	.	.	Name=TRC_1;repeat_type=TR
+chr1	TideCluster	tandem_repeat	1044572	1052202	1	.	.	Name=TRC_1;repeat_type=TR
+chr1	TideCluster	tandem_repeat	1280981	1289173	1	.	.	Name=TRC_1;repeat_type=TR
+chr1	TideCluster	tandem_repeat	2622477	2629348	1	.	.	Name=TRC_1;repeat_type=TR
+chr1	TideCluster	tandem_repeat	2932555	2938957	1	.	.	Name=TRC_1;repeat_type=TR
+chr1	TideCluster	tandem_repeat	3756096	3811285	1	.	.	Name=TRC_1;repeat_type=TR
+chr1	TideCluster	tandem_repeat	4296207	4309378	1	.	.	Name=TRC_1;repeat_type=TR
+chr1	TideCluster	tandem_repeat	17976252	17989244	1	.	.	Name=TRC_1;repeat_type=TR
+chr1	TideCluster	tandem_repeat	76277189	76292785	1	.	.	Name=TRC_1;repeat_type=TR
+chr1	TideCluster	tandem_repeat	78861818	78881703	1	.	.	Name=TRC_1;repeat_type=TR
+chr1	TideCluster	tandem_repeat	94661719	94676460	1	.	.	Name=TRC_1;repeat_type=TR
+chr1	TideCluster	tandem_repeat	905349	918099	1	.	.	Name=TRC_11;repeat_type=TR
+chr1	TideCluster	tandem_repeat	1044453	1052437	1	.	.	Name=TRC_11;repeat_type=TR
+chr1	TideCluster	tandem_repeat	1508963	1514476	1	.	.	Name=TRC_11;repeat_type=TR
+chr1	TideCluster	tandem_repeat	17837065	17843104	1	.	.	Name=TRC_68;repeat_type=TR
+chr1	TideCluster	tandem_repeat	36272564	36280175	1	.	.	Name=TRC_6;repeat_type=TR
+chr1	TideCluster	tandem_repeat	36309823	36328030	1	.	.	Name=TRC_6;repeat_type=TR
+chr1	TideCluster	tandem_repeat	36332944	36457906	1	.	.	Name=TRC_6;repeat_type=TR
+chr1	TideCluster	tandem_repeat	43841980	43947458	1	.	.	Name=TRC_6;repeat_type=TR
+chr1	TideCluster	tandem_repeat	43834645	43841876	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr1	TideCluster	tandem_repeat	47282711	47299159	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr1	TideCluster	tandem_repeat	47315322	47320611	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr1	TideCluster	tandem_repeat	94650119	94661611	1	.	.	Name=TRC_7;repeat_type=SSR;ssr=AAACCCT (99.0%25)
+chr2	TideCluster	tandem_repeat	15537518	15544888	1	.	.	Name=TRC_18;repeat_type=SSR;ssr=ATC (98.6%25)
+chr2	TideCluster	tandem_repeat	15694677	15702269	1	.	.	Name=TRC_18;repeat_type=SSR;ssr=ATC (98.6%25)
+chr2	TideCluster	tandem_repeat	17849154	17854461	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr2	TideCluster	tandem_repeat	17861480	17866563	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr2	TideCluster	tandem_repeat	17884372	17890134	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr2	TideCluster	tandem_repeat	18844830	18853054	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr2	TideCluster	tandem_repeat	25689979	25696957	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr2	TideCluster	tandem_repeat	28325955	28331195	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr2	TideCluster	tandem_repeat	45470056	45476098	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr2	TideCluster	tandem_repeat	45476229	45485607	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr2	TideCluster	tandem_repeat	35023345	35038708	1	.	.	Name=TRC_1;repeat_type=TR
+chr2	TideCluster	tandem_repeat	35049981	35070272	1	.	.	Name=TRC_1;repeat_type=TR
+chr2	TideCluster	tandem_repeat	35072528	35079503	1	.	.	Name=TRC_1;repeat_type=TR
+chr2	TideCluster	tandem_repeat	35093068	35117517	1	.	.	Name=TRC_1;repeat_type=TR
+chr2	TideCluster	tandem_repeat	35121800	35138283	1	.	.	Name=TRC_1;repeat_type=TR
+chr2	TideCluster	tandem_repeat	35138706	35169346	1	.	.	Name=TRC_1;repeat_type=TR
+chr2	TideCluster	tandem_repeat	35171171	35177754	1	.	.	Name=TRC_1;repeat_type=TR
+chr2	TideCluster	tandem_repeat	35181698	35190427	1	.	.	Name=TRC_1;repeat_type=TR
+chr2	TideCluster	tandem_repeat	35192119	35214113	1	.	.	Name=TRC_1;repeat_type=TR
+chr2	TideCluster	tandem_repeat	35214543	35277641	1	.	.	Name=TRC_1;repeat_type=TR
+chr2	TideCluster	tandem_repeat	35285247	35305319	1	.	.	Name=TRC_1;repeat_type=TR
+chr2	TideCluster	tandem_repeat	35366684	35377873	1	.	.	Name=TRC_1;repeat_type=TR
+chr2	TideCluster	tandem_repeat	35380363	35392462	1	.	.	Name=TRC_1;repeat_type=TR
+chr2	TideCluster	tandem_repeat	35416264	35444633	1	.	.	Name=TRC_1;repeat_type=TR
+chr2	TideCluster	tandem_repeat	35446820	35497556	1	.	.	Name=TRC_1;repeat_type=TR
+chr2	TideCluster	tandem_repeat	57386893	57393611	1	.	.	Name=TRC_1;repeat_type=TR
+chr2	TideCluster	tandem_repeat	28090283	28111838	1	.	.	Name=TRC_4;repeat_type=TR
+chr2	TideCluster	tandem_repeat	40696734	40701903	1	.	.	Name=TRC_4;repeat_type=TR
+chr2	TideCluster	tandem_repeat	71696998	71710245	1	.	.	Name=TRC_7;repeat_type=SSR;ssr=AAACCCT (99.0%25)
+chr3	TideCluster	tandem_repeat	1	471820	1	.	.	Name=TRC_1;repeat_type=TR
+chr3	TideCluster	tandem_repeat	476997	807311	1	.	.	Name=TRC_1;repeat_type=TR
+chr3	TideCluster	tandem_repeat	807540	843387	1	.	.	Name=TRC_1;repeat_type=TR
+chr3	TideCluster	tandem_repeat	857393	866585	1	.	.	Name=TRC_1;repeat_type=TR
+chr3	TideCluster	tandem_repeat	1091588	1125629	1	.	.	Name=TRC_1;repeat_type=TR
+chr3	TideCluster	tandem_repeat	2134679	2151030	1	.	.	Name=TRC_1;repeat_type=TR
+chr3	TideCluster	tandem_repeat	2333446	2343582	1	.	.	Name=TRC_1;repeat_type=TR
+chr3	TideCluster	tandem_repeat	4673772	4694240	1	.	.	Name=TRC_1;repeat_type=TR
+chr3	TideCluster	tandem_repeat	4718911	5224703	1	.	.	Name=TRC_1;repeat_type=TR
+chr3	TideCluster	tandem_repeat	6052558	6086404	1	.	.	Name=TRC_1;repeat_type=TR
+chr3	TideCluster	tandem_repeat	29659717	29780565	1	.	.	Name=TRC_1;repeat_type=TR
+chr3	TideCluster	tandem_repeat	57014610	57096304	1	.	.	Name=TRC_1;repeat_type=TR
+chr3	TideCluster	tandem_repeat	67654440	67753192	1	.	.	Name=TRC_1;repeat_type=TR
+chr3	TideCluster	tandem_repeat	67753675	68626312	1	.	.	Name=TRC_1;repeat_type=TR
+chr3	TideCluster	tandem_repeat	4694341	4709269	1	.	.	Name=TRC_7;repeat_type=SSR;ssr=AAACCCT (99.0%25)
+chr3	TideCluster	tandem_repeat	68730485	68736248	1	.	.	Name=TRC_7;repeat_type=SSR;ssr=AAACCCT (99.0%25)
+chr3	TideCluster	tandem_repeat	21052539	21058155	1	.	.	Name=TRC_18;repeat_type=SSR;ssr=ATC (98.6%25)
+chr3	TideCluster	tandem_repeat	26243770	26249015	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr3	TideCluster	tandem_repeat	28270950	28350159	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr3	TideCluster	tandem_repeat	39746229	39791204	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr3	TideCluster	tandem_repeat	39795995	39801390	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr3	TideCluster	tandem_repeat	39805313	39890705	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr3	TideCluster	tandem_repeat	48976969	48991203	1	.	.	Name=TRC_8;repeat_type=TR
+chr3	TideCluster	tandem_repeat	49013609	49019922	1	.	.	Name=TRC_8;repeat_type=TR
+chr3	TideCluster	tandem_repeat	49034843	49040171	1	.	.	Name=TRC_8;repeat_type=TR
+chr3	TideCluster	tandem_repeat	67648762	67654229	1	.	.	Name=TRC_8;repeat_type=TR
+chr4	TideCluster	tandem_repeat	1	23695	1	.	.	Name=TRC_7;repeat_type=SSR;ssr=AAACCCT (99.0%25)
+chr4	TideCluster	tandem_repeat	23694	550763	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	704476	730240	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	4282936	4326858	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	4340972	4354173	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	5088532	5160045	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	9145049	9151631	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	52572530	52719809	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	57629366	57638218	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	57641654	57699176	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	57707693	57776033	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	57781566	57796436	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	57804607	57954099	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	57961875	58053568	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	58061728	58098078	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	58106887	58135880	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	58137430	58253519	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	58258082	58359456	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	58366936	58481685	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	58490232	58509373	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	58517918	58582036	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	58590522	58694802	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	58710554	58841068	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	58848319	58993796	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	59000724	59251236	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	59253963	59261241	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	59274180	59305433	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	59306452	59312539	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	59316450	59321501	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	59324527	59329575	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	59355298	59361406	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	62728050	62780489	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	68353587	68494546	1	.	.	Name=TRC_1;repeat_type=TR
+chr4	TideCluster	tandem_repeat	5824332	5832991	1	.	.	Name=TRC_8;repeat_type=TR
+chr4	TideCluster	tandem_repeat	5865159	5873917	1	.	.	Name=TRC_8;repeat_type=TR
+chr4	TideCluster	tandem_repeat	6511940	6528982	1	.	.	Name=TRC_8;repeat_type=TR
+chr4	TideCluster	tandem_repeat	24817866	24823056	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr4	TideCluster	tandem_repeat	32820495	32831917	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr4	TideCluster	tandem_repeat	32851204	32864884	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr4	TideCluster	tandem_repeat	32883221	32889403	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr4	TideCluster	tandem_repeat	32893192	32915687	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr5	TideCluster	tandem_repeat	9	67422	1	.	.	Name=TRC_1;repeat_type=TR
+chr5	TideCluster	tandem_repeat	73434	257958	1	.	.	Name=TRC_1;repeat_type=TR
+chr5	TideCluster	tandem_repeat	1506792	1518215	1	.	.	Name=TRC_1;repeat_type=TR
+chr5	TideCluster	tandem_repeat	1739122	1744844	1	.	.	Name=TRC_1;repeat_type=TR
+chr5	TideCluster	tandem_repeat	66522141	66531909	1	.	.	Name=TRC_1;repeat_type=TR
+chr5	TideCluster	tandem_repeat	69133193	69299399	1	.	.	Name=TRC_1;repeat_type=TR
+chr5	TideCluster	tandem_repeat	69301003	69357099	1	.	.	Name=TRC_1;repeat_type=TR
+chr5	TideCluster	tandem_repeat	69373739	69382642	1	.	.	Name=TRC_1;repeat_type=TR
+chr5	TideCluster	tandem_repeat	69393655	69523325	1	.	.	Name=TRC_1;repeat_type=TR
+chr5	TideCluster	tandem_repeat	710900	723939	1	.	.	Name=TRC_11;repeat_type=TR
+chr5	TideCluster	tandem_repeat	1497784	1507249	1	.	.	Name=TRC_11;repeat_type=TR
+chr5	TideCluster	tandem_repeat	46095848	46101190	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr5	TideCluster	tandem_repeat	46115742	46148970	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr5	TideCluster	tandem_repeat	50158614	50172482	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr5	TideCluster	tandem_repeat	52603542	52608881	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr5	TideCluster	tandem_repeat	48097029	48102530	1	.	.	Name=TRC_29;repeat_type=SSR;ssr=AGAT (100.0%25)
+chr5	TideCluster	tandem_repeat	53763204	53768743	1	.	.	Name=TRC_29;repeat_type=SSR;ssr=AGAT (100.0%25)
+chr5	TideCluster	tandem_repeat	53197899	53202949	1	.	.	Name=TRC_18;repeat_type=SSR;ssr=ATC (98.6%25)
+chr5	TideCluster	tandem_repeat	69546830	69552374	1	.	.	Name=TRC_7;repeat_type=SSR;ssr=AAACCCT (99.0%25)
+chr5	TideCluster	tandem_repeat	69557182	69564429	1	.	.	Name=TRC_7;repeat_type=SSR;ssr=AAACCCT (99.0%25)
+chr6	TideCluster	tandem_repeat	1	17487	1	.	.	Name=TRC_1;repeat_type=TR
+chr6	TideCluster	tandem_repeat	40927241	40935714	1	.	.	Name=TRC_1;repeat_type=TR
+chr6	TideCluster	tandem_repeat	40936117	40945064	1	.	.	Name=TRC_1;repeat_type=TR
+chr6	TideCluster	tandem_repeat	43996533	44004106	1	.	.	Name=TRC_1;repeat_type=TR
+chr6	TideCluster	tandem_repeat	52085806	52105361	1	.	.	Name=TRC_1;repeat_type=TR
+chr6	TideCluster	tandem_repeat	3482357	3488721	1	.	.	Name=TRC_11;repeat_type=TR
+chr6	TideCluster	tandem_repeat	8673179	8685416	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	8701483	8744260	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	8766394	8775252	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	8807249	8829852	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	8834991	8841638	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	8852899	8904820	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	8914896	8929833	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	8947528	8954544	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	8990257	8999550	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9043322	9049685	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9071806	9082249	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9082921	9094926	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9104403	9112294	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9114921	9120932	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9127146	9136091	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9138494	9143570	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9144862	9150760	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9154945	9182598	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9185083	9191755	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9194246	9200881	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9218983	9232594	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9286524	9293955	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9296020	9304217	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9321526	9332165	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9347200	9354783	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9361628	9366691	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9424983	9431755	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9432424	9437441	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9446249	9451661	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9513756	9518987	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9521928	9527752	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9529662	9551164	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9551840	9563619	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9564335	9614642	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9622464	9628840	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9636966	9643429	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9644891	9661898	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9665973	9689229	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9692413	9698800	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9703272	9719098	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9719494	9750762	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9755365	9781705	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9782446	9803015	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9804442	9815711	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9816234	9848588	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9856098	9861701	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9863401	9881211	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9882460	9891771	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9898332	9904164	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9921977	9927210	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9939219	9948495	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9949658	9975197	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9981416	9987759	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	9996848	10003191	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	10019657	10028095	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	10050616	10056748	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	10059010	10079212	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	10113456	10122144	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	10175178	10180257	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	10185016	10200904	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	10203591	10218202	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	10230672	10237014	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	10252598	10258125	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	10293827	10307532	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	10321513	10329762	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	10345675	10379795	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	11824941	11842492	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	11849202	11854881	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	11899241	11904554	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	11917628	11926501	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	11941771	11954842	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	11957456	11978339	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	11983804	12004435	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12022379	12028665	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12028922	12041683	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12059745	12074452	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12074691	12088267	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12103572	12108811	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12117129	12125681	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12128334	12152646	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12162718	12174527	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12177052	12183289	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12215954	12228505	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12245782	12252305	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12293689	12303195	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12326265	12333485	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12337314	12345907	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12369973	12378193	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12395099	12406494	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12421901	12438746	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12454027	12477779	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12508603	12528271	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12529093	12534848	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12546992	12567886	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12579440	12592209	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12629967	12643490	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12672840	12679465	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12696433	12721870	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12742491	12747547	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12770450	12775506	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12788356	12796914	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12810463	12826264	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12837457	12842970	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12860484	12866406	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12871226	12877128	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12879685	12885586	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12887272	12892971	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12901871	12907570	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12921358	12940018	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12952208	12959665	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	12991813	13007351	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13053287	13060687	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13061076	13074268	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13079819	13089351	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13091436	13096950	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13103979	13109263	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13109936	13115005	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13121681	13138560	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13143510	13167402	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13170344	13175975	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13181076	13186804	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13193347	13198499	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13203713	13209615	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13212172	13218073	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13219759	13225458	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13226497	13231852	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13234359	13240058	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13253845	13268996	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13272180	13282900	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13299853	13327360	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13349939	13360751	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13381503	13386666	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13406745	13414145	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13414534	13427466	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13433224	13438342	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13441749	13458043	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13463392	13473478	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13474101	13482466	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13520698	13531729	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13588141	13600613	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13607896	13620902	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13914715	13924350	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	13949092	13978747	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14177842	14183156	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14186914	14193462	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14197513	14202686	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14210037	14216379	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14218718	14234946	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14316255	14328484	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14383627	14457674	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14464637	14483611	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14497799	14548402	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14569725	14587511	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14679666	14702039	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14710534	14720024	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14731170	14740808	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14747640	14755886	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14779959	14792278	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14794000	14823012	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14847040	14852097	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14858057	14880988	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14884742	14912417	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	14937617	14953441	1	.	.	Name=TRC_4;repeat_type=TR
+chr6	TideCluster	tandem_repeat	52105355	52125158	1	.	.	Name=TRC_8;repeat_type=TR
+chr6	TideCluster	tandem_repeat	52164701	52172941	1	.	.	Name=TRC_7;repeat_type=SSR;ssr=AAACCCT (99.0%25)
+chr7	TideCluster	tandem_repeat	47374	583163	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	584347	652133	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	652172	1478442	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	1661631	1752561	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	2028496	2066733	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	3655096	3684220	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	60930838	61007535	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	61014983	61052316	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	61053161	61077271	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	61081624	61089936	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	61688405	61707222	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	62562028	62603988	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	62607536	62666975	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	62682110	62689998	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	62690936	62786442	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	62790064	62802494	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	65631977	65637012	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	70510926	70968845	1	.	.	Name=TRC_1;repeat_type=TR
+chr7	TideCluster	tandem_repeat	2420293	2433830	1	.	.	Name=TRC_11;repeat_type=TR
+chr7	TideCluster	tandem_repeat	15793387	15799778	1	.	.	Name=TRC_4;repeat_type=TR
+chr7	TideCluster	tandem_repeat	71039244	71053079	1	.	.	Name=TRC_7;repeat_type=SSR;ssr=AAACCCT (99.0%25)
+chr8	TideCluster	tandem_repeat	2	9927	1	.	.	Name=TRC_7;repeat_type=SSR;ssr=AAACCCT (99.0%25)
+chr8	TideCluster	tandem_repeat	26468	753208	1	.	.	Name=TRC_1;repeat_type=TR
+chr8	TideCluster	tandem_repeat	1710810	1722497	1	.	.	Name=TRC_1;repeat_type=TR
+chr8	TideCluster	tandem_repeat	2987202	3008785	1	.	.	Name=TRC_1;repeat_type=TR
+chr8	TideCluster	tandem_repeat	59751127	59756650	1	.	.	Name=TRC_1;repeat_type=TR
+chr8	TideCluster	tandem_repeat	59758245	59782485	1	.	.	Name=TRC_1;repeat_type=TR
+chr8	TideCluster	tandem_repeat	59796381	59912373	1	.	.	Name=TRC_1;repeat_type=TR
+chr8	TideCluster	tandem_repeat	59924918	60053449	1	.	.	Name=TRC_1;repeat_type=TR
+chr8	TideCluster	tandem_repeat	60081360	60376036	1	.	.	Name=TRC_1;repeat_type=TR
+chr8	TideCluster	tandem_repeat	60389128	60395557	1	.	.	Name=TRC_1;repeat_type=TR
+chr8	TideCluster	tandem_repeat	60396212	60403797	1	.	.	Name=TRC_1;repeat_type=TR
+chr8	TideCluster	tandem_repeat	60404763	60410535	1	.	.	Name=TRC_1;repeat_type=TR
+chr8	TideCluster	tandem_repeat	60417481	60425211	1	.	.	Name=TRC_1;repeat_type=TR
+chr8	TideCluster	tandem_repeat	60439002	60501031	1	.	.	Name=TRC_1;repeat_type=TR
+chr8	TideCluster	tandem_repeat	68084795	68453189	1	.	.	Name=TRC_1;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10088722	10100497	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10116699	10128655	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10146068	10151712	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10151974	10157110	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10192502	10213894	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10222479	10248139	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10248875	10255747	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10256901	10276413	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10285743	10310871	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10527569	10535145	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10552629	10599903	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10610203	10618077	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10636514	10643757	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10645836	10653228	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10665563	10679980	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10688666	10698144	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10712477	10752423	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10752790	10762760	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10763005	10784106	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10787480	10793894	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10803087	10809782	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10814145	10854101	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10854468	10870257	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10871175	10880484	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10892079	10938493	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10940657	10950930	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10960364	10977718	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	10997255	11011180	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11025081	11051110	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11051454	11073798	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11073907	11116483	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11118374	11149389	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11150643	11174261	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11178511	11190610	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11194165	11210945	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11222999	11243237	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11243791	11251971	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11280905	11295220	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11310375	11316469	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11319667	11329256	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11334907	11351938	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11360884	11374061	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11390992	11436288	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11443925	11450677	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11471605	11523830	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11553646	11560568	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11566994	11578824	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11582796	11589822	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11596493	11602383	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11603348	11620975	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11625171	11631356	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11639286	11693103	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11719555	11725243	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11741178	11757125	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11763495	11782139	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11782265	11789396	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11797414	11819380	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11825115	11831261	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11838893	11844041	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11848870	11860896	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11906891	11925035	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11946911	11958813	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	11960246	11994336	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12191044	12196867	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12199569	12205720	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12206680	12215177	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12226284	12233834	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12244206	12250542	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12252613	12259267	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12262365	12269915	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12278701	12295136	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12307489	12368857	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12381315	12395000	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12399230	12408211	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12414912	12450002	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12451597	12458592	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12458934	12464602	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12468925	12512231	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12512809	12545326	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12546118	12640768	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12654036	12660410	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12662003	12673689	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12675447	12680502	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12681076	12691742	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12703933	12745752	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12746736	12751756	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12774537	12779996	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12781506	12800356	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12820403	12829209	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12852598	12876036	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12915520	12927386	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12945698	12978936	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	12985749	13030252	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	13030550	13037186	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	13047551	13082832	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	13087634	13097164	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	13097527	13106612	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	13108510	13131401	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	13133296	13148024	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	13149239	13181846	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	13186062	13199465	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	13199648	13215259	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	13219111	13225203	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	13229927	13250557	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	13256320	13269800	1	.	.	Name=TRC_4;repeat_type=TR
+chr8	TideCluster	tandem_repeat	29790032	29803249	1	.	.	Name=TRC_18;repeat_type=SSR;ssr=ATC (98.6%25)
+chr8	TideCluster	tandem_repeat	39579568	39584877	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr8	TideCluster	tandem_repeat	45368301	45374732	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr8	TideCluster	tandem_repeat	41438943	41443991	1	.	.	Name=TRC_42;repeat_type=TR
+chr8	TideCluster	tandem_repeat	45908599	45914478	1	.	.	Name=TRC_29;repeat_type=SSR;ssr=AGAT (100.0%25)
+chr8	TideCluster	tandem_repeat	59653573	59661132	1	.	.	Name=TRC_8;repeat_type=TR
+chr8	TideCluster	tandem_repeat	59699082	59718756	1	.	.	Name=TRC_8;repeat_type=TR
+chr8	TideCluster	tandem_repeat	59700434	59708435	1	.	.	Name=TRC_26;repeat_type=TR
+chr9	TideCluster	tandem_repeat	1	7328	1	.	.	Name=TRC_7;repeat_type=SSR;ssr=AAACCCT (99.0%25)
+chr9	TideCluster	tandem_repeat	70104542	70112246	1	.	.	Name=TRC_7;repeat_type=SSR;ssr=AAACCCT (99.0%25)
+chr9	TideCluster	tandem_repeat	27935	419086	1	.	.	Name=TRC_1;repeat_type=TR
+chr9	TideCluster	tandem_repeat	523237	534177	1	.	.	Name=TRC_1;repeat_type=TR
+chr9	TideCluster	tandem_repeat	2049939	2058100	1	.	.	Name=TRC_1;repeat_type=TR
+chr9	TideCluster	tandem_repeat	3004136	3013180	1	.	.	Name=TRC_1;repeat_type=TR
+chr9	TideCluster	tandem_repeat	3505971	3511488	1	.	.	Name=TRC_1;repeat_type=TR
+chr9	TideCluster	tandem_repeat	3673881	3698351	1	.	.	Name=TRC_1;repeat_type=TR
+chr9	TideCluster	tandem_repeat	61861384	61881694	1	.	.	Name=TRC_1;repeat_type=TR
+chr9	TideCluster	tandem_repeat	61883324	61913778	1	.	.	Name=TRC_1;repeat_type=TR
+chr9	TideCluster	tandem_repeat	61917719	62274261	1	.	.	Name=TRC_1;repeat_type=TR
+chr9	TideCluster	tandem_repeat	62274315	62311329	1	.	.	Name=TRC_1;repeat_type=TR
+chr9	TideCluster	tandem_repeat	65081043	65230534	1	.	.	Name=TRC_1;repeat_type=TR
+chr9	TideCluster	tandem_repeat	65232165	65300107	1	.	.	Name=TRC_1;repeat_type=TR
+chr9	TideCluster	tandem_repeat	69793154	70089299	1	.	.	Name=TRC_1;repeat_type=TR
+chr9	TideCluster	tandem_repeat	70112347	70139957	1	.	.	Name=TRC_1;repeat_type=TR
+chr9	TideCluster	tandem_repeat	3014870	3020106	1	.	.	Name=TRC_11;repeat_type=TR
+chr9	TideCluster	tandem_repeat	25400146	25405873	1	.	.	Name=TRC_26;repeat_type=TR
+chr9	TideCluster	tandem_repeat	25413624	25420143	1	.	.	Name=TRC_26;repeat_type=TR
+chr9	TideCluster	tandem_repeat	25465595	25482157	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr9	TideCluster	tandem_repeat	47635306	47645890	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr9	TideCluster	tandem_repeat	62392950	62442117	1	.	.	Name=TRC_8;repeat_type=TR
+chr9	TideCluster	tandem_repeat	62452767	62466547	1	.	.	Name=TRC_8;repeat_type=TR
+chr9	TideCluster	tandem_repeat	64170715	64180658	1	.	.	Name=TRC_8;repeat_type=TR
+chr10	TideCluster	tandem_repeat	10	17525	1	.	.	Name=TRC_7;repeat_type=SSR;ssr=AAACCCT (99.0%25)
+chr10	TideCluster	tandem_repeat	65176375	65182840	1	.	.	Name=TRC_7;repeat_type=SSR;ssr=AAACCCT (99.0%25)
+chr10	TideCluster	tandem_repeat	77641	252527	1	.	.	Name=TRC_1;repeat_type=TR
+chr10	TideCluster	tandem_repeat	260811	270066	1	.	.	Name=TRC_1;repeat_type=TR
+chr10	TideCluster	tandem_repeat	412573	419583	1	.	.	Name=TRC_1;repeat_type=TR
+chr10	TideCluster	tandem_repeat	633891	654883	1	.	.	Name=TRC_1;repeat_type=TR
+chr10	TideCluster	tandem_repeat	1100220	1107484	1	.	.	Name=TRC_1;repeat_type=TR
+chr10	TideCluster	tandem_repeat	3580703	3586349	1	.	.	Name=TRC_1;repeat_type=TR
+chr10	TideCluster	tandem_repeat	61139085	61149734	1	.	.	Name=TRC_1;repeat_type=TR
+chr10	TideCluster	tandem_repeat	62093845	62101960	1	.	.	Name=TRC_1;repeat_type=TR
+chr10	TideCluster	tandem_repeat	62142359	62155691	1	.	.	Name=TRC_1;repeat_type=TR
+chr10	TideCluster	tandem_repeat	64666960	65132413	1	.	.	Name=TRC_1;repeat_type=TR
+chr10	TideCluster	tandem_repeat	20742033	20759237	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr11	TideCluster	tandem_repeat	1	47160	1	.	.	Name=TRC_7;repeat_type=SSR;ssr=AAACCCT (99.0%25)
+chr11	TideCluster	tandem_repeat	65347	579704	1	.	.	Name=TRC_1;repeat_type=TR
+chr11	TideCluster	tandem_repeat	649968	655660	1	.	.	Name=TRC_1;repeat_type=TR
+chr11	TideCluster	tandem_repeat	59200269	59213812	1	.	.	Name=TRC_1;repeat_type=TR
+chr11	TideCluster	tandem_repeat	59519241	59524780	1	.	.	Name=TRC_1;repeat_type=TR
+chr11	TideCluster	tandem_repeat	61791364	61834728	1	.	.	Name=TRC_1;repeat_type=TR
+chr11	TideCluster	tandem_repeat	61841171	62371962	1	.	.	Name=TRC_1;repeat_type=TR
+chr11	TideCluster	tandem_repeat	1194174	1205186	1	.	.	Name=TRC_11;repeat_type=TR
+chr11	TideCluster	tandem_repeat	1421569	1427664	1	.	.	Name=TRC_11;repeat_type=TR
+chr11	TideCluster	tandem_repeat	14845555	14852338	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr11	TideCluster	tandem_repeat	16572191	16582049	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr11	TideCluster	tandem_repeat	29746380	29764706	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr11	TideCluster	tandem_repeat	33227361	33280521	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr11	TideCluster	tandem_repeat	33285265	33314635	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr11	TideCluster	tandem_repeat	33314943	33320498	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr11	TideCluster	tandem_repeat	47192936	47199562	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr11	TideCluster	tandem_repeat	18769199	18778482	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	18873499	18879186	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	18886424	18898599	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20296769	20304840	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20327297	20337890	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20357490	20384283	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20405327	20413233	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20417204	20422531	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20437536	20443061	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20482678	20490841	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20521749	20528033	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20532347	20537547	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20553293	20564303	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20569718	20587304	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20590707	20597372	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20642670	20674399	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20685867	20692721	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20729254	20734497	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20767221	20798788	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20854683	20886290	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20896019	20908125	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20936554	20943689	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20944685	20956004	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20961808	20978855	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	20994959	21009188	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21016268	21032850	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21128246	21135648	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21156530	21166044	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21181201	21186365	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21196141	21208282	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21208820	21214498	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21220189	21225409	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21266543	21272390	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21305130	21313140	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21348211	21356221	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21366040	21405180	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21405696	21416710	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21419569	21425912	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21427167	21441421	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21443308	21454422	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21457180	21463523	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21533250	21539583	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21589227	21595573	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21607575	21618921	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21637708	21642918	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21654688	21660613	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21661703	21668060	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21700739	21707049	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21714785	21727593	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21732139	21738456	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21750474	21759527	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21774827	21784181	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21791980	21799075	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21815645	21823237	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21856475	21863067	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21868270	21873930	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21875918	21912167	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21920705	21951340	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21959499	21964959	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21984130	21989208	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	21989474	21994818	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22006558	22012403	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22014304	22020716	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22039073	22044309	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22167889	22173127	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22177301	22183949	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22187235	22205625	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22206181	22254109	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22254744	22273728	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22293131	22305368	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22308809	22314081	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22336699	22344700	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22353628	22359145	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22396292	22401920	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22425629	22442620	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22461055	22471742	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22484512	22494642	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22507918	22513813	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22524435	22532094	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22532505	22567343	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22572673	22586254	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22607363	22635879	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22642483	22659057	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22663706	22668821	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22683571	22707269	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22711414	22728928	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22784307	22803209	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22833803	22853989	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	22984739	23002710	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	23011838	23031073	1	.	.	Name=TRC_4;repeat_type=TR
+chr11	TideCluster	tandem_repeat	23099971	23106879	1	.	.	Name=TRC_4;repeat_type=TR
+chr12	TideCluster	tandem_repeat	1	7113	1	.	.	Name=TRC_7;repeat_type=SSR;ssr=AAACCCT (99.0%25)
+chr12	TideCluster	tandem_repeat	14625	397495	1	.	.	Name=TRC_1;repeat_type=TR
+chr12	TideCluster	tandem_repeat	1355826	1363163	1	.	.	Name=TRC_1;repeat_type=TR
+chr12	TideCluster	tandem_repeat	2119644	2125839	1	.	.	Name=TRC_1;repeat_type=TR
+chr12	TideCluster	tandem_repeat	2788407	2796038	1	.	.	Name=TRC_1;repeat_type=TR
+chr12	TideCluster	tandem_repeat	66627214	66649302	1	.	.	Name=TRC_1;repeat_type=TR
+chr12	TideCluster	tandem_repeat	69367607	70164002	1	.	.	Name=TRC_1;repeat_type=TR
+chr12	TideCluster	tandem_repeat	10342805	10355628	1	.	.	Name=TRC_17;repeat_type=TR
+chr12	TideCluster	tandem_repeat	10385437	10390680	1	.	.	Name=TRC_17;repeat_type=TR
+chr12	TideCluster	tandem_repeat	12984765	12992385	1	.	.	Name=TRC_17;repeat_type=TR
+chr12	TideCluster	tandem_repeat	13598001	13606349	1	.	.	Name=TRC_17;repeat_type=TR
+chr12	TideCluster	tandem_repeat	13774754	13786017	1	.	.	Name=TRC_17;repeat_type=TR
+chr12	TideCluster	tandem_repeat	30931190	30958443	1	.	.	Name=TRC_22;repeat_type=SSR;ssr=AAC (98.4%25)
+chr12	TideCluster	tandem_repeat	36818802	36873421	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr12	TideCluster	tandem_repeat	37469833	37477338	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr12	TideCluster	tandem_repeat	38686243	38693624	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr12	TideCluster	tandem_repeat	38705367	38720722	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr12	TideCluster	tandem_repeat	38721676	38795900	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr12	TideCluster	tandem_repeat	48984546	48997364	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr12	TideCluster	tandem_repeat	49961001	49977810	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr12	TideCluster	tandem_repeat	49978673	49985664	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr12	TideCluster	tandem_repeat	50002978	50012047	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr12	TideCluster	tandem_repeat	50012078	50018060	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr12	TideCluster	tandem_repeat	53852237	53859868	1	.	.	Name=TRC_5;repeat_type=SSR;ssr=AAT (90.6%25)
+chr12	TideCluster	tandem_repeat	37892750	37898990	1	.	.	Name=TRC_18;repeat_type=SSR;ssr=ATC (98.6%25)
+chr12	TideCluster	tandem_repeat	58542327	58548717	1	.	.	Name=TRC_42;repeat_type=TR
+chr3	TideCluster	tandem_repeat	14613973	14847884	1	.	.	Name=TRC_4;repeat_type=TR
+chr1	TideCluster	tandem_repeat	38117710	38209580	1	.	.	Name=TRC_4;repeat_type=TR
+chr1	TideCluster	tandem_repeat	38482025	38830465	1	.	.	Name=TRC_4;repeat_type=TR
+chr1	TideCluster	tandem_repeat	38855338	38994999	1	.	.	Name=TRC_4;repeat_type=TR
+chr1	TideCluster	tandem_repeat	39037784	39384830	1	.	.	Name=TRC_4;repeat_type=TR
+chr12	TideCluster	tandem_repeat	17909886	18092156	1	.	.	Name=TRC_4;repeat_type=TR
+chr12	TideCluster	tandem_repeat	18381135	18484092	1	.	.	Name=TRC_4;repeat_type=TR
