@@ -1,3 +1,31 @@
+## 1.21.0 (2026-08-21)
+- **New `--cleanup` option for `run_all`** — deletes the run's intermediates once
+  the pipeline finishes successfully. A finished run is mostly intermediates:
+  82 % of the bytes on a real 800 Mbp genome (1.2 GB → 213 MB), and around 90 %
+  on a 94 Gbp assembly. Off by default; without the flag nothing changes.
+  - What survives is a contract, not an accident. A cleaned run directory can
+    still be **viewed** as a report, **re-rendered** with `tc_rerender_report.py`,
+    used as **comparative-analysis input**, and fed to `tc_per_tra_consensus.py`.
+    Because re-rendering has to keep working, the purge is file-level inside
+    `<prefix>_{kite,tarean,consensus}/` rather than deleting those directories.
+  - Removed: `<prefix>_kite/kitehor.periodogram` (usually the single largest file
+    in a run), the TAREAN `*.kmers`, `ggmin.RData` and `monomers.RData` (both
+    written but never read back), the per-TRC array FASTA that duplicates
+    `<prefix>_tarean/fasta/`, the RepeatMasker `*_renamed.fasta*` leftovers, the
+    long-period re-search intermediates, and `<prefix>_clustering.gff3_1.gff3`.
+  - Nothing is deleted if any step fails, and files kept with `--keep_rounds` are
+    never touched. The run prints what it removed and records
+    `cleanup_files_removed` / `cleanup_bytes_freed` in
+    `<prefix>_pipeline_stats.json`, so a pruned directory says so afterwards.
+- **The README output documentation is rewritten** as a table covering every file
+  a run produces, with a "Kept by `--cleanup`" column, so the purge set and the
+  output documentation are one artefact. This also corrects long-standing
+  errors: `prefix_consensus_1` was documented but is no longer produced,
+  `prefix_kite_report.html` has no writer, the v1 HTML reports moved into
+  `<prefix>_report_legacy/` in 1.17.0, and the `<prefix>_kite/`,
+  `<prefix>_report/` and `dotplots/` directories, the JSON side-cars,
+  `<prefix>_rdna.tsv` and `<prefix>_seqid_lengths.tsv` were undocumented.
+
 ## 1.20.2 (2026-08-21)
 - **Comparative analysis now honours `tidecluster_prefix` for every input.**
   `tc_comparative_analysis.R` resolved four of its six per-run inputs from the
