@@ -1,3 +1,30 @@
+## 1.21.1 (2026-08-21)
+- **Comparative analysis now runs on TideCluster runs made without a reference
+  library.** It previously required `run_all -l <library>`, for two independent
+  reasons, both fixed:
+  - `{prefix}_consensus/consensus_sequences_all.fasta` — a required input — was
+    assembled during the **annotation** step, because its first consumer was
+    RepeatMasker. A run made without `-l` therefore never had it, and the
+    comparative analysis aborted on contact. The file is only the per-TRC
+    `TRC_*_dimers.fasta` concatenated, and those come from the **clustering**
+    step, so it is now written there. Every run is comparative-ready.
+  - `cluster_ssrs_sequences()` crashed when *no* sample contained an SSR TRC
+    (`replacement has 1 row, data has 0`). Unrelated to libraries — it affects
+    any comparison of SSR-free samples.
+  - Runs made by earlier versions are covered too: when the concatenated pool is
+    absent, the comparative analysis rebuilds it from that run's
+    `TRC_*_dimers.fasta` and says so in the log, so archived library-free runs
+    can be compared without re-running them.
+- `consensus_sequences_all.fasta` is now concatenated in TRC order rather than
+  filesystem order, so its content no longer varies between machines for
+  identical input. Annotation output is unaffected (verified: the same records
+  in reversed order give a byte-identical annotation GFF3).
+- Adds a committed comparative fixture under `tests/data/comparative`, so
+  `tests.sh determinism` runs instead of skipping for want of one. Its README
+  records what it does and does not prove — notably that it does not reproduce
+  the original issue #4 non-determinism, because the source dataset has almost no
+  cross-TRC similarity for the prefilter to drop.
+
 ## 1.21.0 (2026-08-21)
 - **New `--cleanup` option for `run_all`** — deletes the run's intermediates once
   the pipeline finishes successfully. A finished run is mostly intermediates:
