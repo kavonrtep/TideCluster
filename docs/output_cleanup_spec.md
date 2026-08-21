@@ -1,6 +1,8 @@
 # Specification — optional output cleanup (`--cleanup`)
 
-**Status:** specification, not yet implemented · **Date:** 2026-08-21
+**Status:** IMPLEMENTED (`tc_utils.CLEANUP_PATTERNS` / `cleanup_run_directory`,
+`TideCluster.py --cleanup`; tests in `tests/test_cleanup.py` and `tests/long.sh`)
+· **Date:** 2026-08-21
 **Written against:** TideCluster 1.20.1
 **Companion:** `docs/carp_cleanup_alignment_request.md` (the CARP-side FR)
 
@@ -157,10 +159,11 @@ recorded in `<prefix>_cmd_args.json` automatically (`save_args_to_file` persists
 every non-`None` arg), so the run's own provenance says it was pruned — no new
 side-car file, which would be at odds with the goal of fewer files.
 
-*Open:* whether to also record `files_removed` / `bytes_freed` in
-`<prefix>_pipeline_stats.json` and surface it in the report's run-settings card.
-Cheap, and it answers "why is this directory smaller than that one?" months
-later. Proposed: yes.
+*Resolved:* `cleanup_files_removed` / `cleanup_bytes_freed` are written into
+`<prefix>_pipeline_stats.json`. They are deliberately **not** surfaced in the
+report: the report is built before cleanup runs, so the card would only show them
+after a subsequent re-render, and a number that appears on the second render but
+not the first is worse than no number. The JSON is the durable record.
 
 ## Relationship to CARP (settled 2026-08-21)
 

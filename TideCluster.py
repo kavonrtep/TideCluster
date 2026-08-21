@@ -33,6 +33,36 @@ MAX_MEMORY_HELP = (
 )
 
 
+def _cleanup_outputs(prefix):
+    """Delete the run's intermediates and report what went.
+
+    Called only at the very end of a SUCCESSFUL run_all -- never from a
+    `finally:`, never for an individual subcommand. What survives is a contract
+    (report viewing, comparative-analysis input, report re-render, per-TRA
+    consensus); see docs/output_cleanup_spec.md and tc_utils.CLEANUP_PATTERNS.
+    """
+    removed, freed = tc.cleanup_run_directory(prefix)
+    print(F"cleanup: removed {len(removed)} intermediate file(s), freed "
+          F"{freed / 1e6:.1f} MB. The run directory is no longer byte-complete; "
+          F"report, re-render, comparative-analysis and per-TRA consensus inputs "
+          F"are kept.")
+    # Record it in the run's own stats so a pruned directory says so months
+    # later. The report is built before cleanup runs, so this shows up only on
+    # a subsequent re-render -- the JSON is the durable record either way.
+    stats_path = F"{prefix}_pipeline_stats.json"
+    if os.path.exists(stats_path):
+        try:
+            with open(stats_path) as f:
+                stats = json.load(f)
+            stats["cleanup_files_removed"] = len(removed)
+            stats["cleanup_bytes_freed"] = freed
+            with open(stats_path, "w") as f:
+                json.dump(stats, f, indent=2)
+        except (OSError, ValueError) as e:
+            print(F"WARNING: could not record cleanup in {stats_path}: {e}",
+                  file=sys.stderr)
+
+
 def _run_required(cmd, what):
     """Run a pipeline step whose failure invalidates the run's outputs.
 
@@ -1553,6 +1583,15 @@ if __name__ == "__main__":
             )
 
     parser_run_all.add_argument(
+            "--cleanup", action="store_true", default=False,
+            help=("Delete intermediate files once the run finishes successfully "
+                  "(~80%% of the output directory). The report, its re-render "
+                  "inputs, the comparative-analysis inputs and the per-TRA "
+                  "consensus inputs are all kept; --keep_rounds files are never "
+                  "touched. Nothing is deleted if any step fails.")
+            )
+
+    parser_run_all.add_argument(
             "-M", "--min_total_length", type=int, default=50000,
             help=("Minimum combined length of tandem repeat arrays within a single "
                   "cluster, required for inclusion in TAREAN analysis."
@@ -1792,6 +1831,12 @@ if __name__ == "__main__":
                     version=__version__,
                     max_memory=cmd_args.max_memory
                     )
+            # Last thing in the run, and only here: every step above raises on
+            # failure, so reaching this line means the run succeeded. Deliberately
+            # NOT in the `finally:` below -- a failed run's intermediates are what
+            # you need to diagnose it.
+            if cmd_args.cleanup:
+                _cleanup_outputs(cmd_args.prefix)
         elif cmd_args.command == "rdna":
             _maybe_identify_rdna(cmd_args.prefix, cmd_args.fasta, cmd_args,
                                  cmd_args.cpu)

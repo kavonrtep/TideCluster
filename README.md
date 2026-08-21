@@ -494,6 +494,7 @@ options:
                         Minimum combined length of tandem repeat arrays within a single cluster, required for inclusion in TAREAN analysis. Default (50000)
   --max_memory GB, --max-memory GB
                         Memory limit for this run, in GB (see "Memory limits on clusters and in containers")
+  --cleanup             Delete intermediate files once the run finishes successfully (see "Cleaning up intermediates")
 ```
 
 ## Memory limits on clusters and in containers
@@ -559,56 +560,95 @@ TideCluster.py run_all -c 40 -pr cen6_sat -f CEN6_ver_220406.fasta -l library.fa
 
 ## Output
 
-### Tidehunter Step
+The table below lists everything a `run_all` writes. `prefix` is the `-pr` value.
 
-- `prefix_tidehunter.gff3` - GFF3 file with tandem repeats detected by TideHunter.
-- `prefix_chunks.bed` - BED file showing how the reference sequence was split into chunks for parallel processing.
+**Kept by `--cleanup`** says whether the file survives an optional cleanup (see
+[Cleaning up intermediates](#cleaning-up-intermediates) below); *kept* files are
+the ones the report, its re-render, the comparative analysis and the per-TRA
+consensus depend on.
 
-### Clustering Step
+### TideHunter step
 
-- `prefix__tidehunter_short.gff3` GFF3 file with tandem repeats shorter than the minimum length threshold used in the clustering step. 
-- `prefix_clustering.gff3` - GFF3 file with tandem repeats identified by `mmseqs2` and `BLASTN`. 
-  Tandem repeat regions in the GFF3 file are labeled by **T**andem **R**epeat **C**luster ID (TRC1, TRC2, etc.). Each TRC is described by the `repeat_type` attribute. `repeat_type` can be either TR (Tandem Repeat) or SSR (Simple Sequence Repeat).
-  By default this GFF3 is made **non-overlapping across TRCs** (each genomic
-  region is annotated once): where variant arrays of a satellite are clustered
-  into separate TRCs that overlap at their boundaries, each contested span is
-  assigned to the dominant TRC — the one with the largest total array length.
-  No base of the union is lost (spans are reassigned, not dropped). Pass
-  `--keep_overlaps` to retain the raw, possibly overlapping regions.
-- `prefix_clustering.gff3_1.gff3` - Intermediate file with tandem repeats clustered by `mmseqs2`.
-- `prefix_consensus` - Directory with consensus sequences for each cluster as identified by TideHunter. There is one FASTA file per cluster. Each FASTA file contains all consensus sequences identified by TideHunter for a given cluster. 
-- `prefix_consensus_1` - Intermediate directory with consensus sequences for each cluster as identified by `mmseqs2`. 
-- `prefix_clustering_split_files` - Directory with GFF3 files, one for each TRC cluster. Each GFF3 file contains tandem repeat regions for a single TRC cluster.
+| Output | Description | Kept by `--cleanup` |
+|---|---|---|
+| `prefix_tidehunter.gff3` | Tandem repeats detected by TideHunter. | kept |
+| `prefix_chunks.bed` | How the reference was split into chunks for parallel processing. | kept |
+| `prefix_tidehunter_round{1,2,3}.gff3` | Per-round results, only with `--long --keep_rounds`. | kept — explicitly requested |
 
-### Annotation Step
+### Clustering step
 
-- `prefix_annotation.gff3` - GFF3 file with tandem repeats annotated by RepeatMasker. 
-  Annotations are shown as additional attributes in the GFF3 file.
-- `prefix_annotation.tsv` - Summarized annotation for each TRC cluster in a tab-delimited format.
-- `prefix_annotation_split_files` - Directory with GFF3 files, one for each TRC cluster. 
-  Each GFF3 file contains tandem repeat annotations for a single TRC cluster.
+| Output | Description | Kept by `--cleanup` |
+|---|---|---|
+| `prefix_clustering.gff3` | Tandem repeat regions labelled by **T**andem **R**epeat **C**luster id (TRC_1, TRC_2, …), each described by a `repeat_type` attribute (`TR` or `SSR`). By default this GFF3 is made **non-overlapping across TRCs**: where variant arrays of a satellite cluster into separate TRCs that overlap at their boundaries, each contested span is assigned to the dominant TRC — the one with the largest total array length. No base of the union is lost (spans are reassigned, not dropped). Pass `--keep_overlaps` to retain the raw, possibly overlapping regions. | kept |
+| `prefix_tidehunter_short.gff3` | Tandem repeats shorter than the clustering minimum length. | kept |
+| `prefix_clustering.gff3_1.gff3` | Intermediate: clusters from `mmseqs2`, before BLASTN. | **removed** |
+| `prefix_consensus/` | One FASTA per TRC with all TideHunter consensus sequences (`TRC_x.fasta`), plus their dimers (`TRC_x_dimers.fasta`). | kept |
+| `prefix_clustering_split_files/` | One GFF3 per TRC. | kept |
+| `prefix_seqid_lengths.tsv` | Length of every input sequence (used by the report's ideograms). | kept |
+| `prefix_cmd_args.json` | Every argument the run was given — the run's provenance. | kept |
 
-### TAREAN Step
+### Annotation step (only with `-l/--library`)
 
-- `prefix_index.html` - Main HTML report, other reports are linked from this file.
-- `prefix_tarean_report.html` - HTML report with tandem repeat annotations. 
-- `prefix_tarean_report.tsv` - File with tandem repeat annotations in a tab-delimited format.
-- `prefix_kite_report.html` - HTML report with KITE analysis.
-- `prefix_trc_superfamilies.html`  HTML report with TRC superfamilies.
-- `prefix_trc_superfamilies.csv`  Table of TRC-to-superfamily assignments
-  (comma-separated, columns `Superfamily,TRC,fallback`). Always written under
-  this name, even when no superfamilies are found — in that case it has the
-  header only and zero data rows.
-- `prefix_trc_superfamilies.manifest.json`  Small manifest declaring the
-  superfamily artefacts (the CSV/HTML basenames, the CSV column schema, and
-  whether any superfamilies were found), so downstream tools key on a stated
-  contract rather than on guessed filenames.
-- `prefix_tarean` - Directory containing subdirectories with detailed TAREAN output for each TRC cluster.
-- `prefix_consensus_dimer_library.fasta` - FASTA file with consensus sequences for 
-  each TRC cluster. This sequences can be used as a library for similarity based 
-  annotation using RepeatMasker. This file is created only for TRC clusters that 
-  pass the minimum combined length threshold.
+| Output | Description | Kept by `--cleanup` |
+|---|---|---|
+| `prefix_annotation.gff3` | Clustering GFF3 with RepeatMasker annotations added as attributes. | kept |
+| `prefix_annotation.tsv` | Annotation summarised per TRC. | kept |
+| `prefix_annotation_split_files/` | One annotated GFF3 per TRC. | kept |
+| `prefix_tidehunter_short_annotation.gff3` | Annotations of the short regions excluded from clustering. | kept |
+| `prefix_consensus/consensus_sequences_all.fasta` | All per-TRC dimer consensus sequences concatenated. Required by the comparative analysis. | kept |
+| `prefix_consensus/*_renamed.fasta*` | RepeatMasker working files (`.cat`, `.masked`, `.tbl`). | **removed** |
 
+### TAREAN / KITE step
+
+| Output | Description | Kept by `--cleanup` |
+|---|---|---|
+| `prefix_index.html` | **Main report** — start here; everything else links from it. | kept |
+| `prefix_report/` | The report's pages and assets. Self-contained: images and TAREAN drill-downs are vendored into it, so it survives deletion of the trees below. | kept |
+| `prefix_report_legacy/` | The original (v1) HTML reports: `prefix_index.html`, `prefix_tarean_report.html`, `prefix_trc_superfamilies.html`. | kept |
+| `prefix_tarean_report.tsv` | Per-TRC TAREAN summary, tab-delimited. | kept |
+| `prefix_consensus_dimer_library.fasta` | One consensus dimer per TRC, in RepeatMasker library format — use it to annotate other genomes. Only TRCs above `-M/--min_total_length` appear. | kept |
+| `prefix_trc_superfamilies.csv` | TRC-to-superfamily assignments (`Superfamily,TRC,fallback`). Always written under this name; header-only with zero rows when no superfamilies are found. | kept |
+| `prefix_trc_superfamilies.manifest.json` | Manifest declaring the superfamily artefacts (CSV/HTML basenames, the CSV column schema, whether any superfamilies were found), so downstream tools key on a stated contract rather than guessed filenames. | kept |
+| `prefix_pipeline_stats.json` | TRC / array counts and total lengths as structured data. | kept |
+| `prefix_rdna.tsv` | Per-TRC rDNA calls (45S / 5S) with reference coverage. | kept |
+| `dotplots/` | One dotplot per superfamily (`superfamily_001.png`, …). Note this directory is **not** prefixed. | kept |
+| `prefix_tarean/fasta/` | Per-TRC array sequences. Required by `tc_per_tra_consensus.py`. | kept |
+| `prefix_tarean/SSRS_summary.csv` | Which TRCs are SSRs. Required by the comparative analysis. | kept |
+| `prefix_tarean/<TRC>.fasta_tarean/` | Per-TRC TAREAN output: `report.html`, `img/`, `summary_table.csv`, `ppm_*.csv`, `consensus.fasta`, `consensus_dimer.fasta`, `tarean_contigs.fasta` … | kept |
+| `prefix_tarean/<TRC>.fasta_tarean/{*.kmers,ggmin.RData,monomers.RData,TRC_x.fasta}` | … and its scratch: k-mer counts, two intermediate R objects that are written but never read, and a second copy of the array FASTA already in `prefix_tarean/fasta/`. | **removed** |
+| `prefix_kite/monomer_size_top3_estimats.csv` | Per-array monomer size estimates (TAB-delimited despite the name). Read by the report and by downstream tools. | kept |
+| `prefix_kite/kitehor.*.tsv`, `prefix_kite/profile_plots/` | kitehor peak / SSR / validation tables and the per-TRC profile heatmaps. | kept |
+| `prefix_kite/kitehor.periodogram` | The raw periodogram bundle the heatmaps were rendered from. Usually the single largest file in the run. | **removed** |
+| `prefix_kite/_*longext*` | Intermediates of the selective long-period re-search. | **removed** |
+
+`tc_per_tra_consensus.py` additionally writes `prefix_per_tra_consensus/`.
+
+## Cleaning up intermediates
+
+A finished run is mostly intermediates — on a real 800 Mbp genome, **82 % of the
+bytes are files nothing reads again**, and the proportion grows with assembly
+size (about 90 % on a 94 Gbp genome, where two write-once R objects dominate).
+Pass `--cleanup` to `run_all` to delete them once the run finishes:
+
+```bash
+TideCluster.py run_all -c 20 -pr prefix -f genome.fasta -l library.fasta --cleanup
+```
+
+Nothing is deleted unless the whole pipeline succeeded — a failed run keeps
+everything, because its intermediates are what you need to diagnose it. Files
+kept with `--keep_rounds` are never touched.
+
+A cleaned run directory can still do everything except reproduce byte-for-byte
+intermediates. Specifically, all of these keep working:
+
+- viewing the HTML report, including every image and TAREAN drill-down;
+- re-rendering the report with `tc_rerender_report.py`;
+- using the run as input to the [comparative analysis](#trc-comparative-analysis);
+- generating per-TRA consensus with `tc_per_tra_consensus.py`.
+
+The run prints what it removed, and records `cleanup_files_removed` /
+`cleanup_bytes_freed` in `prefix_pipeline_stats.json`, so a pruned directory says
+so long after the fact.
 
 ## Updating gff3 file based on manual annotation
 If you want to update GFF3 file with manual annotation, you can use `tc_update_gff3.py` 

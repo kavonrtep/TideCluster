@@ -55,4 +55,7 @@ python3 "$ROOT/tests/test_memory_budget.py"
 echo "=== unit: superfamily dotplot naming + failure propagation (issue #7) ==="
 python3 "$ROOT/tests/test_superfamily_outputs.py"
 
+echo "=== unit: --cleanup purge set + the four guarantees ==="
+python3 "$ROOT/tests/test_cleanup.py"
+
 echo "unit tests OK"

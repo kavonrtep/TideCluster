@@ -2993,6 +2993,124 @@ def save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer):
 
 
 
+# ---------------------------------------------------------------------------
+# Optional output cleanup (`run_all --cleanup`)
+# ---------------------------------------------------------------------------
+# A finished run is ~82% intermediates (measured: 1.2 GB -> 203 MB on a real
+# Solanum run; ~90% on a 94 Gbp assembly, where the two write-only .RData files
+# alone dominate). The purge below is deliberately FILE-level inside
+# <prefix>_{kite,tarean,consensus}/ rather than tree-level, because a pruned run
+# must still be able to do four things -- see docs/output_cleanup_spec.md:
+#
+#   G1 view the HTML report          G3 re-render it (tc_rerender_report.py)
+#   G2 feed tc_comparative_analysis  G4 feed tc_per_tra_consensus.py
+#
+# Deleting whole trees (what CARP's `maximal` used to do) satisfies only G1.
+
+# (glob relative to the run prefix, why it is disposable)
+CLEANUP_PATTERNS = (
+    ("{p}_kite/kitehor.periodogram",
+     "kitehor periodogram (already rendered into <prefix>_kite/profile_plots/)"),
+    ("{p}_tarean/*.fasta_tarean/*.kmers",
+     "TAREAN k-mer counts (written by kmer_counting.py, never read back)"),
+    ("{p}_tarean/*.fasta_tarean/ggmin.RData",
+     "TAREAN ggmin (write-only: saved by methods.R, never load()ed)"),
+    ("{p}_tarean/*.fasta_tarean/monomers.RData",
+     "TAREAN monomers (write-only: saved by methods.R, never load()ed)"),
+    ("{p}_tarean/*.fasta_tarean/TRC_*.fasta",
+     "per-TRC array FASTA (byte-identical duplicate of <prefix>_tarean/fasta/)"),
+    ("{p}_consensus/*_renamed.fasta*",
+     "RepeatMasker leftovers from the annotation step"),
+    ("{p}_kite/_kite_input_longext.fasta",
+     "long-period re-search input"),
+    ("{p}_kite/_rescored_longext.*",
+     "long-period re-search output"),
+    ("{p}_clustering.gff3_1.gff3",
+     "mmseqs2-stage clustering intermediate"),
+)
+
+# Belt and braces. Every pattern above is anchored so it cannot reach these, but
+# a future edit could loosen one -- and the cost of that mistake is silent data
+# loss, discovered months later by whoever tries to re-render or compare. The
+# classic trap is `_tarean/*/TRC_*.fasta`, which matches BOTH the disposable
+# per-TRC copy and the `_tarean/fasta/` original that G4 depends on. Checked
+# before anything is deleted; a hit is a bug, not a condition to recover from.
+CLEANUP_PROTECTED_DIRS = (
+    "{p}_tarean/fasta",
+    "{p}_kite/profile_plots",
+    "{p}_report",
+    "{p}_report_legacy",
+    "{p}_consensus",          # only the *_renamed.fasta* leftovers may go
+)
+
+
+def _cleanup_candidates(prefix):
+    """Files the purge set matches, de-duplicated and sorted. Files only:
+    a pattern must never resolve to a directory."""
+    seen = {}
+    for pattern, why in CLEANUP_PATTERNS:
+        for path in glob.glob(pattern.format(p=prefix)):
+            if os.path.isfile(path):
+                seen.setdefault(os.path.normpath(path), why)
+    return sorted(seen.items())
+
+
+def _cleanup_check_protected(prefix, paths):
+    """Raise if the purge set reaches into a directory the contract protects.
+
+    `<prefix>_consensus/` is protected as a directory but does hold disposable
+    RepeatMasker leftovers, so `*_renamed.fasta*` inside it is the one allowed
+    exception.
+    """
+    guarded = [os.path.normpath(d.format(p=prefix)) + os.sep
+               for d in CLEANUP_PROTECTED_DIRS]
+    consensus = os.path.normpath("{p}_consensus".format(p=prefix)) + os.sep
+    for path in paths:
+        for g in guarded:
+            if not path.startswith(g):
+                continue
+            if g == consensus and "_renamed.fasta" in os.path.basename(path):
+                continue
+            raise RuntimeError(
+                F"cleanup aborted: pattern matched a protected path {path!r}. "
+                F"This is a bug in CLEANUP_PATTERNS -- deleting it would break "
+                F"the guarantees in docs/output_cleanup_spec.md.")
+
+
+def cleanup_run_directory(prefix, dry_run=False):
+    """Delete the run's intermediates; return ``(removed_paths, bytes_freed)``.
+
+    Only ever called after a **successful** ``run_all`` (see TideCluster.py) --
+    a failed run's intermediates are exactly what is needed to diagnose it, and
+    a half-finished directory has no guarantees worth preserving.
+
+    Never raises for an unremovable file: a run that otherwise succeeded must
+    not be failed by its own housekeeping. It *does* raise if the purge set
+    reaches a protected path, because that is a programming error and the
+    two-phase match-then-delete means nothing has been deleted yet.
+    """
+    candidates = _cleanup_candidates(prefix)
+    paths = [p for p, _why in candidates]
+    _cleanup_check_protected(prefix, paths)
+
+    removed, freed = [], 0
+    for path in paths:
+        try:
+            size = os.path.getsize(path)
+        except OSError:
+            continue
+        if not dry_run:
+            try:
+                os.remove(path)
+            except OSError as e:
+                print(F"WARNING: cleanup could not remove {path}: {e}",
+                      file=sys.stderr)
+                continue
+        removed.append(path)
+        freed += size
+    return removed, freed
+
+
 def run_cmd(cmd):
     """
     runs shell command and returns status
