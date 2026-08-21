@@ -60,6 +60,9 @@ settles the "please avoid applying both" warning below — CARP will not pass
 
 ### Their correction on argument 1 (comparative analysis) — valid, and now stale
 
+*(The revised reply, updated for 1.20.2 + 1.21.1, is kept at
+`docs/carp_issue3_reply_draft.md`.)*
+
 They are right that argument 1 did not apply to CARP, for two reasons:
 
 **a) Three of the six comparative inputs are never written on a CARP run.**
@@ -83,8 +86,18 @@ the run completes and writes both samples' `gff3/` exports. Every other `tc_`
 literal left in the script is a default argument value that the real call path
 always overrides.
 
-So after that release, comparative analysis **will** run on CARP output — provided
-CARP was configured with `tandem_repeat_library`, which remains their (a).
+So after that release, comparative analysis **will** run on CARP output — and as
+of **1.21.1** their (a) is gone too: `consensus_sequences_all.fasta` is written by
+the clustering step rather than annotation, and pre-1.21.1 runs get it rebuilt
+from `TRC_*_dimers.fasta`. A CARP run without `tandem_repeat_library` is then
+missing only the two annotation *reports*, both optional. Comparative analysis
+runs on CARP output regardless of that config key.
+
+That makes two files inside the purged trees newly load-bearing for CARP —
+`TideCluster_consensus/consensus_sequences_all.fasta` and
+`TideCluster_tarean/SSRS_summary.csv`, plus `TRC_*_dimers.fasta` for the rebuild
+fallback. All three already survive `e9e8494`, but they are now capability
+inputs rather than incidental survivors.
 
 One small clarification for anyone reading their reply later: the ignored variable
 was `prefix`, which carries the input table's `sample_code`, while lines 1361-1363
