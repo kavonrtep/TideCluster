@@ -459,6 +459,25 @@ rRNA/rDNA TRCs on the summary page and marks each TRC's page. Several TRCs can b
 `45S` (e.g. variants spanning one large array). Disable with `--no_rdna`; tune
 with `--rdna_library`, `--rdna_min_coverage` (0.7), `--rdna_min_identity` (85).
 
+**Using your own library.** `--rdna_library` takes a FASTA in RepeatMasker
+`name#class` format. An entry counts towards 45S or 5S if its class path
+mentions that subunit family **anywhere**, so all of these are accepted:
+
+```
+>ref1#rDNA_45S/18S            # the bundled spelling
+>ref2#rDNA/45S_rDNA/18S       # hierarchical vocabularies (e.g. CARP's)
+>ref3#45S_rDNA/18S
+>ref4#rDNA_5S/5S
+```
+
+Entries whose class names neither family are ignored, with a warning counting
+them. A library in which **no** entry names either family is reported as an
+error rather than quietly producing an empty `<prefix>_rdna.tsv` — an empty
+table means "no rDNA arrays in this genome", and a misconfigured library must
+not be able to fake that. In `run_all` the error is downgraded to a warning and
+the run continues without rDNA labels; the existing `<prefix>_rdna.tsv`, if any,
+is left untouched.
+
 To re-run identification on an existing run (for example after extending the
 library), use the standalone subcommand:
 

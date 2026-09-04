@@ -1513,9 +1513,14 @@ if __name__ == "__main__":
             )
     parser_tarean.add_argument(
             "--rdna_library", default=None,
-            help=("rDNA reference library (RepeatMasker name#class format, "
-                  "classes rDNA_45S/* and rDNA_5S/*) for rDNA identification. "
-                  "Defaults to the bundled data/rdna_library.fasta.")
+            help=("rDNA reference library in RepeatMasker `name#class` format, "
+                  "for rDNA identification. An entry counts as 45S or 5S if its "
+                  "class path mentions that subunit family anywhere, so "
+                  "rDNA_45S/18S, rDNA/45S_rDNA/18S and 45S_rDNA/18S are all "
+                  "accepted; entries naming neither are ignored, and a library "
+                  "with no usable entry is reported as an error rather than "
+                  "silently yielding no calls. Defaults to the bundled "
+                  "data/rdna_library.fasta.")
             )
     parser_tarean.add_argument(
             "--no_rdna", action="store_true", default=False,
@@ -1644,9 +1649,14 @@ if __name__ == "__main__":
             )
     parser_run_all.add_argument(
             "--rdna_library", default=None,
-            help=("rDNA reference library (RepeatMasker name#class format, "
-                  "classes rDNA_45S/* and rDNA_5S/*) for rDNA identification. "
-                  "Defaults to the bundled data/rdna_library.fasta.")
+            help=("rDNA reference library in RepeatMasker `name#class` format, "
+                  "for rDNA identification. An entry counts as 45S or 5S if its "
+                  "class path mentions that subunit family anywhere, so "
+                  "rDNA_45S/18S, rDNA/45S_rDNA/18S and 45S_rDNA/18S are all "
+                  "accepted; entries naming neither are ignored, and a library "
+                  "with no usable entry is reported as an error rather than "
+                  "silently yielding no calls. Defaults to the bundled "
+                  "data/rdna_library.fasta.")
             )
     parser_run_all.add_argument(
             "--no_rdna", action="store_true", default=False,

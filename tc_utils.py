@@ -562,6 +562,84 @@ def get_repeatmasker_annotation(rm_file, seq_lengths, prefix, parse_id=True):
 
 RDNA_TOP_TYPES = ("rDNA_45S", "rDNA_5S")
 
+# A reference library entry is `name#class`, where class is a '/'-separated
+# path. The subunit family used to be matched as `class.split("/")[0]` against
+# the two literals above, so only TideCluster's own spelling worked: a library
+# using an equivalent hierarchical vocabulary -- e.g. CARP's
+# `rDNA/45S_rDNA/18S`, the SAME sequences relabelled -- yielded zero usable
+# references and an empty `<prefix>_rdna.tsv`, indistinguishable from a genome
+# with no rDNA. Match anywhere in the class path instead.
+#
+# 45S is tested BEFORE 5S, and both exclude a preceding digit: the string "45S"
+# contains "5S", so a naive 5S test would label every 45S reference as 5S, and
+# "25S" would match too.
+_RDNA_45S_RE = re.compile(r"(?<![0-9])45S", re.IGNORECASE)
+_RDNA_5S_RE = re.compile(r"(?<![0-9.])5S", re.IGNORECASE)
+
+
+def rdna_top_type(cls):
+    """Subunit family for a RepeatMasker class path: ``"rDNA_45S"``,
+    ``"rDNA_5S"`` or ``None``.
+
+    Accepts every spelling seen in the wild -- `rDNA_45S/18S` (bundled),
+    `rDNA/45S_rDNA/18S` (CARP), `45S_rDNA/18S` -- so a library need only name
+    the subunit family somewhere in its class path. If a path mentions both,
+    45S wins.
+    """
+    if not cls:
+        return None
+    if _RDNA_45S_RE.search(cls):
+        return "rDNA_45S"
+    if _RDNA_5S_RE.search(cls):
+        return "rDNA_5S"
+    return None
+
+
+def rdna_library_top_types(rdna_library):
+    """``({header: top_type}, [unrecognised classes])`` for a reference library.
+
+    Headers whose class names no subunit family are reported rather than
+    dropped, so a mislabelled library can be diagnosed instead of silently
+    producing no calls.
+    """
+    tops, unknown = {}, []
+    for h in read_fasta_sequence_size(rdna_library):
+        cls = h.split("#", 1)[1] if "#" in h else ""
+        top = rdna_top_type(cls)
+        if top is None:
+            unknown.append(cls or "(no class)")
+        else:
+            tops[h] = top
+    return tops, unknown
+
+
+def validate_rdna_library(rdna_library):
+    """Return ``{header: top_type}``; raise if the library has no usable entry.
+
+    A user-supplied library that contributes zero references is a configuration
+    error, not a genome without rDNA -- and the two used to be indistinguishable
+    because the run simply wrote a header-only `<prefix>_rdna.tsv` and exited 0.
+    Checked up front, before any BLAST, so nothing is written or overwritten.
+    """
+    tops, unknown = rdna_library_top_types(rdna_library)
+    if not tops:
+        seen = sorted(set(unknown))
+        raise ValueError(
+            F"rDNA library {rdna_library} has no usable reference: none of its "
+            F"{len(unknown)} entries names a 45S or 5S subunit family in its "
+            F"`name#class` header. Classes found: "
+            F"{', '.join(seen[:8])}{' ...' if len(seen) > 8 else ''}. Expected a "
+            F"class path mentioning 45S or 5S, e.g. rDNA_45S/18S, "
+            F"rDNA/45S_rDNA/18S or rDNA_5S/5S.")
+    if unknown:
+        seen = sorted(set(unknown))
+        print(F"WARNING: rDNA library {rdna_library}: {len(unknown)} of "
+              F"{len(unknown) + len(tops)} entries have a class naming neither "
+              F"45S nor 5S and are ignored ("
+              F"{', '.join(seen[:5])}{' ...' if len(seen) > 5 else ''})",
+              file=sys.stderr)
+    return tops
+
 
 def blastn_rdna_reference_coverage(rdna_library, subject_fasta, cpu,
                                    min_identity=85.0):
@@ -581,10 +659,7 @@ def blastn_rdna_reference_coverage(rdna_library, subject_fasta, cpu,
     :return: {subject_seqid: {top_type: (coverage_frac, identity)}}
     """
     ref_len = read_fasta_sequence_size(rdna_library)
-    ref_top = {}
-    for h in ref_len:
-        cls = h.split("#", 1)[1] if "#" in h else ""
-        ref_top[h] = cls.split("/")[0]
+    ref_top, _unknown = rdna_library_top_types(rdna_library)
     work = tempfile.mkdtemp(prefix="tc_rdna_blast_")
     db = os.path.join(work, "subjdb")
     out = os.path.join(work, "hits.tsv")
@@ -730,6 +805,10 @@ def identify_rdna(prefix, fasta, rdna_library, cpu, min_coverage=0.7,
 
     :return: {TRC_id: (label, coverage)}
     """
+    # Checked first: a library that names no subunit family produces no calls,
+    # and an empty result must not be mistaken for "this genome has no rDNA".
+    # Raising here means <prefix>_rdna.tsv is neither written nor overwritten.
+    validate_rdna_library(rdna_library)
     gff = gff or (prefix + "_clustering.gff3")
     consensus_dir = consensus_dir or (prefix + "_consensus")
     work = tempfile.mkdtemp(prefix="tc_rdna_")

@@ -8,6 +8,9 @@ outfmt-6 file from that subject's seqids. Exercises:
   - assign_rdna_to_trcs: per-TRC aggregation, threshold, type selection
   - _write_rdna_attributes: rDNA_type/rDNA_coverage added only to matched TRCs
   - identify_rdna: consensus-first search + genomic fallback orchestration
+  - rdna_top_type / validate_rdna_library: which class spellings a reference
+    library may use, and that an unusable one is reported instead of silently
+    producing no calls
 
 Run: python3 tests/test_rdna.py
 """
@@ -143,6 +146,56 @@ def main():
     # TRC_3 had no consensus -> went through the genomic-fallback subject path
     check("genomic fallback ran without error for consensus-less TRC_3",
           "TRC_3" not in calls)  # fake yields no rDNA hit for TRC_3 region
+
+    # ---------------------------------------------------------------
+    # Library class vocabulary. The subunit family used to be matched as
+    # class.split("/")[0] against two literals, so an equivalent hierarchical
+    # spelling -- the SAME sequences relabelled, as CARP ships them -- produced
+    # zero usable references and a header-only <prefix>_rdna.tsv, which is
+    # indistinguishable from a genome with no rDNA.
+    print("\n-- library class vocabulary --")
+    for cls, want in (
+            ("rDNA_45S/18S",       "rDNA_45S"),   # bundled
+            ("rDNA_45S/25S",       "rDNA_45S"),
+            ("rDNA_45S/5.8S",      "rDNA_45S"),
+            ("rDNA/45S_rDNA/18S",  "rDNA_45S"),   # CARP vocabulary
+            ("45S_rDNA/18S",       "rDNA_45S"),   # bare
+            ("rDNA_5S/5S",         "rDNA_5S"),    # bundled
+            ("rDNA/5S_rDNA/5S",    "rDNA_5S"),    # CARP vocabulary
+            ("5S_rDNA/5S",         "rDNA_5S"),
+            ("Satellite/centromeric", None),
+            ("", None)):
+        got = tc.rdna_top_type(cls)
+        check(F"rdna_top_type({cls or '<empty>'}) == {want}", got == want)
+
+    # "45S" contains "5S": testing 5S first would label every 45S entry 5S.
+    check("45S is not mistaken for 5S",
+          tc.rdna_top_type("rDNA/45S_rDNA/18S") == "rDNA_45S")
+    check("25S does not register as 5S", tc.rdna_top_type("rDNA/25S") is None)
+
+    print("\n-- unusable library is reported, not silently empty --")
+    relabelled = os.path.join(d, "relabelled.fasta")
+    write(relabelled, RDNA_LIB_TEXT.replace("#rDNA_45S/", "#rDNA/45S_rDNA/")
+                                   .replace("#rDNA_5S/", "#rDNA/5S_rDNA/"))
+    tops, unknown = tc.rdna_library_top_types(relabelled)
+    check("relabelled library resolves every entry",
+          len(tops) > 0 and not unknown)
+    check("relabelled library agrees with the bundled one",
+          sorted(tops.values()) == sorted(tc.rdna_library_top_types(lib)[0].values()))
+
+    bad = os.path.join(d, "bad.fasta")
+    write(bad, "\n".join(l.split("#")[0] + "#Satellite/unknown" if l.startswith(">")
+                          else l for l in RDNA_LIB_TEXT.split("\n")))
+    try:
+        tc.validate_rdna_library(bad)
+        check("library with no 45S/5S entry raises", False)
+    except ValueError as exc:
+        check("library with no 45S/5S entry raises", True)
+        check("the error names the classes it found",
+              "Satellite/unknown" in str(exc))
+        check("the error names what was expected", "45S" in str(exc))
+    check("a usable library validates quietly",
+          len(tc.validate_rdna_library(lib)) > 0)
 
     print("\nALL PASS" if not failures else f"\nFAILED: {failures}")
     sys.exit(1 if failures else 0)
