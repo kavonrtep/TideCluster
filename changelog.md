@@ -1,3 +1,29 @@
+## 1.21.2 (2026-09-04)
+- **`--rdna_library` no longer fails silently on an unfamiliar class naming.**
+  The subunit family was matched as the first `/`-separated token of a
+  reference's class against the literals `rDNA_45S` / `rDNA_5S`; anything else
+  was skipped without comment, so a library using an equivalent spelling
+  produced a header-only `<prefix>_rdna.tsv` and exit 0 — indistinguishable from
+  a genome with no rDNA arrays. Reported by CARP, which ships the same 117
+  references under its own vocabulary.
+  - A reference now counts towards 45S or 5S if its class path mentions that
+    subunit family **anywhere**, so `rDNA/45S_rDNA/18S`, `rDNA_45S/18S` and
+    `45S_rDNA/18S` are all accepted. Existing libraries are unaffected.
+  - A library in which **no** entry names either family is now reported as an
+    error naming the classes found and those expected, instead of quietly
+    producing no calls. It is checked before any search runs, so
+    `<prefix>_rdna.tsv` is neither written nor overwritten — an absent result
+    means the step failed, an empty one means the genome has no rDNA. In
+    `run_all` this is downgraded to a warning and the run continues.
+  - A library where only some entries are unusable warns with the count and the
+    offending classes, and proceeds with the rest.
+- **The bundled rDNA library is relabelled to the same class vocabulary CARP
+  uses** (`rDNA/45S_rDNA/18S` rather than `rDNA_45S/18S`, and so on), so the two
+  projects ship one database under one set of labels. Labels only: the sequences
+  and their names are byte-identical, and the calls a run produces are unchanged
+  — the class strings never reach an output, since they collapse internally to
+  45S / 5S. Libraries using the previous spelling keep working.
+
 ## 1.21.1 (2026-08-21)
 - **Comparative analysis now runs on TideCluster runs made without a reference
   library.** It previously required `run_all -l <library>`, for two independent
