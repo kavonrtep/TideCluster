@@ -1516,8 +1516,9 @@ if __name__ == "__main__":
             help=("rDNA reference library in RepeatMasker `name#class` format, "
                   "for rDNA identification. An entry counts as 45S or 5S if its "
                   "class path mentions that subunit family anywhere, so "
-                  "rDNA_45S/18S, rDNA/45S_rDNA/18S and 45S_rDNA/18S are all "
-                  "accepted; entries naming neither are ignored, and a library "
+                  "rDNA/45S_rDNA/18S (the bundled spelling), rDNA_45S/18S and "
+                  "45S_rDNA/18S are all accepted; entries naming neither are "
+                  "ignored, and a library "
                   "with no usable entry is reported as an error rather than "
                   "silently yielding no calls. Defaults to the bundled "
                   "data/rdna_library.fasta.")
@@ -1652,8 +1653,9 @@ if __name__ == "__main__":
             help=("rDNA reference library in RepeatMasker `name#class` format, "
                   "for rDNA identification. An entry counts as 45S or 5S if its "
                   "class path mentions that subunit family anywhere, so "
-                  "rDNA_45S/18S, rDNA/45S_rDNA/18S and 45S_rDNA/18S are all "
-                  "accepted; entries naming neither are ignored, and a library "
+                  "rDNA/45S_rDNA/18S (the bundled spelling), rDNA_45S/18S and "
+                  "45S_rDNA/18S are all accepted; entries naming neither are "
+                  "ignored, and a library "
                   "with no usable entry is reported as an error rather than "
                   "silently yielding no calls. Defaults to the bundled "
                   "data/rdna_library.fasta.")

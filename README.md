@@ -437,8 +437,9 @@ options:
 
 During `run_all` (and the `tarean` step) TideCluster also flags which TRCs are
 **ribosomal DNA**, distinguishing **45S** (18S–5.8S–25S) from **5S** rDNA by
-similarity to a bundled reference library (`data/rdna_library.fasta`, in
-RepeatMasker `name#class` format with classes `rDNA_45S/*` and `rDNA_5S/*`).
+similarity to a bundled reference library (`data/rdna_library.fasta`, 117
+references in RepeatMasker `name#class` format, classes `rDNA/45S_rDNA/*` and
+`rDNA/5S_rDNA/*`).
 
 A TRC is labelled from the **best single-subunit reference coverage**: it is
 called rDNA if one library reference (e.g. an 18S or 25S gene) is matched
@@ -464,10 +465,10 @@ with `--rdna_library`, `--rdna_min_coverage` (0.7), `--rdna_min_identity` (85).
 mentions that subunit family **anywhere**, so all of these are accepted:
 
 ```
->ref1#rDNA_45S/18S            # the bundled spelling
->ref2#rDNA/45S_rDNA/18S       # hierarchical vocabularies (e.g. CARP's)
+>ref1#rDNA/45S_rDNA/18S       # the bundled spelling
+>ref2#rDNA_45S/18S            # TideCluster's own earlier form
 >ref3#45S_rDNA/18S
->ref4#rDNA_5S/5S
+>ref4#rDNA/5S_rDNA/5S
 ```
 
 Entries whose class names neither family are ignored, with a warning counting

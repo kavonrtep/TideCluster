@@ -197,6 +197,38 @@ def main():
     check("a usable library validates quietly",
           len(tc.validate_rdna_library(lib)) > 0)
 
+    # ---------------------------------------------------------------
+    # The BUNDLED library, pinned. TideCluster and CARP ship the same 117
+    # sequences; they diverged in labelling only, which silently disabled rDNA
+    # detection for anyone pointing --rdna_library at CARP's copy. The labels
+    # are now the same on both sides, so this pins the shipped file: every entry
+    # must resolve, and the class set + per-class counts must not drift.
+    print("\n-- bundled library --")
+    bundled = os.path.join(ROOT, "data", "rdna_library.fasta")
+    if not os.path.isfile(bundled):
+        check("bundled rDNA library exists", False)
+    else:
+        b_tops, b_unknown = tc.rdna_library_top_types(bundled)
+        check("every bundled entry resolves to a subunit family", not b_unknown)
+        check("bundled library has 117 entries", len(b_tops) == 117)
+        by_class = {}
+        for h in b_tops:
+            by_class[h.split("#", 1)[1]] = by_class.get(h.split("#", 1)[1], 0) + 1
+        expected_classes = {
+            "rDNA/45S_rDNA/18S": 23,
+            "rDNA/45S_rDNA/25S": 17,
+            "rDNA/45S_rDNA/5.8S": 18,
+            "rDNA/5S_rDNA/5S": 59,
+        }
+        check("bundled class vocabulary + counts match CARP's copy",
+              by_class == expected_classes)
+        if by_class != expected_classes:
+            print("   got:     ", dict(sorted(by_class.items())))
+            print("   expected:", dict(sorted(expected_classes.items())))
+        n45 = sum(1 for v in b_tops.values() if v == "rDNA_45S")
+        n5 = sum(1 for v in b_tops.values() if v == "rDNA_5S")
+        check("bundled 45S/5S split is 58/59", (n45, n5) == (58, 59))
+
     print("\nALL PASS" if not failures else f"\nFAILED: {failures}")
     sys.exit(1 if failures else 0)
 
