@@ -27,6 +27,7 @@ NCPU="${NCPU:-4}"
 echo "=== comparative SSR-partition unit test ==="
 Rscript "$ROOT/tests/test_ssr_partition.R"
 Rscript "$ROOT/tests/test_ssr_empty.R"
+Rscript "$ROOT/tests/test_absorbed_trc.R"
 
 FIXTURE="${TC_COMPARATIVE_FIXTURE:-}"
 if [ -z "$FIXTURE" ]; then

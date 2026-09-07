@@ -843,6 +843,41 @@ get_seq_files <- function(input_dirs, prefix, tc_code = "tc"){
   }
   s_tc <- sapply(fasta_tc, readDNAStringSet)
   s_th <- sapply(fasta_th, readDNAStringSet)
+
+  # The clustering GFF3 is the authority on which TRCs exist. Overlap
+  # resolution (default-on since 1.16) removes a TRC whose every span is won by
+  # a dominant neighbour, but a run's consensus set is frozen before that step,
+  # so <prefix>_consensus/ -- and therefore <prefix>_annotation.tsv -- still
+  # carry it. Such a TRC has no genomic location to contribute: including it
+  # puts a sequence in the similarity graph that no GFF3 accounts for, and
+  # yields a group whose annotation fraction is a zero-length vector, which
+  # used to abort the whole run after the expensive search (issue #8).
+  clust_paths <- file.path(input_dirs, paste0(tc_code, "_clustering.gff3"))
+  trc_of <- function(n) sub("^(TRC_[0-9]+).*", "\\1", n)
+  for (i in seq_along(input_dirs)) {
+    if (!file.exists(clust_paths[i])) {
+      message("No clustering GFF3 at ", clust_paths[i],
+              "; keeping every consensus sequence for ", prefix[i])
+      next
+    }
+    gff <- rtracklayer::import.gff3(clust_paths[i])
+    valid <- unique(as.character(gff$Name))
+    valid <- valid[!is.na(valid)]
+    drop_tc <- !trc_of(names(s_tc[[i]])) %in% valid
+    drop_th <- !trc_of(names(s_th[[i]])) %in% valid
+    if (any(drop_tc) || any(drop_th)) {
+      lost <- sort(unique(c(trc_of(names(s_tc[[i]]))[drop_tc],
+                            trc_of(names(s_th[[i]]))[drop_th])))
+      message(sprintf(
+        "%s: excluding %d consensus sequence(s) from %d TRC(s) absent from %s%s: %s",
+        prefix[i], sum(drop_tc) + sum(drop_th), length(lost),
+        basename(clust_paths[i]),
+        if (length(lost) > 10) " (first 10)" else "",
+        paste(utils::head(lost, 10), collapse = ", ")))
+      s_tc[[i]] <- s_tc[[i]][!drop_tc]
+      s_th[[i]] <- s_th[[i]][!drop_th]
+    }
+  }
   
   # Clean up file path vectors
   rm(fasta_tc, fasta_th)
@@ -1319,7 +1354,10 @@ create_annotation_dataframes <- function(grps_pivoted, annotation_results, prefi
   for (i in seq_along(prefix)) {
     cln <- paste0(prefix[i], "_annot")
     annot_prefix_groups_df[[cln]] <- sapply(annotation_results$annot_fractions[[i]], function(x) {
-      if (is.na(x)[1]) {
+      # length(x) == 0 must come first: is.na(numeric(0))[1] is NA, and `if (NA)`
+      # raises "missing value where TRUE/FALSE needed" (issue #8). The empty
+      # case means the same thing as NA here -- no annotation for this group.
+      if (length(x) == 0 || is.na(x)[1]) {
         return("")
       } else {
         return(paste(names(x), " (", round(unlist(x) * 100, 1), "%)", sep = "", collapse = ", "))
