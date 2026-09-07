@@ -236,6 +236,23 @@ TideCluster.py --version
 To pin a specific release, append `=<version>` (e.g.
 `tidecluster=1.21.2`).
 
+**The channel order matters.** `conda-forge` must come before `bioconda`, which
+must come before `petrnovak` — this is the order bioconda itself requires. It is
+not cosmetic under `channel_priority: strict`, where each package is taken from
+the highest-priority channel that provides it *at all*: several R dependencies
+exist on bioconda only as builds from 2016 that need R 3.3, while others
+(`r-igraph`, `r-plyr`, `r-reshape2`) are on conda-forge only and need R 4.x, so
+demoting conda-forge makes the environment unsolvable. The failure surfaces as an
+unrelated-looking pin conflict, e.g.
+
+```
+LibMambaUnsatisfiableError: ... package tidecluster-<version> requires
+r-igraph 2.0.3.*, but none of the providers can be installed
+```
+
+If you see that, check the channel order before anything else — with
+`conda-forge` first the same command resolves, under strict priority or flexible.
+
 ### Singularity / Apptainer
 
 Pre-built SIF images are published as OCI artefacts on GHCR:
