@@ -1,3 +1,28 @@
+## 1.21.3 (2026-09-07)
+- **Comparative analysis no longer aborts on a TRC that overlap resolution
+  removed (issue #8).** The run failed after the search with
+  `Error in if (is.na(x)[1]) { : missing value where TRUE/FALSE needed`,
+  producing no `trc_satellite_families.tsv` — on a 20-genome batch that cost
+  2.1 h before failing.
+  - `resolve_trc_overlaps` (on by default since 1.16) removes a TRC whose every
+    array span is won by a dominant overlapping neighbour. A run's consensus
+    sequences are written from a set fixed *before* that step, so such a TRC
+    keeps its `<prefix>_consensus/` files and is annotated into
+    `<prefix>_annotation.tsv`, while being absent from
+    `<prefix>_clustering.gff3` — the file the comparative analysis uses for TRC
+    lengths. Its annotation fraction then came out as a zero-length vector,
+    which the `is.na()` guard did not handle.
+  - The search pool is now restricted to TRCs present in each sample's
+    clustering GFF3, which is the authority on which TRCs exist; excluded
+    sequences are reported in the log. Because this is applied when reading a
+    run rather than when writing one, **existing run directories work without
+    being recomputed**.
+  - The zero-length case is also handled directly, as a backstop for any other
+    route to an empty annotation fraction.
+  - Neither `-m/--min_length` nor `-M/--min_total_length` is involved; TRCs
+    below either threshold were never affected.
+  - Runs with no absorbed TRC are unaffected: output is byte-identical.
+
 ## 1.21.2 (2026-09-04)
 - **`--rdna_library` no longer fails silently on an unfamiliar class naming.**
   The subunit family was matched as the first `/`-separated token of a
