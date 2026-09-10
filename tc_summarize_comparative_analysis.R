@@ -8,10 +8,17 @@ library(jsonlite)
 
 # Get the directory where this script is located
 args <- commandArgs(trailingOnly = FALSE)
-script_path <- dirname(sub("--file=", "", args[grep("--file=", args)]))
+# `--file=` holds the path AS INVOKED and does not resolve symlinks. Both the
+# conda package and the container put each CLI in `bin/` as a symlink to the
+# real tree ($PREFIX/share/tidecluster, /opt/tidecluster), so taking dirname()
+# of the raw value points at `bin/` and every asset looked up beside the script
+# is missing (issue #9). normalizePath() follows the symlink, and is correct for
+# a real-path or relative invocation too.
+script_path <- sub("--file=", "", args[grep("--file=", args)])
 if (length(script_path) == 0) {
-  # Fallback to current directory if script path detection fails
   script_path <- getwd()
+} else {
+  script_path <- dirname(normalizePath(script_path[1]))
 }
 
 # Function to parse satellite families data from directory
