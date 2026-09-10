@@ -1,3 +1,21 @@
+## 1.21.4 (2026-09-10)
+- **`tc_summarize_comparative_analysis.R` can find its HTML templates again when
+  run from the conda package or the container (issue #9).** Invoked by its plain
+  name — the way both deployments expose it — it failed at the final step with
+  `Template directory not found: /opt/conda/bin/html`, after all the parsing and
+  clustering work was already done.
+  - R reports the script path *as invoked* and does not resolve symlinks, and
+    both the conda package and the container place each command in `bin/` as a
+    symlink into the real tree (`share/tidecluster`, `/opt/tidecluster`). The
+    script therefore looked for its `html/` assets next to the symlink instead
+    of next to itself. The path is now resolved through the symlink before use,
+    which is also correct when the script is called by its real path or from a
+    source checkout.
+  - A source checkout keeps the script and its assets side by side, so this only
+    ever affected installed copies — which is why no test caught it. The new
+    regression test builds the installed layout and checks the lookup from both
+    invocation forms.
+
 ## 1.21.3 (2026-09-07)
 - **Comparative analysis no longer aborts on a TRC that overlap resolution
   removed (issue #8).** The run failed after the search with
