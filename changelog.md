@@ -1,3 +1,24 @@
+## 1.22.0 (2026-10-09)
+- **Comparative analysis writes a new table, `trc_similarity_tarean.tsv`, with
+  pairwise similarity between TRCs that have a TAREAN monomer.** There is one
+  row per unordered pair of TRCs, within and across samples, that have any
+  blastn hit between them. Columns: `spec1`, `spec2`, `trc_spec1`,
+  `trc_spec2`, `identity`, `overlap1_in_2`, `overlap2_in_1`,
+  `monomer_length1`, `monomer_length2`. The table is written on every run and
+  is independent of the satellite-family clustering; the existing outputs are
+  unchanged.
+  - Each TRC is represented by its best TAREAN consensus only (the first record
+    in `<prefix>_consensus_dimer_library.fasta`). SSR TRCs are excluded, and so
+    are TRCs that are not in the clustering GFF3.
+  - Results do not depend on where a consensus starts. The query is the TAREAN
+    dimer, with hit positions folded back onto the monomer, and the target is
+    the other monomer repeated, so rotated and reverse-complemented copies of
+    the same satellite score 1 / 1. A linear monomer query would cut such
+    alignments in two.
+  - New option `--similarity_evalue` (default 1e-5) sets the blastn e-value
+    floor, the only filter applied to the table.
+  - New test `tests/test_trc_similarity.R`, run by `tests.sh determinism`.
+
 ## 1.21.4 (2026-09-10)
 - **`tc_summarize_comparative_analysis.R` can find its HTML templates again when
   run from the conda package or the container (issue #9).** Invoked by its plain
