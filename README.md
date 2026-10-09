@@ -929,6 +929,8 @@ Rscript tc_comparative_analysis.R -i input_config.tsv -o output_directory -c 10
   have checked the impact. Note that an existing `mmseqs2_results.rds` in the
   output directory is reused as-is — to change masking, run into a fresh output
   directory (or delete that file first).
+- `--similarity_evalue`: blastn e-value floor for `trc_similarity_tarean.tsv`
+  (default: 1e-5) — the only filter applied to that table; see below.
 
 ### How similarity between TRCs is evaluated
 
@@ -1005,6 +1007,37 @@ prevalent_annot: Satellite/FabTR_PisTR-B
 - Groups SSRs with similar repeat motifs across samples
 - Contains TRC IDs and SSR types for each cluster
 - Filters SSRs by minimum percentage threshold (default: 10%)
+
+**`trc_similarity_tarean.tsv`** - Pairwise similarity of TRCs with a TAREAN
+monomer, independent of the satellite-family clustering above. One row per
+unordered pair of TRCs, **within and across samples**, that have any blastn hit
+between them. Only an e-value floor (`--similarity_evalue`) is applied, so filter
+it downstream as needed.
+
+| Column | Description |
+|---|---|
+| `spec1`, `spec2` | `sample_code` of each TRC (`spec1` comes first in the input table) |
+| `trc_spec1`, `trc_spec2` | TRC IDs |
+| `identity` | percent identity over the aligned region (both directions combined) |
+| `overlap1_in_2` | fraction (0–1) of TRC 1's monomer covered by alignment to TRC 2 |
+| `overlap2_in_1` | the same for TRC 2's monomer in TRC 1 |
+| `monomer_length1`, `monomer_length2` | TAREAN monomer length (bp) |
+
+How the table is built:
+- **Which TRCs:** each TRC's **best** TAREAN consensus, i.e. the first record of
+  that TRC in `<prefix>_consensus_dimer_library.fasta`. TRCs without a TAREAN
+  consensus are absent. So are SSR TRCs, whose library entry is a synthetic SSR
+  multimer rather than a TAREAN estimate, and TRCs missing from the clustering
+  GFF3.
+- **Phase-independent:** satellites are circular, so a consensus can start
+  anywhere. The query is the TAREAN dimer, with hit positions folded back onto
+  the monomer, and the target is the other monomer repeated. Rotated and
+  reverse-complemented copies of the same satellite therefore score 1 / 1.
+- **Overlaps are asymmetric** when one monomer contains sequence the other
+  lacks. For example, a 360 bp monomer made of a 180 bp satellite plus unrelated
+  sequence gives 1.0 one way and ~0.5 the other. A true HOR (*k* diverged
+  copies of the same monomer) is covered ~1.0 in **both** directions; read the
+  monomer-length ratio to spot it.
 
 #### Supporting Files
 

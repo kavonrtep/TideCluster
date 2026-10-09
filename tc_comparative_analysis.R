@@ -1838,6 +1838,210 @@ memory_usage <- function(){
 
 
 
+# ---------------------------------------------------------------------------
+# Pairwise TRC similarity from TAREAN consensus monomers
+# (trc_similarity_tarean.tsv)
+# ---------------------------------------------------------------------------
+# One row per unordered pair of TRCs -- within and across samples -- that have a
+# TAREAN consensus and any blastn hit between them. Independent of the MMseqs2
+# family clustering above: no thresholds beyond an e-value floor, so it is a raw
+# table to filter downstream.
+#
+# Monomers come from <prefix>_consensus_dimer_library.fasta. tarean_report.R
+# writes each entry as consensus+consensus, best TAREAN variant (highest
+# total_score) first per TRC, so the first record of a TRC, halved, is its best
+# TAREAN monomer. SSR TRCs are skipped: tarean_report.R replaces their library
+# entries with synthetic SSR multimers, which are not a TAREAN estimate.
+#
+# Satellites are circular, so where a consensus happens to start is arbitrary.
+# The query is the TAREAN dimer, with hit coordinates folded back onto the
+# monomer (position modulo monomer length), so an alignment crossing the
+# monomer's start is not cut in two. Each subject is its monomer repeated to at
+# least (longest dimer + its own monomer length), so any rotation of any query
+# fits inside one continuous subject.
+read_tarean_monomers <- function(input_dirs, sample_code, tc_code) {
+  out <- list()
+  for (i in seq_along(input_dirs)) {
+    lib_path <- file.path(input_dirs[i],
+                          paste0(tc_code[i], "_consensus_dimer_library.fasta"))
+    if (!file.exists(lib_path)) {
+      message(sample_code[i], ": no ", basename(lib_path),
+              "; no TAREAN monomers for the similarity table")
+      next
+    }
+    lib <- readDNAStringSet(lib_path)
+    trc <- sub("#.*", "", names(lib))
+    first <- !duplicated(trc)               # first record = best TAREAN variant
+    lib <- lib[first]
+    trc <- trc[first]
+
+    # Same authority as get_seq_files(): only TRCs present in the clustering
+    # GFF3 (issue #8), and SSRs out because their entry is not a TAREAN monomer.
+    gff_path <- file.path(input_dirs[i], paste0(tc_code[i], "_clustering.gff3"))
+    if (file.exists(gff_path)) {
+      gff <- rtracklayer::import.gff3(gff_path)
+      gff_name <- as.character(gff$Name)
+      rtype <- mcols(gff)$repeat_type
+      ssr <- if (is.null(rtype)) character(0) else
+        unique(gff_name[!is.na(rtype) & as.character(rtype) == "SSR"])
+      keep <- trc %in% gff_name & !trc %in% ssr
+      lib <- lib[keep]
+      trc <- trc[keep]
+    } else {
+      message(sample_code[i], ": no ", basename(gff_path),
+              "; SSR TRCs cannot be excluded from the similarity table")
+    }
+
+    mono_len <- width(lib) %/% 2L
+    ok <- mono_len > 0
+    if (!any(ok)) next
+    out[[length(out) + 1]] <- data.frame(
+      sample = sample_code[i], sample_index = i, trc = trc[ok],
+      monomer_length = mono_len[ok],
+      seq = as.character(subseq(lib[ok], 1, mono_len[ok])),
+      stringsAsFactors = FALSE)
+  }
+  if (length(out) == 0) {
+    return(data.frame(sample = character(0), sample_index = integer(0),
+                      trc = character(0), monomer_length = integer(0),
+                      seq = character(0), stringsAsFactors = FALSE))
+  }
+  m <- do.call(rbind, out)
+  trc_num <- suppressWarnings(as.numeric(sub("^TRC_", "", m$trc)))
+  m <- m[order(m$sample_index, trc_num, m$trc), ]
+  rownames(m) <- NULL
+  m
+}
+
+# Reduce the HSPs of one query/subject/strand to (coverage, identity, aligned
+# length). Query coordinates are on the dimer and are folded onto the monomer
+# (mono_len). HSPs are taken greedily by bitscore and kept only if at least half
+# of their monomer positions are new: query and subject are both multimers, so
+# the same region matches many times and those repeats must not inflate the
+# identity average.
+summarise_hsps <- function(qstart, qend, pident, len, bitscore, mono_len) {
+  o <- order(-bitscore, qstart, qend)
+  covered <- logical(mono_len)
+  keep <- logical(length(o))
+  for (k in o) {
+    pos <- unique((qstart[k]:qend[k] - 1L) %% mono_len + 1L)
+    if (sum(!covered[pos]) * 2 >= length(pos)) {
+      keep[k] <- TRUE
+      covered[pos] <- TRUE
+    }
+  }
+  c(coverage = sum(covered) / mono_len,
+    identity = sum(pident[keep] * len[keep]) / sum(len[keep]),
+    aligned = sum(len[keep]),
+    bitscore = sum(bitscore[keep]))
+}
+
+compute_trc_similarity_table <- function(input_dirs, sample_code, tc_code,
+                                         output_directory, ncpu = 1,
+                                         evalue = 1e-5) {
+  columns <- c("spec1", "spec2", "trc_spec1", "trc_spec2", "identity",
+               "overlap1_in_2", "overlap2_in_1",
+               "monomer_length1", "monomer_length2")
+  dir.create(output_directory, recursive = TRUE, showWarnings = FALSE)
+  out_file <- file.path(output_directory, "trc_similarity_tarean.tsv")
+  write_out <- function(df) {
+    write.table(df, out_file, sep = "\t", row.names = FALSE, quote = FALSE)
+    message(sprintf("Exported %d TRC similarity pair(s) to %s", nrow(df), out_file))
+  }
+  empty <- as.data.frame(setNames(replicate(length(columns), character(0),
+                                            simplify = FALSE), columns))
+
+  mono <- read_tarean_monomers(input_dirs, sample_code, tc_code)
+  message(sprintf("TRC similarity: %d TRC(s) with a TAREAN monomer", nrow(mono)))
+  if (nrow(mono) < 2) return(invisible(write_out(empty)))
+
+  ids <- paste0("m", seq_len(nrow(mono)))
+  query <- DNAStringSet(paste0(mono$seq, mono$seq))   # the TAREAN dimer
+  names(query) <- ids
+  max_len <- 2L * max(mono$monomer_length)
+  copies <- ceiling((max_len + mono$monomer_length) / mono$monomer_length)
+  subject <- DNAStringSet(mapply(function(s, k) paste(rep(s, k), collapse = ""),
+                                 mono$seq, copies, USE.NAMES = FALSE))
+  names(subject) <- ids
+
+  tmp <- tempfile(pattern = "trc_similarity_")
+  dir.create(tmp)
+  on.exit(unlink(tmp, recursive = TRUE), add = TRUE)
+  q_fa <- file.path(tmp, "query.fasta")
+  s_fa <- file.path(tmp, "subject.fasta")
+  db <- file.path(tmp, "subject_db")
+  bl_out <- file.path(tmp, "blast.tsv")
+  writeXStringSet(query, q_fa)
+  writeXStringSet(subject, s_fa)
+
+  status <- system2("makeblastdb", c("-in", s_fa, "-dbtype", "nucl", "-out", db),
+                    stdout = FALSE)
+  if (status != 0) stop("makeblastdb failed for the TRC similarity table (exit ", status, ")")
+  # -dust no: the table is meant to be raw, and dust strips exactly the
+  # low-complexity satellites whose similarity is in question
+  # (cf. --lowcomplexity_mask for the MMseqs2 search).
+  status <- system2("blastn", c(
+    "-task", "blastn", "-query", q_fa, "-db", db,
+    "-outfmt", shQuote("6 qseqid sseqid pident length qstart qend sstart send bitscore"),
+    "-evalue", evalue, "-dust", "no", "-max_target_seqs", length(subject),
+    "-num_threads", max(1, ncpu), "-out", bl_out))
+  if (status != 0) stop("blastn failed for the TRC similarity table (exit ", status, ")")
+
+  bl <- if (file.size(bl_out) > 0) {
+    read.table(bl_out, sep = "\t", header = FALSE, stringsAsFactors = FALSE,
+               col.names = c("q", "s", "pident", "length", "qstart", "qend",
+                             "sstart", "send", "bitscore"))
+  } else NULL
+  if (!is.null(bl)) bl <- bl[bl$q != bl$s, ]
+  if (is.null(bl) || nrow(bl) == 0) return(invisible(write_out(empty)))
+
+  mono_len <- setNames(mono$monomer_length, ids)
+  bl$strand <- ifelse(bl$sstart <= bl$send, "+", "-")
+  groups <- split(seq_len(nrow(bl)), paste(bl$q, bl$s, bl$strand, sep = "\t"))
+  per_strand <- do.call(rbind, lapply(names(groups), function(key) {
+    r <- groups[[key]]
+    q <- bl$q[r[1]]
+    v <- summarise_hsps(bl$qstart[r], bl$qend[r], bl$pident[r], bl$length[r],
+                        bl$bitscore[r], mono_len[[q]])
+    data.frame(q = q, s = bl$s[r[1]], coverage = v[["coverage"]],
+               identity = v[["identity"]], aligned = v[["aligned"]],
+               bitscore = v[["bitscore"]], stringsAsFactors = FALSE)
+  }))
+  # one direction per query/subject: the strand covering more of the query
+  per_strand <- per_strand[order(per_strand$q, per_strand$s,
+                                 -per_strand$coverage, -per_strand$bitscore), ]
+  dir_hits <- per_strand[!duplicated(per_strand[, c("q", "s")]), ]
+
+  # fold both directions into one row per unordered pair; ids follow the
+  # sample / TRC order of `mono`, so the lower index is TRC 1
+  qi <- as.integer(sub("^m", "", dir_hits$q))
+  si <- as.integer(sub("^m", "", dir_hits$s))
+  dir_hits$a <- pmin(qi, si)
+  dir_hits$b <- pmax(qi, si)
+  dir_hits$forward <- qi < si                 # query is TRC 1 of the pair
+  pairs <- unique(dir_hits[, c("a", "b")])
+  pairs <- pairs[order(pairs$a, pairs$b), ]
+  fwd <- dir_hits[dir_hits$forward, ]
+  bwd <- dir_hits[!dir_hits$forward, ]
+  pk <- paste(pairs$a, pairs$b)
+  f <- fwd[match(pk, paste(fwd$a, fwd$b)), ]
+  r <- bwd[match(pk, paste(bwd$a, bwd$b)), ]
+  zero <- function(x) ifelse(is.na(x), 0, x)
+  aligned <- zero(f$aligned) + zero(r$aligned)
+  identity <- (zero(f$identity * f$aligned) + zero(r$identity * r$aligned)) / aligned
+
+  res <- data.frame(
+    spec1 = mono$sample[pairs$a], spec2 = mono$sample[pairs$b],
+    trc_spec1 = mono$trc[pairs$a], trc_spec2 = mono$trc[pairs$b],
+    identity = round(identity, 2),
+    overlap1_in_2 = round(zero(f$coverage), 3),
+    overlap2_in_1 = round(zero(r$coverage), 3),
+    monomer_length1 = mono$monomer_length[pairs$a],
+    monomer_length2 = mono$monomer_length[pairs$b],
+    stringsAsFactors = FALSE)
+  invisible(write_out(res))
+}
+
 # Main execution function
 main <- function(opt) {
   # Load required libraries
@@ -1892,6 +2096,11 @@ main <- function(opt) {
   export_results(grps_pivoted, result$ssrs_groups, annotation_report,
                 opt$output_directory)
 
+  message("\nComputing pairwise TRC similarity from TAREAN monomers...")
+  compute_trc_similarity_table(input_tc_dirs, prefix, tc_code,
+                               opt$output_directory, ncpu = opt$cpu,
+                               evalue = opt$similarity_evalue)
+
   message("\nAnalysis complete! Results saved to: ", opt$output_directory)
 }
 
@@ -1943,7 +2152,10 @@ option_list <- list(
     help=paste("Force bit-for-bit reproducible output: runs the MMseqs2 search single-threaded (--threads 1) so the result file ordering is fixed too. Slower, but the m8 file and every downstream table are byte-identical across runs and machines. Without this flag the result table is still stable across thread counts and runs (via --max-seqs, deterministic dedup and sorted graph edges); only the on-disk m8 ordering may vary. [default: %default]")),
   make_option(
     c("--lowcomplexity_mask"), type="integer", default=1,
-    help=paste("MMseqs2 tantan low-complexity masking in the comparative all-vs-all search: 1=on (default, current behaviour), 0=off. Turn off for AT-rich / simple-repeat satellites whose monomers are mostly low-complexity: masking strips their alignable sequence so highly similar TRCs fail the coverage cut and one biological family fragments across many comparative families. Caveat: with masking off, unrelated AT-rich / low-complexity satellites can align and over-merge, so keep this on unless you know your target satellites are simple-repeat-rich and have checked the impact. NOTE: a pre-existing mmseqs2_results.rds in the output dir is reused as-is, so to change masking re-run into a fresh output dir (or delete that file). [default: %default]"))
+    help=paste("MMseqs2 tantan low-complexity masking in the comparative all-vs-all search: 1=on (default, current behaviour), 0=off. Turn off for AT-rich / simple-repeat satellites whose monomers are mostly low-complexity: masking strips their alignable sequence so highly similar TRCs fail the coverage cut and one biological family fragments across many comparative families. Caveat: with masking off, unrelated AT-rich / low-complexity satellites can align and over-merge, so keep this on unless you know your target satellites are simple-repeat-rich and have checked the impact. NOTE: a pre-existing mmseqs2_results.rds in the output dir is reused as-is, so to change masking re-run into a fresh output dir (or delete that file). [default: %default]")),
+  make_option(
+    c("--similarity_evalue"), type="numeric", default=1e-5,
+    help=paste("E-value floor for the blastn search behind trc_similarity_tarean.tsv, the pairwise similarity table of TRCs with a TAREAN monomer (best TAREAN consensus per TRC, within and across samples, SSR TRCs excluded). It is the only filter on that table. [default: %default]"))
 )
 
 # Only parse CLI args and run the analysis when this file is executed as a
