@@ -1,3 +1,20 @@
+## 1.22.1 (2026-10-09)
+- **The Singularity image builds again; 1.22.0 was released without one.** The
+  1.22.0 conda package was published normally, so conda users already have
+  everything in 1.22.0. No TideCluster code changed in this release.
+  - The image build installed all dependencies into miniforge's *base* env,
+    which also hosts mamba itself. The dependency set only solves on Python
+    3.12, so once the unpinned `condaforge/miniforge3:latest` base image moved
+    past that, the install rewrote conda/mamba mid-transaction. It deleted the
+    running mamba binary (`/opt/conda/bin/mamba (deleted)`, then a package
+    cache error).
+  - Dependencies now go into a dedicated env, `/opt/conda/envs/tidecluster`,
+    which is first on the container's `PATH`. Commands are also still
+    linked from `/opt/conda/bin`, so existing invocations keep working.
+- **CI:** the new `sif-check.yml` builds the image on pull requests and runs the
+  short test inside it, so a broken `TideCluster.def` is caught before a
+  version is tagged.
+
 ## 1.22.0 (2026-10-09)
 - **Comparative analysis writes a new table, `trc_similarity_tarean.tsv`, with
   pairwise similarity between TRCs that have a TAREAN monomer.** There is one

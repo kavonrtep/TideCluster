@@ -234,7 +234,7 @@ TideCluster.py --version
 ```
 
 To pin a specific release, append `=<version>` (e.g.
-`tidecluster=1.22.0`).
+`tidecluster=1.22.1`).
 
 **The channel order matters.** `conda-forge` must come before `bioconda`, which
 must come before `petrnovak` — this is the order bioconda itself requires. It is
@@ -260,7 +260,7 @@ Pre-built SIF images are published as OCI artefacts on GHCR:
 ```bash
 apptainer pull oras://ghcr.io/kavonrtep/tidecluster/sif:latest
 # or pin a release:
-# apptainer pull oras://ghcr.io/kavonrtep/tidecluster/sif:1.22.0
+# apptainer pull oras://ghcr.io/kavonrtep/tidecluster/sif:1.22.1
 
 apptainer exec tidecluster_latest.sif TideCluster.py --version
 ```
