@@ -140,7 +140,7 @@ jobs:
   #
   # The host's tests/short.sh invokes "$ROOT/TideCluster.py" — that file
   # has shebang `#!/usr/bin/env python`. Inside the container the env's
-  # python is /opt/conda/bin/python with all dependencies already
+  # python is /opt/conda/envs/tidecluster/bin/python with all dependencies already
   # installed by %post, so the host script runs against the container's
   # python interpreter. The wrapper sub-step exercises the per-TRA
   # consensus path (Rscript + mafft + blastn + makeblastdb).

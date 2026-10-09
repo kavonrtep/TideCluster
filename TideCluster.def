@@ -85,22 +85,33 @@ EOF
     export CONDARC=/opt/conda/config/.condarc
     export CONDA_PLUGINS_AUTO_ACCEPT_TOS=yes
 
-    # Initialize conda for bash so that `conda activate base` works in
+    # Initialize conda for bash so that `conda activate` works in
     # interactive shells inside the container.
     /opt/conda/bin/conda init bash
     echo ". /opt/conda/etc/profile.d/conda.sh" >> /etc/profile
-    echo "conda activate base" >> /etc/profile
+    echo "conda activate /opt/conda/envs/tidecluster" >> /etc/profile
 
+    # Everything goes into a dedicated env, NOT base. Base hosts mamba itself,
+    # and the dependency set only solves on Python 3.12 (as of 1.22.0). When
+    # the unpinned miniforge3:latest moves base to something the deps cannot
+    # share, installing into base rewrites conda/mamba mid-transaction and
+    # deletes the running mamba binary: the 1.22.0 SIF build died with
+    # "/opt/conda/bin/mamba (deleted): No such file or directory" in the
+    # genomeinfodbdata post-link, then "Cannot find a valid extracted directory
+    # cache ... Package cache error". A separate prefix leaves base untouched
+    # whatever Python the base image moves to.
+    #
     # bioconductor-genomeinfodbdata's post-link.sh parses dataURLs.json with
-    # python-yq, which shells out to `jq`. jq is not pulled into base by the
-    # dependency set, so install it first — otherwise the post-link aborts with
-    # "yq: Error starting jq: ... 'jq'. Is jq installed and available on PATH?"
-    # and kills the whole `apptainer build`. Both the main install below and the
-    # GenomeInfoDb force-reinstall guard run that post-link, and conda does not
-    # guarantee it links jq before genomeinfodbdata within a single transaction,
-    # so install jq up front rather than relying on it being a co-dependency.
-    echo "=== Installing jq (needed by bioconductor post-link scripts) ==="
-    /opt/conda/bin/mamba install -y -n base -c conda-forge jq
+    # python-yq, which shells out to `jq`. jq is not pulled in by the
+    # dependency set, so the env is created with jq first — otherwise the
+    # post-link aborts with "yq: Error starting jq: ... Is jq installed and
+    # available on PATH?" and kills the whole `apptainer build`. Both the main
+    # install below and the GenomeInfoDb force-reinstall guard run that
+    # post-link, and conda does not guarantee it links jq before
+    # genomeinfodbdata within a single transaction.
+    TC_ENV=/opt/conda/envs/tidecluster
+    echo "=== Creating ${TC_ENV} with jq (needed by bioconductor post-link scripts) ==="
+    /opt/conda/bin/mamba create -y -p "${TC_ENV}" -c conda-forge jq
 
     # Install runtime dependencies from conda-forge / bioconda only.
     # NOTE: tidecluster itself is NOT installed from a channel here —
@@ -110,7 +121,7 @@ EOF
     # Use mamba (libmamba solver) instead of classic conda — see comment
     # at the top of this def for why.
     echo "=== Installing runtime dependencies ==="
-    /opt/conda/bin/mamba install -y -n base \
+    /opt/conda/bin/mamba install -y -p "${TC_ENV}" \
         -c conda-forge -c bioconda -c petrnovak \
         --file /opt/tidecluster/conda-deps.txt
 
@@ -121,18 +132,18 @@ EOF
     # ("there is no package called 'GenomeInfoDbData'"). Force-
     # reinstall when the load test fails so post-link runs again.
     echo "=== Verifying GenomeInfoDb loads ==="
-    if ! /opt/conda/bin/conda run -n base \
+    if ! /opt/conda/bin/conda run -p "${TC_ENV}" \
             Rscript -e 'suppressMessages(library(GenomeInfoDb))' 2>/dev/null
     then
         echo "GenomeInfoDb failed to load; force-reinstalling data package"
-        /opt/conda/bin/mamba install -y -n base --force-reinstall \
+        /opt/conda/bin/mamba install -y -p "${TC_ENV}" --force-reinstall \
             -c conda-forge -c bioconda bioconductor-genomeinfodbdata
-        /opt/conda/bin/conda run -n base \
+        /opt/conda/bin/conda run -p "${TC_ENV}" \
             Rscript -e 'suppressMessages(library(GenomeInfoDb))'
     fi
 
     # Mirror conda/tidecluster/build.sh: make every CLI executable and
-    # symlink it into /opt/conda/bin so users can call e.g.
+    # symlink it into the env's bin/ (first on PATH) so users can call e.g.
     # `apptainer exec sif TideCluster.py ...` without absolute paths.
     echo "=== Symlinking TideCluster CLIs ==="
     for script in \
@@ -146,6 +157,8 @@ EOF
         tc_comparative_analysis.R \
         tc_summarize_comparative_analysis.R; do
         chmod +x "/opt/tidecluster/${script}"
+        ln -sf "/opt/tidecluster/${script}" "${TC_ENV}/bin/${script}"
+        # pre-1.22.1 images had them here; keep that path working
         ln -sf "/opt/tidecluster/${script}" "/opt/conda/bin/${script}"
     done
 
@@ -154,54 +167,54 @@ EOF
 
     # Verify installation
     echo "=== Verifying TideCluster installation ==="
-    ls -la /opt/conda/bin/TideCluster.py || \
+    ls -la "${TC_ENV}/bin/TideCluster.py" || \
         echo "TideCluster.py not found in expected location"
-    /opt/conda/bin/conda run -n base TideCluster.py --version
+    /opt/conda/bin/conda run -p "${TC_ENV}" TideCluster.py --version
     echo "=== Installation complete ==="
 
 %environment
-    # Ensure conda is in path
-    export PATH=/opt/conda/bin:$PATH
-    export CONDA_DEFAULT_ENV=base
-    export CONDA_PREFIX=/opt/conda
+    # The tidecluster env first, then base (for conda/mamba themselves)
+    export PATH=/opt/conda/envs/tidecluster/bin:/opt/conda/bin:$PATH
+    export CONDA_DEFAULT_ENV=tidecluster
+    export CONDA_PREFIX=/opt/conda/envs/tidecluster
 
 %runscript
     # Source conda and execute TideCluster.py
     . /opt/conda/etc/profile.d/conda.sh
-    conda activate base
+    conda activate /opt/conda/envs/tidecluster
     exec TideCluster.py "$@"
 
 %apprun TideCluster
     . /opt/conda/etc/profile.d/conda.sh
-    conda activate base
+    conda activate /opt/conda/envs/tidecluster
     exec TideCluster.py "$@"
 
 %apprun tc_update_gff3
     . /opt/conda/etc/profile.d/conda.sh
-    conda activate base
+    conda activate /opt/conda/envs/tidecluster
     exec tc_update_gff3.py "$@"
 
 %apprun tc_reannotate
     . /opt/conda/etc/profile.d/conda.sh
-    conda activate base
+    conda activate /opt/conda/envs/tidecluster
     exec tc_reannotate.py "$@"
 
 %apprun tc_merge_annotations
     . /opt/conda/etc/profile.d/conda.sh
-    conda activate base
+    conda activate /opt/conda/envs/tidecluster
     exec tc_merge_annotations.py "$@"
 
 %apprun tc_per_tra_consensus
     . /opt/conda/etc/profile.d/conda.sh
-    conda activate base
+    conda activate /opt/conda/envs/tidecluster
     exec tc_per_tra_consensus.py "$@"
 
 %apprun tc_comparative_analysis
     . /opt/conda/etc/profile.d/conda.sh
-    conda activate base
+    conda activate /opt/conda/envs/tidecluster
     exec tc_comparative_analysis.R "$@"
 
 %apprun tc_summarize_comparative_analysis
     . /opt/conda/etc/profile.d/conda.sh
-    conda activate base
+    conda activate /opt/conda/envs/tidecluster
     exec tc_summarize_comparative_analysis.R "$@"
