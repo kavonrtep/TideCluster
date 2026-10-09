@@ -150,7 +150,12 @@ tag name equals `version.py`**). The convention:
    (`tidecluster=…`, `sif:…`).
 2. Commit `release: X.Y.Z — <summary>` **directly on `main`** (release
    commits go on main; feature work lands first via fast-forward, no
-   merge commits).
+   merge commits). Before that, the feature branch goes through a **PR**:
+   `sif-check.yml` builds the SIF and runs `tests/short.sh` inside it, so a
+   broken `TideCluster.def` shows up before tagging. 1.22.0 was tagged with a
+   def that no longer built, and shipped without a container. Land a green PR
+   by fast-forwarding `main` locally and pushing; GitHub then marks the PR
+   merged.
 3. `git tag -a X.Y.Z -m "…" HEAD`, with the tag name == `version.py`.
 4. **Push from the host, not the sandbox** (no SSH trust here):
    `git push origin main && git push origin X.Y.Z`.
@@ -160,10 +165,18 @@ The `/release` skill automates steps 1–3 and prints the push commands.
 ## Singularity image
 
 `TideCluster.def` builds `TideCluster.sif` from the same
-`conda-deps.txt`. Build with:
+`conda-deps.txt`, into a dedicated env at `/opt/conda/envs/tidecluster`.
+Never install into base, because base hosts mamba itself.
+
+**Never build from the working copy.** `%files . /opt/tidecluster` copies the
+whole build directory, and the dev checkout is about 43 GB (`hermit/`,
+`test_data/`) against about 25 MB of tracked files. Normally let CI build it
+(`sif-check.yml` on the PR). For a local build, export a clean ref first:
 
 ```bash
-sudo singularity build TideCluster.sif TideCluster.def
+SRC=/mnt/ssd/tc_build_src; rm -rf "$SRC"; mkdir -p "$SRC"
+git archive <ref> | tar -x -C "$SRC" && cd "$SRC"
+sudo APPTAINER_TMPDIR=<scratch with ~10 GB> apptainer build /mnt/ssd/tc.sif TideCluster.def
 ```
 
 Released images are published to

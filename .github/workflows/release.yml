@@ -82,6 +82,8 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────
   # 2. Build the Singularity image from the canonical TideCluster.def.
+  # sif-check.yml runs this build + the in-container test on PRs; keep the
+  # two in sync.
   # The def's %files block bakes the repo into the image and %post
   # installs runtime deps from conda-forge / bioconda only — no
   # dependency on the petrnovak anaconda.org channel.

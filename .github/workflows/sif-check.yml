@@ -1,0 +1,103 @@
+name: sif-check
+
+# Builds the Singularity image on PRs and runs the short fixture inside it --
+# the same build-sif + test-in-container gate as release.yml, but publishing
+# nothing. The point is to find a broken TideCluster.def BEFORE a version tag
+# is pushed: 1.22.0's SIF build failed only after tagging, leaving a released
+# version with no container.
+#
+# Keep the build and test steps in sync with release.yml.
+#
+# Docs-only PRs are skipped. Run it by hand on any branch from the Actions tab
+# (workflow_dispatch).
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sif-check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  APPTAINER_VERSION: 1.3.5
+
+jobs:
+  build-sif:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo apt-get autoremove -y
+          df -h
+
+      - uses: eWaterCycle/setup-apptainer@v2
+        with:
+          apptainer-version: ${{ env.APPTAINER_VERSION }}
+
+      - name: Build SIF
+        run: |
+          SIF="images/tidecluster_check.sif"
+          mkdir -p images
+          sudo apptainer build --force "$SIF" TideCluster.def
+          sudo chown "$(id -u):$(id -g)" "$SIF"
+          ls -lh "$SIF"
+
+      - name: Upload SIF for the test job
+        uses: actions/upload-artifact@v4
+        with:
+          name: sif-check
+          path: images/tidecluster_check.sif
+          retention-days: 1
+          compression-level: 0
+
+  test-in-container:
+    needs: build-sif
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          df -h
+
+      - uses: eWaterCycle/setup-apptainer@v2
+        with:
+          apptainer-version: ${{ env.APPTAINER_VERSION }}
+
+      - name: Download SIF
+        uses: actions/download-artifact@v4
+        with:
+          name: sif-check
+          path: images/
+
+      - name: Container sanity
+        run: |
+          SIF=images/tidecluster_check.sif
+          apptainer exec "$SIF" TideCluster.py --version
+          apptainer exec "$SIF" which blastn makeblastdb Rscript
+          apptainer exec "$SIF" tc_comparative_analysis.R --help > /dev/null
+
+      - name: Run short fixture through the container
+        run: |
+          apptainer exec -B "$PWD" images/tidecluster_check.sif bash tests/short.sh
+
+      - name: Upload output on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sif_check_short_output_${{ github.run_id }}
+          path: tmp/tests/short
+          retention-days: 14
