@@ -61,11 +61,9 @@ function updateDetailedMatrix() {
     const startRow = startIdx + 1;
     const endRow = Math.min(endIdx, families.length);
 
-    // Dynamic column width based on number of samples
-    let columnWidth = 35;
-    if (samples.length > 20) {
-        columnWidth = Math.max(20, Math.min(35, 1000 / samples.length));
-    }
+    // Font size and column widths scale with the number of samples
+    const density = matrixDensity(samples.length);
+    const columnWidth = density.col;
 
     let html = `
         <div class="detailed-matrix-controls">
@@ -91,10 +89,10 @@ function updateDetailedMatrix() {
             </div>
         </div>
         <div class="matrix-container">
-            <table class="detailed-matrix" style="table-layout: fixed;">
+            <table class="detailed-matrix" style="table-layout: fixed; ${matrixDensityStyle(density)}">
                 <thead>
                     <tr>
-                        <th class="corner-cell" style="width: 60px;">Family ID</th>
+                        <th class="corner-cell" style="width: ${density.familyCol}px;">Family ID</th>
     `;
 
     // Sample headers with dynamic width

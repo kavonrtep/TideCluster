@@ -14,10 +14,11 @@ function initSharedMatrix() {
     }
     
     const colorScale = getColorScale(allValues, "Blues");
+    const density = matrixDensity(samples.length);
     
     let html = `
         <div class="matrix-container">
-            <table class="shared-matrix">
+            <table class="shared-matrix" style="${matrixDensityStyle(density)}">
                 <thead>
                     <tr>
                         <th class="corner-cell"></th>

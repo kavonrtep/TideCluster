@@ -1760,14 +1760,16 @@ def render_cluster_overview(model, ctx):
             n_excluded += 1
             continue
         kite = t.get("kite") or {}
-        cc = kite.get("combined_class_counts") or {}
         pts.append({
             "id":   t["id"],
             "x":    statistics.median(xs),
             "y":    cov_bp / 1e6,
             "n":    t["n_arrays"],
             "cov":  cov_bp,
-            "hor":  cc.get("hor", 0) + cc.get("hor_with_ssr", 0),
+            # Same HOR definition as the TRC tables (strict ∪ supported tier).
+            # kitehor's combined_class is not TideCluster's HOR call and is
+            # almost never "hor", which made this read 0 for every TRC.
+            "hor":  sum(1 for a in t["arrays"] if _is_hor(a)),
             "cls":  kite.get("combined_class"),
             "sf":   t.get("superfamily"),
             "ann":  t.get("annotation"),

@@ -306,7 +306,7 @@ header .timestamp {
 .shared-matrix,
 .detailed-matrix {
     border-collapse: collapse;
-    font-size: 8px;
+    font-size: var(--mx-font, 8px);
     background-color: white;
     table-layout: fixed;
 }
@@ -329,7 +329,7 @@ header .timestamp {
 .detailed-matrix td:not(.family-id):not(.annotation-cell) {
     width: auto;
     min-width: 20px;
-    max-width: 50px;
+    max-width: var(--mx-col, 50px);
 }
 
 .corner-cell {
@@ -345,7 +345,7 @@ header .timestamp {
     writing-mode: vertical-rl;
     text-orientation: mixed;
     min-height: 80px;
-    font-size: 7px;
+    font-size: var(--mx-header-font, 7px);
 }
 
 /* Row headers (horizontal) */
@@ -353,11 +353,11 @@ header .timestamp {
     writing-mode: horizontal-tb;
     text-orientation: initial;
     min-height: auto;
-    min-width: 80px;
-    max-width: 80px;
+    min-width: var(--mx-row-header, 80px);
+    max-width: var(--mx-row-header, 80px);
     text-align: center;
     padding: 4px 2px;
-    font-size: 8px;
+    font-size: var(--mx-font, 8px);
 }
 
 .annotation-header {
@@ -373,7 +373,7 @@ header .timestamp {
     cursor: pointer;
     transition: all 0.2s ease;
     font-weight: 500;
-    font-size: 8px;
+    font-size: var(--mx-font, 8px);
 }
 
 .matrix-cell:hover {
@@ -400,9 +400,9 @@ header .timestamp {
     color: #2c3e50;
     padding: 2px 4px;
     text-align: center;
-    min-width: 60px;
-    max-width: 60px;
-    font-size: 7px;
+    min-width: var(--mx-family-col, 60px);
+    max-width: var(--mx-family-col, 60px);
+    font-size: var(--mx-header-font, 7px);
 }
 
 .family-id.clickable {

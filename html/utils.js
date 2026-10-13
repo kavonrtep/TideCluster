@@ -37,6 +37,31 @@ function getColorScale(values, colorScheme = "Blues") {
     };
 }
 
+// Sizing for the sample matrices (Shared / Detailed families), scaled to the
+// number of samples: readable text with few samples, the original compact
+// 7-8px layout once there are many. Linear between FEW and MANY samples.
+function matrixDensity(nSamples) {
+    const FEW = 8, MANY = 48;
+    const t = Math.min(1, Math.max(0, (nSamples - FEW) / (MANY - FEW)));
+    const lerp = (a, b) => Math.round(a + (b - a) * t);
+    // Beyond MANY keep the original 1000/n rule; lerp(64, 21) meets it there.
+    const col = nSamples > MANY ? Math.max(20, 1000 / nSamples) : lerp(64, 21);
+    return {
+        font: lerp(14, 8),          // matrix cells, row headers
+        headerFont: lerp(14, 7),    // vertical column headers, family IDs
+        col: Math.round(col),       // sample column width (px)
+        rowHeader: lerp(140, 80),   // row-header column width (px)
+        familyCol: lerp(90, 60),    // Family ID column width (px)
+    };
+}
+
+// Inline style that hands matrixDensity() to the CSS variables in styles.css.
+function matrixDensityStyle(d) {
+    return `--mx-font:${d.font}px;--mx-header-font:${d.headerFont}px;` +
+           `--mx-col:${d.col}px;--mx-row-header:${d.rowHeader}px;` +
+           `--mx-family-col:${d.familyCol}px;`;
+}
+
 // Create tooltip
 function createTooltip() {
     const tooltip = document.createElement("div");
@@ -47,7 +72,7 @@ function createTooltip() {
         color: white;
         padding: 8px;
         border-radius: 4px;
-        font-size: 12px;
+        font-size: 14px;
         pointer-events: none;
         z-index: 1000;
         display: none;
