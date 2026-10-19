@@ -1,3 +1,19 @@
+## Unreleased
+- **The cluster overview scatter in the HTML report showed `HOR arrays: 0` for
+  every TRC.** The tooltip counted arrays that kitehor's `combined_class`
+  labels `hor`, which almost never happens because TideCluster makes its own
+  HOR call. It now counts arrays with a confident HOR order (tier strict ∪
+  supported), the same number the TRC tables show. Re-render an existing run
+  with `tc_rerender_report.py` to apply it. Runs whose monomer CSV predates the
+  `hor_order_confidence` column still show 0, as their tables do.
+- **The "Shared families" and "Detailed families" tables in the comparative
+  report are readable with few samples.** Font sizes and column widths were
+  fixed at 7–8 px, which suits comparisons of many samples. They now scale with
+  the number of samples: 14 px text with 8 or fewer samples, shrinking to the
+  previous compact layout at 48 or more, so large comparisons look the same as
+  before. The hover tooltip in the comparative report is also larger (14 px,
+  was 12 px).
+
 ## 1.22.1 (2026-10-09)
 - **The Singularity image builds again; 1.22.0 was released without one.** The
   1.22.0 conda package was published normally, so conda users already have
