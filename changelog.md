@@ -1,4 +1,4 @@
-## Unreleased
+## 1.22.2 (2026-10-19)
 - **The cluster overview scatter in the HTML report showed `HOR arrays: 0` for
   every TRC.** The tooltip counted arrays that kitehor's `combined_class`
   labels `hor`, which almost never happens because TideCluster makes its own
