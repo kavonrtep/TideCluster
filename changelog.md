@@ -1,4 +1,4 @@
-## Unreleased
+## 1.22.3 (2026-10-26)
 - **A TRC dropped by overlap resolution no longer shows up as a superfamily
   member (#12).** A TRC whose arrays all lie inside a dominant TRC's arrays is
   dropped from `<prefix>_clustering.gff3`, but its consensus files were still
