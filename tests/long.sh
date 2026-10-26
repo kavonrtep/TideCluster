@@ -35,6 +35,10 @@ echo "=== run_all on $FASTA ==="
 NCLUST=$(grep -c 'Name=TRC_' "$OUT/long_clustering.gff3" || true)
 [ "${NCLUST:-0}" -ge 1 ] || { echo "FAIL: no TRC_ clusters in long_clustering.gff3"; exit 1; }
 
+# Every per-TRC output names only TRCs in the clustering GFF3 (issue #12).
+python3 "$ROOT/tests/check_trc_consistency.py" "$OUT/long" \
+  || { echo "FAIL: per-TRC outputs disagree with long_clustering.gff3"; exit 1; }
+
 # Report link-closure: every local ref reachable from the index must resolve,
 # both as-built and after a simulated 'maximal' cleanup (kite/tarean/dotplots
 # deleted) — the self-contained-report contract downstream tools rely on.

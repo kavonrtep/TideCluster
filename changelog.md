@@ -1,3 +1,29 @@
+## Unreleased
+- **A TRC dropped by overlap resolution no longer shows up as a superfamily
+  member (#12).** A TRC whose arrays all lie inside a dominant TRC's arrays is
+  dropped from `<prefix>_clustering.gff3`, but its consensus files were still
+  written. The below-threshold superfamily fallback then attached it to a
+  superfamily, so the superfamily table and pages listed a TRC with no arrays,
+  no row in the TRC tables and no TRC page, and the report linked to pages
+  that do not exist. On the *S. galericulata* run in the issue, TRC_25, TRC_32
+  and TRC_41 were listed and the report had 3 missing pages.
+  - Clustering now leaves dropped TRCs out of `<prefix>_consensus/` and
+    `consensus_sequences_all.fasta`, so they are also gone from
+    `<prefix>_annotation.tsv`, `<prefix>_rdna.tsv` and the comparative pool
+    (the cause of #8). The GFF3 and every other output are unchanged:
+    byte-identical on the issue's genome.
+  - Superfamilies that consisted of one TRC and its own dropped variants
+    disappear, as a single TRC is not a superfamily. On the issue's genome,
+    SF 2 and SF 3 are gone and SF 1 is unchanged.
+  - Re-running `tarean` on an output directory from 1.16–1.22.2 gives the
+    corrected superfamilies too: the fallback now skips TRCs that are not in
+    the clustering GFF3, and logs them.
+  - Clustering into an existing output directory removes per-TRC consensus
+    files left from the earlier run.
+  - Dropping happens in 3 of 4 genomes checked, so most runs from 1.16–1.22.2
+    are affected. `--keep_overlaps` turns overlap resolution off, so it never
+    produced the problem.
+
 ## 1.22.2 (2026-10-19)
 - **The cluster overview scatter in the HTML report showed `HOR arrays: 0` for
   every TRC.** The tooltip counted arrays that kitehor's `combined_class`

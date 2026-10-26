@@ -25,6 +25,10 @@ echo "=== run_all on CEN6 part ==="
 [ -s "$OUT/short_clustering.gff3" ] || { echo "FAIL: no clustering.gff3"; exit 1; }
 [ -s "$OUT/short_index.html" ]      || { echo "FAIL: no index.html"; exit 1; }
 
+# Every per-TRC output names only TRCs in the clustering GFF3 (issue #12).
+python3 "$ROOT/tests/check_trc_consistency.py" "$OUT/short" \
+  || { echo "FAIL: per-TRC outputs disagree with short_clustering.gff3"; exit 1; }
+
 echo
 echo "=== per-TRA consensus wrapper ==="
 "$ROOT/tc_per_tra_consensus.py" -p short -c "$NCPU"

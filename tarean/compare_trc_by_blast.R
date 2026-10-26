@@ -529,12 +529,33 @@ if (!is.null(opt$consensus_dir) && dir.exists(opt$consensus_dir)) {
   all_dimer_files <- list.files(opt$consensus_dir,
                                 pattern = "^TRC_[0-9]+_dimers\\.fasta$",
                                 full.names = TRUE)
+  # Only TRCs that exist in <prefix>_clustering.gff3 may be attached. Up to
+  # 1.22.2, overlap resolution dropped fully absorbed TRCs from the GFF3 but
+  # left their dimer files here, and the fallback listed them as superfamily
+  # members with no arrays and no report page (issue #12). Clustering no
+  # longer writes those files; this keeps tarean re-runs on older output
+  # directories correct too. Without the GFF3, nothing is filtered.
+  clustering_gff <- paste0(opt$prefix, "_clustering.gff3")
+  gff_trcs <- NULL
+  if (file.exists(clustering_gff)) {
+    gff_lines <- grep("^#", readLines(clustering_gff), value = TRUE, invert = TRUE)
+    gff_lines <- grep("Name=TRC_[0-9]+", gff_lines, value = TRUE)
+    gff_trcs <- unique(sub(".*Name=(TRC_[0-9]+).*", "\\1", gff_lines))
+  }
   small_fasta_paths <- list()
+  not_in_gff <- character()
   for (f in all_dimer_files) {
     trc_id <- sub("_dimers\\.fasta$", "", basename(f))
-    if (!(trc_id %in% big_trcs)) {
-      small_fasta_paths[[trc_id]] <- f
+    if (trc_id %in% big_trcs) next
+    if (!is.null(gff_trcs) && !(trc_id %in% gff_trcs)) {
+      not_in_gff <- c(not_in_gff, trc_id)
+      next
     }
+    small_fasta_paths[[trc_id]] <- f
+  }
+  if (length(not_in_gff) > 0) {
+    message(sprintf("Fallback: skipping %d TRC(s) with consensus files but no feature in %s: %s",
+                    length(not_in_gff), clustering_gff, paste(not_in_gff, collapse = ", ")))
   }
   small_trcs <- names(small_fasta_paths)
 

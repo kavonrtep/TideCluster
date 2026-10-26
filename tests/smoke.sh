@@ -47,5 +47,9 @@ echo "=== clustering (min_length=500 to allow tiny arrays) ==="
 [ -s "$OUT/smoke_clustering.gff3" ] || {
   echo "FAIL: smoke_clustering.gff3 missing or empty"; exit 1; }
 
+# Every per-TRC output names only TRCs in the clustering GFF3 (issue #12).
+python3 "$ROOT/tests/check_trc_consistency.py" "$OUT/smoke" \
+  || { echo "FAIL: per-TRC outputs disagree with smoke_clustering.gff3"; exit 1; }
+
 echo
 echo "smoke PASSED (outputs in $OUT)"

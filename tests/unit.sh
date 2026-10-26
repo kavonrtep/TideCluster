@@ -46,6 +46,9 @@ python3 "$ROOT/tests/test_rdna.py"
 echo "=== unit: cross-TRC overlap resolution ==="
 python3 "$ROOT/tests/test_overlap_resolution.py"
 
+echo "=== unit: superfamily fallback skips absorbed TRCs (issue #12) ==="
+python3 "$ROOT/tests/test_superfamily_absorbed.py"
+
 echo "=== unit: self-contained report image vendoring ==="
 python3 "$ROOT/tests/test_vendor_images.py"
 

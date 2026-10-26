@@ -2908,6 +2908,10 @@ def resolve_trc_overlaps(gff3_file, gff3_out_file):
 
     :param gff3_file: input clustering GFF3 (features carry Name=TRC_x)
     :param gff3_out_file: output GFF3 (may equal the input — written via a temp)
+    :return: sorted list of TRC names that lost every base to a dominant TRC
+        and are therefore absent from the output. Callers holding per-TRC state
+        built before resolution (``clustering()``'s consensus set) must drop
+        these, or that state outlives the TRC (issue #12).
     """
     feats = {}        # seqid -> list of (start, end, name, strand)
     attrs = {}        # name -> attributes dict (from its first feature)
@@ -2968,6 +2972,7 @@ def resolve_trc_overlaps(gff3_file, gff3_out_file):
             out.write(F"{seqid}\tTideCluster\ttandem_repeat\t{s}\t{e}\t1\t"
                       F"{strand}\t.\t{attr_str}\n")
     os.replace(tmp, gff3_out_file)
+    return lost
 
 
 def merge_genomic_intervals(intervals):
@@ -3064,6 +3069,15 @@ def save_consensus_files(consensus_dir, cons_cls, cons_cls_dimer):
     """
     if not os.path.exists(consensus_dir):
         os.makedirs(consensus_dir)
+    # Per-TRC files left by an earlier run into the same prefix would otherwise
+    # survive: every reader globs TRC_*_dimers.fasta, so a stale file brings
+    # back a TRC that this run does not have (issue #12). Only the per-TRC
+    # files are cleared; the directory also holds RepeatMasker by-products.
+    per_trc = re.compile(r"^(TRC_\d+)(_dimers)?\.fasta$")
+    for fname in os.listdir(consensus_dir):
+        m = per_trc.match(fname)
+        if m and m.group(1) not in cons_cls:
+            os.remove(os.path.join(consensus_dir, fname))
     for cluster_id in cons_cls:
         f = os.path.join(consensus_dir, cluster_id + ".fasta")
         save_fasta_dict_to_file(cons_cls[cluster_id], f)

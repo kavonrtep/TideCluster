@@ -938,7 +938,15 @@ def clustering(fasta, prefix, gff3=None, min_length=None, dust=True, cpu=4,
     # region once. Each contested span goes to the dominant TRC (largest total
     # array length). Disabled with --keep_overlaps.
     if resolve_overlaps:
-        tc.resolve_trc_overlaps(gff3_out, gff3_out)
+        absorbed = tc.resolve_trc_overlaps(gff3_out, gff3_out)
+        # A TRC that lost every span has no feature left in gff3_out, but
+        # cons_cls was built above from the pre-resolution GFF3. Drop it, or
+        # its <prefix>_consensus/ files outlive it and every reader of that
+        # directory brings it back: the superfamily fallback lists it as a
+        # member, annotation gives it an annotation.tsv row (issue #12, #8).
+        for trc in absorbed:
+            cons_cls.pop(trc, None)
+            cons_cls_dimer.pop(trc, None)
 
     # save also first round of clustering for debugging
     cons_cls1, cons_cls_dimer1_ = tc.add_cluster_info_to_gff3(

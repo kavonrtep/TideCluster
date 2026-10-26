@@ -76,8 +76,9 @@ def main():
         f.write(feat("chr1", 1010, 1050, "TRC_C"))        # nested in A -> absorbed
 
     before = parse(gin)
-    tc.resolve_trc_overlaps(gin, gout)
+    absorbed = tc.resolve_trc_overlaps(gin, gout)
     after = parse(gout)
+    check("returns the absorbed TRCs", absorbed == ["TRC_C"])
 
     c0, m0 = union_and_overlap(before)
     c1, m1 = union_and_overlap(after)
@@ -108,9 +109,41 @@ def main():
 
     # idempotent: resolving an already-resolved file is a no-op on geometry
     gout2 = os.path.join(d, "resolved2.gff3")
-    tc.resolve_trc_overlaps(gout, gout2)
+    absorbed2 = tc.resolve_trc_overlaps(gout, gout2)
     check("idempotent (second pass identical geometry)",
           parse(gout2) == after)
+    check("second pass absorbs nothing", absorbed2 == [])
+
+    # Consensus files (issue #12). clustering() drops the absorbed TRCs from
+    # its consensus set before saving, so <prefix>_consensus/ has the same TRCs
+    # as the resolved GFF3. A stale TRC file from an earlier run into the same
+    # directory must go too, while non-TRC files there are left alone.
+    cdir = os.path.join(d, "tc_consensus")
+    os.makedirs(cdir)
+    for stale in ("TRC_9.fasta", "TRC_9_dimers.fasta"):
+        open(os.path.join(cdir, stale), "w").write(">old\nACGT\n")
+    keep = os.path.join(cdir, "consensus_sequences_all.fasta_renamed.fasta.out")
+    open(keep, "w").write("rm by-product\n")
+    cons = {n: {f"{n}_rep": "ACGT"} for n in ("TRC_A", "TRC_B", "TRC_C")}
+    dim = {n: {f"{n}_rep": "ACGTACGT"} for n in cons}
+    for trc in absorbed:
+        cons.pop(trc, None)
+        dim.pop(trc, None)
+    tc.save_consensus_files(cdir, cons, dim)
+    on_disk = {f[:-len("_dimers.fasta")] for f in os.listdir(cdir)
+               if f.endswith("_dimers.fasta")}
+    check("consensus dir == TRCs in resolved GFF3", on_disk == set(by_name))
+    check("stale TRC_9 files removed",
+          not any(f.startswith("TRC_9") for f in os.listdir(cdir)))
+    check("non-TRC files in consensus dir kept", os.path.exists(keep))
+
+    # clustering() must use the return value (a guard on the wiring, which
+    # needs a full clustering run to exercise end to end).
+    src = open(os.path.join(ROOT, "TideCluster.py")).read()
+    check("clustering() prunes cons_cls by the absorbed TRCs",
+          "absorbed = tc.resolve_trc_overlaps(" in src
+          and "cons_cls.pop(trc, None)" in src
+          and "cons_cls_dimer.pop(trc, None)" in src)
 
     print("\nALL PASS" if not failures else f"\nFAILED: {failures}")
     sys.exit(1 if failures else 0)

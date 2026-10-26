@@ -29,11 +29,25 @@ sorted and deterministic, and the operation is idempotent.
 Wired into `TideCluster.clustering()` (default-on) for the `clustering` and
 `run_all` subcommands; `--keep_overlaps` opts out.
 
-**Caveat — absorbed TRCs.** A TRC whose arrays are *entirely* nested inside
-larger dominant TRCs loses all its bases and is dropped from the GFF3; the run
-logs `resolve_trc_overlaps: N TRC(s) fully absorbed …`. In practice this is rare
-(fully-nested distinct TRCs would usually have clustered together); the observed
-overlaps are boundary transitions, where no TRC vanishes.
+**Absorbed TRCs.** A TRC whose arrays are *entirely* nested inside larger
+dominant TRCs loses all its bases and is dropped from the GFF3; the run logs
+`resolve_trc_overlaps: N TRC(s) fully absorbed …`. This was first expected to
+be rare (fully nested distinct TRCs would usually have clustered together), and
+the calibration genome below absorbed none. It is not rare. Resolving the
+pre-1.16 GFF3s of three test genomes absorbs 1 of 29 TRCs in *A. thaliana*
+(208 kb), 5 of 282 in drapa and 0 of 73 in *S. lycopersicum*; the
+*S. galericulata* run in issue #12 absorbs 3. An absorbed TRC is usually a
+monomer variant of the TRC it sits in.
+
+`resolve_trc_overlaps()` returns the absorbed TRCs, and `clustering()` removes
+them from its consensus set before writing `<prefix>_consensus/`. Up to 1.22.2
+it did not: the consensus set is built before resolution, so an absorbed TRC
+kept its consensus files. Everything that reads that directory then brought it
+back. The superfamily fallback listed it as a member with no arrays and no
+report page (#12), it got a row in `<prefix>_annotation.tsv`, and it crashed
+the comparative analysis (#8). The GFF3 was always correct. Two consumer-side
+filters, in `tc_comparative_analysis.R` and in the superfamily fallback, also
+keep output directories written by 1.16–1.22.2 correct.
 
 ## Validation (calibration genome OZ408684.1)
 
