@@ -36,6 +36,9 @@ import sys
 from collections import Counter, namedtuple
 from pathlib import Path
 
+# Same as tc_utils: kitehor TSV cells can exceed csv's 128 KiB default (#13).
+csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
+
 __version__ = "3"  # schema version for report.json
 #   v2: 4-bin spectral HOR (retired)
 #   v3: founder-arithmetic HOR tier (hor_order_confidence: none|strict|

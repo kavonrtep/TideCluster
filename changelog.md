@@ -1,3 +1,25 @@
+## Unreleased
+- **`tarean` no longer crashes on long homopolymer arrays (#13).** For a poly-A
+  or poly-C array of 100 kb or more, kitehor `ssr-scan` can write a consensus
+  of several hundred kb into one `kitehor.ssr.tsv` cell. That is above
+  Python's default `csv` field limit (131,072 characters), so
+  `build_monomer_size_csv` raised `field larger than field limit` and the run
+  stopped after clustering. The limit is now raised wherever TideCluster reads
+  kitehor tables.
+- **`monomer_size` of an SSR array is now the SSR motif length,** like its
+  founder already was. KITE cannot report a 1 bp period, so a homopolymer's
+  top-ranked peak is a spurious period of kb to 100+ kb. That period was
+  shown as the TRC's `monomer_kite` in the report and set the `⚠short` badge
+  with "longer alternative ≈ 104585 bp". The `score` column is left blank
+  when the top kite peak is not the motif, and the `⚠short` flag is no longer
+  set on SSR arrays. `monomer_size_2`…`_5` and `alt_longer_period` keep
+  kitehor's peaks.
+  - For motifs of 2 bp or more KITE already ranks the motif first, so
+    `monomer_size_top3_estimats.csv` is byte-identical on S. lycopersicum,
+    A. thaliana, the #12 Scutellaria genome and the unit fixture. On D. rapa
+    one of 2,073 arrays changes: a 9 bp SSR array whose only kite peak is at
+    2580 bp now has `monomer_size` 9 (2580 stays as `alt_longer_period`).
+
 ## 1.22.3 (2026-10-26)
 - **A TRC dropped by overlap resolution no longer shows up as a superfamily
   member (#12).** A TRC whose arrays all lie inside a dominant TRC's arrays is

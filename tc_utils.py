@@ -19,6 +19,11 @@ from shutil import rmtree
 import re
 import networkx as nx
 
+# kitehor ssr-scan writes whole consensus sequences into kitehor.ssr.tsv; for a
+# long homopolymer array that cell can pass csv's default 128 KiB field limit
+# and abort tarean (issue #13).
+csv.field_size_limit(min(sys.maxsize, 2**31 - 1))
+
 class GRange:
     def __init__(self, seqid, start, end, name, strand):
         self.seqid = seqid
@@ -4999,6 +5004,15 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
             (None, None) if p is None
             else (_num(p.get("period")), _num(p.get("score")))
             for p in top5]
+        # SSR arrays: monomer_size is the motif, like founder_period (Pass 4).
+        # For motifs >= 2 bp kite already ranks the motif first, so this is a
+        # no-op. A homopolymer's 1 bp period is below kite's range, so its
+        # rank-1 peak is a spurious multi-kb period (issue #13); keep the score
+        # only when it belongs to the motif peak.
+        if e.get("ssr_override"):
+            p1, s1 = ms_scores[0]
+            fp = e["founder_period"]
+            ms_scores[0] = (fp, s1 if p1 == fp else None)
 
         # Subrepeat candidates. When kitehor >= 0.13.0's tandem-validate
         # output is available, draw the top-2 from its per-array
@@ -5075,8 +5089,12 @@ def build_monomer_size_csv(kite_tsv, ssr_tsv, rescored_peaks_tsv, out_csv,
                 alt_longer = _num(
                     max(longer, key=lambda p: _num(p.get("score")) or 0.0)
                     .get("period"))
+            # Not for SSR arrays: their founder is the clustering motif, not a
+            # kite pick, and a homopolymer's founder peak is a spurious long
+            # period whose weak score would flag every poly-A array (#13).
             fsc = _num(e["founder_peak"].get("score"))
-            if fsc is not None and fsc < _FOUNDER_SCORE_MIN:
+            if (fsc is not None and fsc < _FOUNDER_SCORE_MIN
+                    and not e.get("ssr_override")):
                 weak_short = True
 
         ssr = ssr_by_rec.get(e["record_id"], {})
