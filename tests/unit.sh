@@ -22,6 +22,9 @@ python3 "$ROOT/tests/test_report_exports.py"
 echo "=== unit: SSR raw/consensus + founder (real kite fixture) ==="
 python3 "$ROOT/tests/test_ssr_raw_fixture.py"
 
+echo "=== unit: homopolymer SSR (csv field limit, monomer_size = motif) ==="
+python3 "$ROOT/tests/test_ssr_homopolymer.py"
+
 echo "=== unit: harmonic-ladder founder (Pass 7) ==="
 python3 "$ROOT/tests/test_harmonic_ladder.py"
 

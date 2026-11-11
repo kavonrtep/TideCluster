@@ -1,0 +1,6 @@
+##gff-version 3
+polyA_tbias_0	TideCluster	tandem_repeat	21001	375737	1	.	.	Name=TRC_1;repeat_type=SSR;ssr=A (100.0%25)
+polyA_tbias_1	TideCluster	tandem_repeat	21001	375740	1	.	.	Name=TRC_1;repeat_type=SSR;ssr=A (100.0%25)
+polyA_tbias_2	TideCluster	tandem_repeat	21001	375736	1	.	.	Name=TRC_1;repeat_type=SSR;ssr=A (100.0%25)
+chr4	TideCluster	tandem_repeat	20146849	20156677	1	.	.	Name=TRC_170;repeat_type=SSR;ssr=ACCCACCCC (100.0%25)
+chr8	TideCluster	tandem_repeat	11078704	11092487	1	.	.	Name=TRC_170;repeat_type=SSR;ssr=ACCCACCCC (100.0%25)

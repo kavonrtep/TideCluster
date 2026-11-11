@@ -126,7 +126,11 @@ higher-order repeats.
   (`weak_short_founder_flag`) with its dominant longer-period alternative
   (`alt_longer_period`) and an amber `⚠short` badge in the report, so the
   rare surviving weak short call can be eyeballed. Purely diagnostic — the
-  founder call is unchanged.
+  founder call is unchanged. Not applied to arrays of an SSR TRC: their
+  founder is the motif from clustering, and since 1.22.4 so is their
+  `monomer_size` (kite cannot report a 1 bp period, so a homopolymer's top
+  kite peak is a spurious kb-scale one; it stays visible as
+  `alt_longer_period`).
 - Subrepeat candidates: since 1.13.0 sourced from `kitehor
   tandem-validate` and gated against TideCluster's founder — only
   genuine partial-occupancy nested motifs that do **not** coincide with
