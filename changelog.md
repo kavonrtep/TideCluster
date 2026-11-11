@@ -1,4 +1,4 @@
-## Unreleased
+## 1.22.4 (2026-11-11)
 - **`tarean` no longer crashes on long homopolymer arrays (#13).** For a poly-A
   or poly-C array of 100 kb or more, kitehor `ssr-scan` can write a consensus
   of several hundred kb into one `kitehor.ssr.tsv` cell. That is above
